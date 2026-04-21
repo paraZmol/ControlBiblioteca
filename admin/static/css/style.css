@@ -1,0 +1,139 @@
+/* style.css - Estilos del panel de administración */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background: #0f0f23;
+    color: #e0e0e0;
+    min-height: 100vh;
+}
+
+/* Login */
+.login-container {
+    max-width: 360px;
+    margin: 15vh auto;
+    padding: 40px;
+    background: #1a1a2e;
+    border-radius: 12px;
+    text-align: center;
+    border: 1px solid #333;
+}
+.login-container h1 { font-size: 24px; color: #e94560; margin-bottom: 5px; }
+.login-container h3 { color: #888; font-weight: normal; margin-bottom: 30px; }
+.login-container input {
+    width: 100%; padding: 12px; margin-bottom: 12px;
+    background: #16213e; border: 1px solid #333; border-radius: 6px;
+    color: white; font-size: 14px;
+}
+.login-container button {
+    width: 100%; padding: 12px; background: #e94560;
+    color: white; border: none; border-radius: 6px;
+    font-size: 16px; cursor: pointer; font-weight: bold;
+}
+.login-container button:hover { background: #c73a52; }
+.error { color: #ff6b6b; margin-top: 10px; font-size: 13px; }
+
+/* Dashboard */
+.dashboard { padding: 20px 30px; }
+header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding-bottom: 20px; border-bottom: 1px solid #333;
+}
+header h1 { font-size: 22px; color: #e94560; }
+.header-right { display: flex; align-items: center; gap: 15px; }
+.header-right span { color: #aaa; }
+.btn-logout {
+    padding: 8px 16px; background: #333; color: #ccc;
+    border: 1px solid #555; border-radius: 6px; cursor: pointer;
+}
+.btn-logout:hover { background: #e94560; color: white; border-color: #e94560; }
+
+/* Stats */
+.stats-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 15px; margin: 25px 0;
+}
+.stat-card {
+    background: #1a1a2e; padding: 25px; border-radius: 10px;
+    text-align: center; border: 1px solid #333;
+}
+.stat-card.active { border-color: #e94560; }
+.stat-number { font-size: 36px; font-weight: bold; color: white; }
+.stat-label { color: #888; margin-top: 5px; }
+
+/* Terminales grid */
+.terminales-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+}
+.terminal-card {
+    padding: 14px; border-radius: 8px; text-align: center;
+    border: 2px solid #333; background: #1a1a2e;
+    display: flex; flex-direction: column; gap: 6px;
+}
+.terminal-card.bloqueado { border-color: #ffc947; }
+.terminal-card.activo    { border-color: #4caf50; background: #1a2e1a; }
+.terminal-card.offline   { border-color: #555; opacity: 0.5; }
+.terminal-nombre { font-weight: bold; font-size: 15px; }
+.terminal-estado { font-size: 12px; font-weight: 600; }
+.terminal-ip     { font-size: 11px; color: #666; }
+.estado-activo   { color: #4caf50; }
+.estado-bloqueado{ color: #ffc947; }
+.estado-offline  { color: #777; }
+
+.terminal-acciones { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.btn-bloquear {
+    padding: 6px 10px; background: #c0392b; color: white;
+    border: none; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 600;
+    width: 100%;
+}
+.btn-bloquear:hover { background: #e74c3c; }
+.unlock-row { display: flex; gap: 4px; }
+.unlock-row input {
+    flex: 1; padding: 6px 8px; background: #16213e;
+    border: 1px solid #444; border-radius: 5px;
+    color: white; font-size: 12px; min-width: 0;
+}
+.btn-desbloquear {
+    padding: 6px 10px; background: #27ae60; color: white;
+    border: none; border-radius: 5px; cursor: pointer; font-size: 14px;
+}
+.btn-desbloquear:hover { background: #2ecc71; }
+
+/* WS status badge */
+.ws-badge { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 20px; }
+.ws-badge.ok  { color: #4caf50; background: #1a2e1a; border: 1px solid #4caf50; }
+.ws-badge.off { color: #ffc947; background: #2e2a1a; border: 1px solid #ffc947; }
+
+/* Notificación flotante */
+.notificacion {
+    position: fixed; bottom: 24px; right: 24px;
+    padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600;
+    display: none; z-index: 9999; max-width: 360px;
+}
+.notificacion.ok    { background: #1a3a1a; color: #4caf50; border: 1px solid #4caf50; }
+.notificacion.error { background: #3a1a1a; color: #e74c3c; border: 1px solid #e74c3c; }
+
+/* Botón Bloquear Todas */
+.btn-bloquear-todas {
+    padding: 8px 18px; background: #8e1a1a; color: white;
+    border: 1px solid #c0392b; border-radius: 6px; cursor: pointer;
+    font-size: 13px; font-weight: 600;
+}
+.btn-bloquear-todas:hover { background: #c0392b; }
+
+/* Tabla */
+.section { margin: 25px 0; }
+.section h2 { margin-bottom: 15px; color: #e94560; }
+.tabla {
+    width: 100%; border-collapse: collapse;
+    background: #1a1a2e; border-radius: 8px; overflow: hidden;
+}
+.tabla th { background: #16213e; padding: 12px; text-align: left; color: #aaa; font-size: 13px; }
+.tabla td { padding: 12px; border-top: 1px solid #2a2a3e; }
+.tabla .btn-cerrar {
+    padding: 5px 12px; background: #e94560; color: white;
+    border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
+}
+.tabla .btn-cerrar:hover { background: #c73a52; }
+.empty-msg { color: #666; text-align: center; padding: 20px; }

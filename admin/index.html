@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Biblioteca UNASAM - Panel de Administración</title>
+    <link rel="stylesheet" href="static/css/style.css">
+</head>
+<body>
+    <!-- Login -->
+    <div id="loginPanel" class="login-container">
+        <h1>📚 Control Biblioteca</h1>
+        <h3>Panel de Administración</h3>
+        <input type="text" id="username" placeholder="Usuario" autocomplete="username">
+        <input type="password" id="password" placeholder="Contraseña" autocomplete="current-password">
+        <button onclick="login()">Iniciar Sesión</button>
+        <p id="loginError" class="error"></p>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dashboard" class="dashboard" style="display:none">
+        <header>
+            <h1>📚 Control Biblioteca UNASAM</h1>
+            <div class="header-right">
+                <span id="wsStatus" class="ws-badge off">○ WS Desconectado</span>
+                <span id="usuarioActual"></span>
+                <button onclick="logout()" class="btn-logout">Cerrar Sesión</button>
+            </div>
+        </header>
+
+        <!-- Estadísticas -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number" id="totalTerminales">0</div>
+                <div class="stat-label">Terminales</div>
+            </div>
+            <div class="stat-card active">
+                <div class="stat-number" id="terminalesActivas">0</div>
+                <div class="stat-label">Activas</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="sesionesActivas">0</div>
+                <div class="stat-label">Sesiones</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalAlumnos">0</div>
+                <div class="stat-label">Alumnos</div>
+            </div>
+        </div>
+
+        <!-- Terminales -->
+        <section class="section">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px">
+                <h2 style="margin:0">Terminales</h2>
+                <button onclick="bloquearTodas()" class="btn-bloquear-todas">🔒 Bloquear Todas</button>
+            </div>
+            <div id="terminalesGrid" class="terminales-grid"></div>
+        </section>
+
+        <!-- Sesiones activas -->
+        <section class="section">
+            <h2>Sesiones Activas</h2>
+            <table id="tablaSesiones" class="tabla">
+                <thead>
+                    <tr>
+                        <th>Estudiante</th>
+                        <th>Código</th>
+                        <th>DNI</th>
+                        <th>Facultad</th>
+                        <th>Escuela</th>
+                        <th>Actividad</th>
+                        <th>Inicio</th>
+                        <th>Salida</th>
+                        <th>Fecha</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="sesionesBody"></tbody>
+            </table>
+            <p id="sinSesiones" class="empty-msg">No hay sesiones activas</p>
+        </section>
+    </div>
+
+    <div id="notificacion" class="notificacion"></div>
+    <script src="static/js/app.js"></script>
+</body>
+</html>

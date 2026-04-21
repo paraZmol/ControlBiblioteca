@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet publish *)",
+      "Bash(dotnet build *)",
+      "Read(//c/Users/nunes/AppData/Local/Temp/**)",
+      "Bash(reg query *)",
+      "Bash(schtasks /query /tn \"ArranqueBiblioteca\")",
+      "Bash(powershell -Command \"Get-ItemProperty 'HKLM:\\\\SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Winlogon' | Select-Object Shell, Userinit, AutoAdminLogon\")",
+      "Bash(powershell -Command \"Get-ScheduledTask -TaskName 'ArranqueBiblioteca' -ErrorAction SilentlyContinue | Select-Object TaskName, State\")",
+      "Bash(powershell -Command \"Get-ItemProperty 'HKCU:\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run'\")"
+    ]
+  }
+}
