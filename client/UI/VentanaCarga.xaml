@@ -1,0 +1,55 @@
+<Window x:Class="ControlBiblioteca.Client.UI.VentanaCarga"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Biblioteca UNASAM"
+        WindowStyle="None"
+        WindowState="Normal"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Background="#1a1a2e">
+
+    <Window.Resources>
+        <!-- Animación de tres puntos pulsantes desfasados -->
+        <Storyboard x:Key="AnimDots" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="Dot1" Storyboard.TargetProperty="Opacity"
+                             From="1" To="0.12" Duration="0:0:0.55"
+                             AutoReverse="True" BeginTime="0:0:0"/>
+            <DoubleAnimation Storyboard.TargetName="Dot2" Storyboard.TargetProperty="Opacity"
+                             From="1" To="0.12" Duration="0:0:0.55"
+                             AutoReverse="True" BeginTime="0:0:0.18"/>
+            <DoubleAnimation Storyboard.TargetName="Dot3" Storyboard.TargetProperty="Opacity"
+                             From="1" To="0.12" Duration="0:0:0.55"
+                             AutoReverse="True" BeginTime="0:0:0.36"/>
+        </Storyboard>
+    </Window.Resources>
+
+    <Window.Triggers>
+        <EventTrigger RoutedEvent="Window.Loaded">
+            <BeginStoryboard Storyboard="{StaticResource AnimDots}"/>
+        </EventTrigger>
+    </Window.Triggers>
+
+    <Grid>
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+
+            <TextBlock Text="Biblioteca UNASAM"
+                       FontSize="44" FontWeight="Bold"
+                       Foreground="#e94560"
+                       HorizontalAlignment="Center"/>
+
+            <TextBlock Text="Terminal de Consulta"
+                       FontSize="20" Foreground="#c4c4c4"
+                       HorizontalAlignment="Center"
+                       Margin="0,14,0,64"/>
+
+            <!-- Tres puntos animados -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <Ellipse x:Name="Dot1" Width="14" Height="14" Fill="#e94560" Margin="9,0"/>
+                <Ellipse x:Name="Dot2" Width="14" Height="14" Fill="#e94560" Margin="9,0"/>
+                <Ellipse x:Name="Dot3" Width="14" Height="14" Fill="#e94560" Margin="9,0"/>
+            </StackPanel>
+
+        </StackPanel>
+    </Grid>
+</Window>

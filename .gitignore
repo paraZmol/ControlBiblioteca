@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.agents/
+
+# Visual Studio / C#
+.vs/
+[Bb]in/
+[Oo]bj/
+publish/
+*.user
+*.suo
+
+# Base de Datos (si aplica)
+data/*.db

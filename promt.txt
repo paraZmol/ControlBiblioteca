@@ -1,0 +1,27 @@
+el sistema de bloqueo y el conteo de terminales están perfectos. Ahora vamos a ampliar la información que maneja el Administrador y añadir el control remoto. Usa las reglas de ahorro de tokens.
+
+1. Ampliación de Datos (Python/SQLAlchemy):
+
+Modifica el modelo de Sesion para incluir estos campos: dni, facultad, escuela, fecha_uso y hora_salida.
+
+Asegúrate de que cuando el servidor valide al alumno con el SGA, extraiga y guarde estos datos automáticamente.
+
+2. Interfaz del Panel Admin (HTML/JS):
+
+Actualiza la tabla de Sesiones Activas. Debe tener estas columnas exactas:
+
+Estudiante | Código | DNI | Facultad | Escuela | Actividad | Inicio | Salida | Fecha
+
+En la columna Acciones, añade un botón rojo con un ícono de encendido que diga "Apagar PC".
+
+Este botón debe emitir un mensaje por WebSocket: {"type": "remote_command", "action": "shutdown"}.
+
+3. Control Remoto (Cliente C#):
+
+En WebSocketService.cs, añade un manejador para el mensaje remote_command.
+
+Si la acción es shutdown, debe ejecutar: Process.Start(new ProcessStartInfo("shutdown", "/s /t 5") { CreateNoWindow = true, UseShellExecute = false });.
+
+4. Publicación:
+
+Al terminar los cambios, ejecuta el comando dotnet publish para generar el nuevo .exe único.
