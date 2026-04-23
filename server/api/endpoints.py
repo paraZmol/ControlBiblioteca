@@ -2,16 +2,29 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
-from models import Alumno, Terminal, Sesion, Usuario
+from models import Alumno, Terminal, Sesion, Usuario, ahora_lima
+import pytz
+import socket
 from auth_service import (
     verificar_password, hashear_password, crear_token, obtener_usuario_actual
 )
+from core.websocket_manager import manager
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api")
+
+
+def _obtener_ip_local() -> str:
+    """Detecta la IP de la interfaz de red local (no 127.0.0.1)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
 
 
 # ── Esquemas Pydantic ──────────────────────────────────────────────
@@ -40,6 +53,14 @@ class UsuarioCrear(BaseModel):
     password: str
     nombre_completo: str | None = None
     rol: str = "encargado"
+
+
+# ── Server Info ────────────────────────────────────────────────────
+
+@router.get("/server-info")
+async def server_info():
+    """Retorna la IP real de la interfaz de red del servidor."""
+    return {"ip": _obtener_ip_local()}
 
 
 # ── Auth ────────────────────────────────────────────────────────────
@@ -141,10 +162,10 @@ async def registrar_terminal(
     terminal = result.scalar_one_or_none()
     if terminal:
         terminal.nombre = datos.nombre
-        terminal.ultima_conexion = datetime.utcnow()
+        terminal.ultima_conexion = ahora_lima()
         terminal.estado = "bloqueado"
     else:
-        terminal = Terminal(nombre=datos.nombre, ip=datos.ip, estado="bloqueado", ultima_conexion=datetime.utcnow())
+        terminal = Terminal(nombre=datos.nombre, ip=datos.ip, estado="bloqueado", ultima_conexion=ahora_lima())
         db.add(terminal)
     await db.flush()
     return {"id": terminal.id, "nombre": terminal.nombre}
@@ -171,8 +192,15 @@ async def iniciar_sesion(
     if not terminal:
         raise HTTPException(status_code=404, detail="Terminal no registrada")
 
-    # Crear sesión
-    sesion = Sesion(alumno_id=alumno.id, terminal_id=terminal.id)
+    # Crear sesión con datos desnormalizados (snapshot) del alumno
+    sesion = Sesion(
+        alumno_id=alumno.id,
+        terminal_id=terminal.id,
+        dni=alumno.codigo,
+        facultad=alumno.facultad,
+        escuela=alumno.escuela,
+        inicio=ahora_lima()
+    )
     terminal.estado = "activo"
     db.add(sesion)
     await db.flush()
@@ -183,6 +211,7 @@ async def iniciar_sesion(
 async def cerrar_sesion(
     sesion_id: int,
     motivo: str = "manual",
+    hora_salida: str = None,
     db: AsyncSession = Depends(get_db)
 ):
     """Cerrar una sesión activa."""
@@ -191,7 +220,18 @@ async def cerrar_sesion(
     if not sesion:
         raise HTTPException(status_code=404, detail="Sesión no encontrada o ya cerrada")
 
-    sesion.fin = datetime.utcnow()
+    # Usar hora_salida del administrador si se proporciona, sino hora del servidor
+    if hora_salida:
+        try:
+            # Intentar parsear el formato locale del navegador (ej: "21/4/2026, 15:34:45" o "2026-04-21T...")
+            import dateutil.parser
+            sesion.hora_salida = dateutil.parser.parse(hora_salida, dayfirst=True)
+        except:
+            sesion.hora_salida = ahora_lima()
+    else:
+        sesion.hora_salida = ahora_lima()
+    
+    sesion.fin = sesion.hora_salida # Sincronizar fin con hora_salida
     sesion.activa = False
     sesion.motivo_cierre = motivo
 
@@ -199,7 +239,11 @@ async def cerrar_sesion(
     await db.execute(
         update(Terminal).where(Terminal.id == sesion.terminal_id).values(estado="bloqueado")
     )
-    return {"mensaje": "Sesión cerrada", "duracion_min": int((sesion.fin - sesion.inicio).total_seconds() / 60)}
+    # Asegurar que ambos sean offset-naive para el cálculo
+    inicio_naive = sesion.inicio.replace(tzinfo=None) if sesion.inicio else ahora_lima().replace(tzinfo=None)
+    fin_naive = sesion.fin.replace(tzinfo=None) if sesion.fin else ahora_lima().replace(tzinfo=None)
+    
+    return {"mensaje": "Sesión cerrada", "duracion_min": int((fin_naive - inicio_naive).total_seconds() / 60)}
 
 
 @router.get("/sesiones/activas")
@@ -227,7 +271,8 @@ async def sesiones_activas(
             "escuela": s.escuela or a.escuela or "",
             "terminal_nombre": t.nombre,
             "terminal_ip": t.ip,
-            "razon_uso": s.razon_uso or ""
+            "razon_uso": s.razon_uso or "",
+            "hora_salida": s.hora_salida
         }
         for s, a, t in result.all()
     ]
@@ -264,3 +309,63 @@ async def dashboard_stats(
         "sesiones_activas": sesiones_activas_count,
         "total_alumnos": total_alumnos
     }
+
+
+@router.post("/admin/cerrar-todas")
+async def cerrar_todas_sesiones(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual)
+):
+    """Cierra todas las sesiones activas en el sistema."""
+    if admin.rol != "admin":
+        raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
+    
+    # Buscar todas las sesiones activas
+    res = await db.execute(select(Sesion).where(Sesion.activa == True))
+    sesiones = res.scalars().all()
+    
+    ahora = datetime.utcnow().replace(tzinfo=None)
+    for s in sesiones:
+        s.activa = False
+        s.fin = ahora
+        s.hora_salida = ahora
+        s.motivo_cierre = "admin_bulk"
+    
+    # Bloquear todas las terminales conectadas a nivel de base de datos
+    await db.execute(update(Terminal).values(estado="bloqueado"))
+    
+    await db.commit()
+    
+    # Notificar a las terminales físicamente vía WS
+    from core.websocket_manager import manager
+    await manager.bloquear_todas()
+    await manager.notificar_evento(f"Administrador cerró TODAS las sesiones activas ({len(sesiones)} sesiones)", "warning")
+    await manager.notificar_admins()
+    
+    return {"mensaje": f"Se han cerrado {len(sesiones)} sesiones correctamente"}
+
+
+@router.delete("/admin/reset-total")
+async def reset_total(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual)
+):
+    """Vaciado total de las tablas de sesiones, alumnos y terminales."""
+    from main import logger
+    logger.info(f"[ADMIN] Usuario '{admin.username}' solicitó RESET TOTAL")
+    
+    if admin.rol != "admin":
+        logger.warning(f"[ADMIN] Intento de reset rechazado para usuario '{admin.username}' (no es admin)")
+        raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
+    
+    # El orden importa por las claves foráneas
+    await db.execute(delete(Sesion))
+    await db.execute(delete(Alumno))
+    await db.execute(delete(Terminal))
+    
+    # Desconectar físicamente todas las terminales para que no se re-registren solo por heartbeat
+    await manager.desconectar_todo()
+    
+    await db.commit()
+    await manager.notificar_evento("🧹 RESET TOTAL: El sistema ha sido reseteado por el administrador", "warning")
+    return {"mensaje": "Todo el sistema ha sido limpiado correctamente"}

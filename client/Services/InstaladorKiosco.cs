@@ -565,7 +565,7 @@ namespace ControlBiblioteca.Client.Services
                 _btnReiniciar.Click += (_, _) =>
                 {
                     RunCmd("shutdown.exe", "/r /t 5 /c \"Activando modo kiosco\"");
-                    Application.Current.Shutdown();
+                    Environment.Exit(0);
                 };
                 Grid.SetRow(_btnReiniciar, 4);
                 root.Children.Add(_btnReiniciar);

@@ -1,15 +1,17 @@
 # main.py - Punto de entrada del servidor FastAPI
 import logging
 import os
+import socket
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
+import asyncio
 
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from database import init_db, async_session
 from models import Alumno, Usuario, Terminal, Sesion
 from auth_service import hashear_password
@@ -19,6 +21,29 @@ from core.websocket_manager import manager
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("control")
+
+# ── Detección de IP Real ───────────────────────────────────────────
+
+def obtener_ip_local():
+    """Obtiene la IP real de la interfaz activa (no 127.0.0.1)."""
+    try:
+        # Conectar a un socket remoto (8.8.8.8:80) sin enviar datos
+        # Esto obtiene la IP que el SO usaría para alcanzar esa red
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        logger.info(f"[IP] IP Local detectada: {ip}")
+        return ip
+    except Exception as e:
+        logger.warning(f"[IP] No se pudo detectar IP (usando fallback): {e}")
+        # Fallback: intentar obtener hostname + localhost
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except:
+            return "127.0.0.1"
+
+_IP_LOCAL = obtener_ip_local()
 
 # ── API SGA UNASAM ───────────────────────────────────────────────────
 _SGA_BASE = os.getenv("SGA_API_URL", "https://sga.unasam.edu.pe/integracion/api/biblioteca/matriculados")
@@ -130,6 +155,53 @@ if os.path.exists(admin_path):
     app.mount("/admin", StaticFiles(directory=admin_path, html=True), name="admin")
 
 
+# ── Endpoint de información del servidor ───────────────────────────
+
+@app.get("/api/server-info")
+async def server_info():
+    """Devuelve información del servidor: IP local y puerto."""
+    return {
+        "ip": _IP_LOCAL,
+        "port": 8000,
+        "ws_url": f"ws://{_IP_LOCAL}:8000/ws/admin",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+# ── Endpoint de limpieza y mantenimiento ───────────────────────────
+
+@app.post("/api/limpiar-todo")
+async def limpiar_todo(admin: Usuario = Depends(lambda: None)):
+    """
+    Limpia todas las sesiones, resetea terminales y desconecta todo.
+    Requiere autenticación de admin en producción.
+    """
+    try:
+        # Desconectar todas las conexiones WebSocket en memoria
+        await manager.desconectar_todo()
+        logger.info("[LIMPIEZA] Todas las conexiones WebSocket desconectadas")
+
+        # Limpiar BD: sesiones y terminales
+        async with async_session() as db:
+            # Borrar todas las sesiones
+            await db.execute(delete(Sesion))
+            await db.commit()
+            logger.info("[LIMPIEZA] Todas las sesiones eliminadas")
+
+            # Resetear estado de terminales
+            result = await db.execute(select(Terminal))
+            for terminal in result.scalars().all():
+                terminal.estado = "offline"
+                terminal.ultima_conexion = None
+            await db.commit()
+            logger.info("[LIMPIEZA] Todas las terminales reseteadas a estado 'offline'")
+
+        return {"estado": "ok", "mensaje": "Sistema limpiado completamente"}
+    except Exception as e:
+        logger.error(f"[LIMPIEZA] Error durante limpieza: {e}")
+        return {"estado": "error", "mensaje": str(e)}, 500
+
+
 # ── WebSocket para terminales ───────────────────────────────────────
 
 @app.websocket("/ws/terminal/{terminal_ip}")
@@ -141,6 +213,8 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
 
     await manager.conectar(terminal_id, websocket, ip=terminal_ip)
     logger.info(f"[WS] Terminal conectada: {terminal_id}")
+    await manager.notificar_evento(f"Terminal '{terminal_id}' conectada desde {terminal_ip}")
+    await manager.enviar_log("activity", f"Terminal '{terminal_id}' conectada desde {terminal_ip}")
 
     # ── Registro automático: INSERT si no existe, UPDATE si ya existe ─
     async with async_session() as db:
@@ -167,15 +241,33 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
     try:
         while True:
             try:
-                data = await websocket.receive_json()
+                # Timeout de 60 segundos para recibir mensajes (heartbeat o comandos)
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=60.0)
+            except asyncio.TimeoutError:
+                # Si pasa 1 minuto sin mensajes, considerar desconexión
+                logger.warning(f"[WS] Timeout 60s sin mensajes de {terminal_id}")
+                break
             except WebSocketDisconnect:
                 raise
-            except Exception:
-                await websocket.send_json({"tipo": "error", "motivo": "Mensaje JSON inválido"})
+            except Exception as e:
+                logger.debug(f"[WS] Error recibiendo JSON: {e}")
+                try:
+                    await websocket.send_json({"tipo": "error", "motivo": "Mensaje JSON inválido"})
+                except:
+                    pass
                 continue
 
             tipo = data.get("tipo", "")
+            if not tipo:
+                tipo = data.get("type", "") # Soporte para "type" en lugar de "tipo"
+            
             logger.info(f"[WS] {terminal_id} → tipo={tipo!r}")
+
+            if tipo == "error_report":
+                msg = data.get("message", "Error sin detalle")
+                logger.error(f"[WS-CLIENT-ERROR] {terminal_id}: {msg}")
+                await manager.enviar_log("error", f"PC: {terminal_id} - {msg}")
+                continue
 
             if tipo == "heartbeat":
                 await websocket.send_json({"tipo": "heartbeat_ack"})
@@ -299,6 +391,8 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         "apellidos": alumno.apellidos,
                     })
                     logger.info(f"[WS] {terminal_id} respuesta enviada OK")
+                    await manager.notificar_evento(f"🟢 ENTRADA: {alumno.nombres} {alumno.apellidos} en {terminal_id}", "login")
+                    await manager.enviar_log("activity", f"👤 Acceso: {alumno.nombres} {alumno.apellidos} en {terminal_id}")
 
                 await manager.notificar_admins()
 
@@ -322,6 +416,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             sesion.motivo_cierre = "logout"
                             await db.commit()
                             logger.info(f"[WS] {terminal_id} sesión cerrada en DB")
+                            await manager.notificar_evento(f"SALIDA: Terminal {terminal_id} (manual logout)", "logout")
                 await manager.bloquear_terminal(terminal_id)
                 await manager.notificar_admins()
 
@@ -337,7 +432,23 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 t = res2.scalar_one_or_none()
             if t:
                 t.estado = "offline"
+                
+                # CIERRE AUTOMÁTICO DE SESIÓN AL DESCONECTAR
+                res_s = await db.execute(
+                    select(Sesion).where(Sesion.terminal_id == t.id, Sesion.activa == True)
+                )
+                sesion = res_s.scalar_one_or_none()
+                if sesion:
+                    ahora = datetime.utcnow().replace(tzinfo=None)
+                    sesion.hora_salida = ahora
+                    sesion.fin = ahora
+                    sesion.activa = False
+                    sesion.motivo_cierre = "desconexion_red"
+                    logger.info(f"[WS] Sesion en {terminal_id} cerrada por desconexion")
+                    
                 await db.commit()
+        await manager.notificar_evento(f"Terminal '{terminal_id}' se ha desconectado (offline)", "offline")
+        await manager.enviar_log("error", f"⚠️ Terminal '{terminal_id}' perdió conexión con el servidor")
         await manager.notificar_admins()
     except Exception as exc:
         logger.error(f"[WS] Error inesperado en {terminal_id}: {exc}", exc_info=True)

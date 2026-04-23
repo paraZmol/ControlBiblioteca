@@ -1,23 +1,36 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace ControlBiblioteca.Client.Services
 {
     internal sealed class KioscoConfig
     {
-        public string ServerIp   { get; set; } = "127.0.0.1";
-        public int    ServerPort { get; set; } = 8000;
+        public string TerminalName { get; set; } = "";
+        public string ServerIp     { get; set; } = "127.0.0.1";
+        public int    ServerPort   { get; set; } = 8000;
 
         internal string WsBaseUrl => $"ws://{ServerIp}:{ServerPort}";
 
-        // En modo PublishSingleFile, AppDomain.CurrentDomain.BaseDirectory apunta al
-        // directorio temporal de extracción, no al directorio del .exe.
-        // Environment.ProcessPath devuelve la ruta real del ejecutable en ambos modos.
         private static readonly string _ruta = Path.Combine(
             Path.GetDirectoryName(Environment.ProcessPath)
                 ?? AppDomain.CurrentDomain.BaseDirectory,
             "kiosco.config.json");
+
+        internal void Guardar()
+        {
+            try
+            {
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                string json = JsonSerializer.Serialize(this, options);
+                File.WriteAllText(_ruta, json);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error al guardar config: {ex.Message}");
+            }
+        }
 
         /// <summary>
         /// Lee kiosco.config.json y devuelve también un mensaje de diagnóstico

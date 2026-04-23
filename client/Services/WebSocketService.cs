@@ -23,7 +23,7 @@ namespace ControlBiblioteca.Client.Services
         public event Action<bool>?   OnConexionCambiada;
         public event Action<string>? OnError;
 
-        private const int HEARTBEAT_MS   = 30000;
+        private const int HEARTBEAT_MS   = 5000;    // Heartbeat cada 5 segundos para mantener conexión estable
         private const int RECONEXION_MIN = 5000;   // espera inicial entre reintentos
         private const int RECONEXION_MAX = 60000;  // tope: no reconectar más de 1 vez/minuto
 
@@ -73,6 +73,7 @@ namespace ControlBiblioteca.Client.Services
                 {
                     OnConexionCambiada?.Invoke(false);
                     OnError?.Invoke(ex.Message);
+                    // No podemos reportar via WS si falló la conexión, pero lo dejamos listo
                 }
 
                 if (!_cts.Token.IsCancellationRequested)
@@ -97,6 +98,22 @@ namespace ControlBiblioteca.Client.Services
                 var bytes = Encoding.UTF8.GetBytes(mensaje);
                 await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
             }
+        }
+
+        /// <summary>
+        /// Envía un reporte de error al servidor para que aparezca en el panel admin.
+        /// </summary>
+        public async Task ReportarErrorAsync(string detalle)
+        {
+            try
+            {
+                if (EstaConectado)
+                {
+                    var msg = "{\"type\":\"error_report\", \"message\":\"" + detalle.Replace("\"", "'").Replace("\\", "/") + "\"}";
+                    await EnviarAsync(msg);
+                }
+            }
+            catch { /* evitar bucles infinitos de error */ }
         }
 
         /// <summary>
@@ -144,6 +161,7 @@ namespace ControlBiblioteca.Client.Services
                 catch (Exception ex)
                 {
                     System.Diagnostics.Debug.WriteLine($"[Heartbeat] Error: {ex.Message}");
+                    _ = ReportarErrorAsync("Fallo de Heartbeat: " + ex.Message);
                     break;
                 }
             }
