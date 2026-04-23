@@ -22,6 +22,7 @@
         <header>
             <h1>📚 Control Biblioteca UNASAM</h1>
             <div class="header-right">
+                <span id="serverIpBadge" class="server-badge">IP SERVIDOR: ...</span>
                 <span id="wsStatus" class="ws-badge off">○ WS Desconectado</span>
                 <span id="usuarioActual"></span>
                 <button onclick="logout()" class="btn-logout">Cerrar Sesión</button>
@@ -52,7 +53,11 @@
         <section class="section">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px">
                 <h2 style="margin:0">Terminales</h2>
-                <button onclick="bloquearTodas()" class="btn-bloquear-todas">🔒 Bloquear Todas</button>
+                <div style="display:flex; gap:10px">
+                    <button onclick="finalizarTodo()" class="btn-finalizar">🏁 Finalizar Todas</button>
+                    <button onclick="limpiarTodo()" class="btn-limpiar">🧹 Limpiar Todo</button>
+                    <button onclick="bloquearTodas()" class="btn-bloquear-todas">🔒 Bloquear Todas</button>
+                </div>
             </div>
             <div id="terminalesGrid" class="terminales-grid"></div>
         </section>
@@ -72,16 +77,42 @@
                         <th>Inicio</th>
                         <th>Salida</th>
                         <th>Fecha</th>
-                        <th>Acciones</th>
                     </tr>
                 </thead>
                 <tbody id="sesionesBody"></tbody>
             </table>
             <p id="sinSesiones" class="empty-msg">No hay sesiones activas</p>
         </section>
+
+        <!-- Consolas de Eventos (Footer Monitoreo) -->
+        <footer id="footer-monitoreo" class="section" style="margin-top: 40px">
+            <div class="consolas-wrapper">
+                <div class="console-box">
+                    <div class="console-header">🟢 ACTIVIDAD DE TERMINALES</div>
+                    <div id="console-activity" class="console-content"></div>
+                </div>
+                <div class="console-box">
+                    <div class="console-header">⚠️ SISTEMA Y ERRORES</div>
+                    <div id="console-errors" class="console-content"></div>
+                </div>
+            </div>
+        </footer>
     </div>
 
     <div id="notificacion" class="notificacion"></div>
+
+    <!-- Modal de Advertencia -->
+    <div id="modal-advertencia" class="modal-overlay" style="display:none">
+        <div class="modal-content">
+            <h3 id="modal-titulo">⚠️ Advertencia</h3>
+            <p id="modal-mensaje">¿Estás seguro?</p>
+            <div class="modal-buttons">
+                <button id="btn-modal-cancelar" class="btn-cancelar">Cancelar</button>
+                <button id="btn-modal-confirmar" class="btn-confirmar-rojo">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
     <script src="static/js/app.js"></script>
 </body>
 </html>

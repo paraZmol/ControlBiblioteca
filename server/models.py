@@ -3,6 +3,14 @@ from datetime import datetime, date
 from sqlalchemy import String, Integer, Boolean, DateTime, Date, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
+import pytz
+
+# Zona horaria de Perú
+TIMEZONE_PERU = pytz.timezone('America/Lima')
+
+def ahora_lima():
+    """Retorna la hora actual en zona horaria de Perú (America/Lima)."""
+    return datetime.now(TIMEZONE_PERU)
 
 
 class Alumno(Base):
@@ -49,8 +57,10 @@ class Sesion(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     alumno_id: Mapped[int] = mapped_column(ForeignKey("alumnos.id"), nullable=False)
     terminal_id: Mapped[int] = mapped_column(ForeignKey("terminales.id"), nullable=False)
-    inicio: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    inicio: Mapped[datetime] = mapped_column(DateTime, default=ahora_lima)
     fin: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # hora_salida
+    hora_inicio: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # hora capturada del administrador
+    hora_salida: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # hora capturada del administrador
     activa: Mapped[bool] = mapped_column(Boolean, default=True)
     motivo_cierre: Mapped[str] = mapped_column(String(50), nullable=True)  # manual, timeout, admin
     razon_uso: Mapped[str] = mapped_column(String(200), nullable=True)  # razon de uso seleccionada en login

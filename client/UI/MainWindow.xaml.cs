@@ -109,73 +109,83 @@ namespace ControlBiblioteca.Client.UI
 
         private async void BtnIngresar_Click(object sender, RoutedEventArgs e)
         {
-            // Limpiar errores previos
-            LimpiarErroresVisuales();
-            bool hayError = false;
-
-            // Validar DNI
-            string codigo = TxtCodigo.Text.Trim().ToUpper();
-            if (string.IsNullOrEmpty(codigo) || !System.Text.RegularExpressions.Regex.IsMatch(codigo, @"^\d{8}$"))
+            try
             {
-                TxtCodigo.BorderBrush = _borderError;
-                TxtEstado.Text = "Ingrese un DNI válido (8 dígitos)";
-                hayError = true;
-            }
+                // Limpiar errores previos
+                LimpiarErroresVisuales();
+                bool hayError = false;
 
-            // Validar razón de uso
-            string razon = ObtenerRazon();
-            if (string.IsNullOrEmpty(razon))
-            {
-                var item = CmbRazon.SelectedItem as ComboBoxItem;
-                string sel = item?.Content?.ToString() ?? "";
-                if (sel.StartsWith("Otros"))
+                // Validar DNI
+                string codigo = TxtCodigo.Text.Trim().ToUpper();
+                if (string.IsNullOrEmpty(codigo) || !System.Text.RegularExpressions.Regex.IsMatch(codigo, @"^\d{8}$"))
                 {
-                    TxtOtroRazon.BorderBrush = _borderError;
-                    TxtErrorOtros.Text = "Debe especificar la razón de uso";
+                    TxtCodigo.BorderBrush = _borderError;
+                    TxtEstado.Text = "Ingrese un DNI válido (8 dígitos)";
+                    hayError = true;
                 }
-                else
+
+                // Validar razón de uso
+                string razon = ObtenerRazon();
+                if (string.IsNullOrEmpty(razon))
                 {
-                    CmbRazon.BorderBrush = _borderError;
-                }
-                if (!hayError) TxtEstado.Text = "Seleccione una razón de uso";
-                hayError = true;
-            }
-
-            if (hayError) return;
-
-            if (!_wsService.EstaConectado) { ValidarOffline(codigo); return; }
-
-            TxtEstado.Text        = "Validando...";
-            BtnIngresar.IsEnabled = false;
-
-            await _wsService.EnviarAsync(JsonSerializer.Serialize(new
-            {
-                tipo   = "login_request",
-                codigo,
-                razon
-            }));
-
-            _loginCts?.Cancel();
-            _loginCts?.Dispose();
-            _loginCts = new CancellationTokenSource();
-            var token = _loginCts.Token;
-
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await Task.Delay(10_000, token);
-                    Dispatcher.Invoke(() =>
+                    var item = CmbRazon.SelectedItem as ComboBoxItem;
+                    string sel = item?.Content?.ToString() ?? "";
+                    if (sel.StartsWith("Otros"))
                     {
-                        if (!_desbloqueado)
-                        {
-                            BtnIngresar.IsEnabled = true;
-                            TxtEstado.Text = "Sin respuesta del servidor. Intente de nuevo.";
-                        }
-                    });
+                        TxtOtroRazon.BorderBrush = _borderError;
+                        TxtErrorOtros.Text = "Debe especificar la razón de uso";
+                    }
+                    else
+                    {
+                        CmbRazon.BorderBrush = _borderError;
+                    }
+                    if (!hayError) TxtEstado.Text = "Seleccione una razón de uso";
+                    hayError = true;
                 }
-                catch (OperationCanceledException) { }
-            }, token);
+
+                if (hayError) return;
+
+                if (!_wsService.EstaConectado) { ValidarOffline(codigo); return; }
+
+                TxtEstado.Text        = "Validando...";
+                BtnIngresar.IsEnabled = false;
+
+                await _wsService.EnviarAsync(JsonSerializer.Serialize(new
+                {
+                    tipo   = "login_request",
+                    codigo,
+                    razon
+                }));
+
+                _loginCts?.Cancel();
+                _loginCts?.Dispose();
+                _loginCts = new CancellationTokenSource();
+                var token = _loginCts.Token;
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(10_000, token);
+                        Dispatcher.Invoke(() =>
+                        {
+                            if (!_desbloqueado)
+                            {
+                                BtnIngresar.IsEnabled = true;
+                                TxtEstado.Text = "Sin respuesta del servidor. Intente de nuevo.";
+                            }
+                        });
+                    }
+                    catch (OperationCanceledException) { }
+                }, token);
+            }
+            catch (Exception ex)
+            {
+                TxtEstado.Text = "Error en login: " + ex.Message;
+                BtnIngresar.IsEnabled = true;
+                _ = _wsService.ReportarErrorAsync($"Error BtnIngresar_Click: {ex.Message}");
+                LogDebug($"ERROR BtnIngresar: {ex}");
+            }
         }
 
         private void ValidarOffline(string codigo)
@@ -199,8 +209,17 @@ namespace ControlBiblioteca.Client.UI
 
         private async void BtnCerrarSesion_Click(object sender, RoutedEventArgs e)
         {
-            await _wsService.EnviarAsync(JsonSerializer.Serialize(new { tipo = "logout" }));
-            Bloquear();
+            try
+            {
+                await _wsService.EnviarAsync(JsonSerializer.Serialize(new { tipo = "logout" }));
+                Bloquear();
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"ERROR BtnCerrarSesion: {ex}");
+                _ = _wsService.ReportarErrorAsync($"Error al cerrar sesión: {ex.Message}");
+                Bloquear();
+            }
         }
 
         private void TxtCodigo_KeyDown(object sender, KeyEventArgs e)
@@ -365,50 +384,93 @@ namespace ControlBiblioteca.Client.UI
                 switch (tipo)
                 {
                     case "desbloquear":
-                        var alumno = root.GetProperty("alumno");
-                        string nom = alumno.GetProperty("nombres").GetString()   ?? "";
-                        string ape = alumno.GetProperty("apellidos").GetString() ?? "";
-                        string cod = alumno.GetProperty("codigo").GetString()    ?? "";
-                        Desbloquear(nom, ape, cod);
+                        try
+                        {
+                            var alumno = root.GetProperty("alumno");
+                            string nom = alumno.GetProperty("nombres").GetString()   ?? "";
+                            string ape = alumno.GetProperty("apellidos").GetString() ?? "";
+                            string cod = alumno.GetProperty("codigo").GetString()    ?? "";
+                            Desbloquear(nom, ape, cod);
+                        }
+                        catch (Exception ex)
+                        {
+                            LogDebug($"ERROR desbloquear: {ex}");
+                            _ = _wsService.ReportarErrorAsync($"Error desbloqueo: {ex.Message}");
+                        }
                         break;
 
                     case "bloquear":
-                        Bloquear();
+                        try
+                        {
+                            Bloquear();
+                        }
+                        catch (Exception ex)
+                        {
+                            LogDebug($"ERROR bloquear: {ex}");
+                            _ = _wsService.ReportarErrorAsync($"Error bloqueo: {ex.Message}");
+                        }
                         break;
 
                     case "login_rechazado":
-                        string motivo = root.TryGetProperty("motivo", out var m)
-                            ? m.GetString() ?? "Error"
-                            : "Error";
-                        LogDebug($"Login rechazado: {motivo}");
-                        Dispatcher.Invoke(() =>
+                        try
                         {
-                            TxtEstado.Text        = motivo;
-                            BtnIngresar.IsEnabled = true;
-                        });
+                            string motivo = root.TryGetProperty("motivo", out var m)
+                                ? m.GetString() ?? "Error"
+                                : "Error";
+                            LogDebug($"Login rechazado: {motivo}");
+                            Dispatcher.Invoke(() =>
+                            {
+                                TxtEstado.Text        = motivo;
+                                BtnIngresar.IsEnabled = true;
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            LogDebug($"ERROR login_rechazado: {ex}");
+                        }
                         break;
 
                     case "heartbeat_ack":
+                        // Sin acción necesaria
                         break;
 
                     case "remote_command":
-                        string action = root.TryGetProperty("action", out var act) ? act.GetString() ?? "" : "";
-                        if (action == "shutdown")
+                        try
                         {
-                            LogDebug("Comando remoto recibido: apagando PC en 5 segundos...");
-                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
-                                "shutdown", "/s /t 5")
+                            string action = root.TryGetProperty("action", out var act) ? act.GetString() ?? "" : "";
+                            if (action == "shutdown")
                             {
-                                CreateNoWindow  = true,
-                                UseShellExecute = false
-                            });
+                                LogDebug("Comando remoto recibido: enviando session_closed y apagando PC...");
+                                // Enviar mensaje de cierre de sesión antes de apagar
+                                var sessionClosedMsg = JsonSerializer.Serialize(new { tipo = "session_closed", hora_salida = DateTime.UtcNow.ToString("O") });
+                                _ = _wsService.EnviarAsync(sessionClosedMsg);
+                                
+                                // Pequeña pausa para asegurar que el mensaje se envía
+                                System.Threading.Thread.Sleep(500);
+                                
+                                // Apagar PC
+                                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                                    "shutdown", "/s /f /t 0")
+                                {
+                                    CreateNoWindow  = true,
+                                    UseShellExecute = false
+                                });
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LogDebug($"ERROR remote_command: {ex}");
+                            _ = _wsService.ReportarErrorAsync($"Error comando remoto: {ex.Message}");
                         }
                         break;
                 }
             }
             catch (Exception ex)
             {
-                Dispatcher.Invoke(() => TxtEstado.Text = $"Error: {ex.Message}");
+                string errorMsg = $"Error procesando mensaje: {ex.Message}";
+                Dispatcher.Invoke(() => TxtEstado.Text = errorMsg);
+                _ = _wsService.ReportarErrorAsync(errorMsg);
+                LogDebug($"ERROR ProcesarMensajeServidor: {ex}");
             }
         }
 

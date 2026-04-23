@@ -67,6 +67,17 @@ class ConnectionManager:
         for ip in list(self.conexiones_activas):
             await self.bloquear_terminal(ip)
 
+    async def desconectar_todo(self):
+        """Cierra todas las conexiones de terminales."""
+        muertos = list(self.conexiones_activas.items())
+        for tid, ws in muertos:
+            try:
+                await ws.close()
+            except:
+                pass
+            self.desconectar(tid)
+        await self.notificar_admins()
+
     async def broadcast(self, mensaje: dict):
         muertos = []
         for ip, ws in self.conexiones_activas.items():
@@ -114,6 +125,40 @@ class ConnectionManager:
             "terminales": list(self.conexiones_activas.keys()),
             "total": len(self.conexiones_activas)
         }
+
+    async def notificar_evento(self, mensaje: str, nivel: str = "info"):
+        """Envía un mensaje de log/evento a todos los paneles admin conectados."""
+        payload = {
+            "tipo": "evento_log",
+            "mensaje": mensaje,
+            "nivel": nivel,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        }
+        muertos = []
+        for ws in self._admins:
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                muertos.append(ws)
+        for ws in muertos:
+            self.desconectar_admin(ws)
+
+    async def enviar_log(self, category: str, message: str):
+        """Envía un log al panel admin: activity o error."""
+        payload = {
+            "type": "log",
+            "category": category,
+            "message": message,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        }
+        muertos = []
+        for ws in self._admins:
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                muertos.append(ws)
+        for ws in muertos:
+            self.desconectar_admin(ws)
 
     async def _enviar_estado(self, ws: WebSocket):
         await ws.send_json(self._estado_actual())

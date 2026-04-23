@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Threading;
 using ControlBiblioteca.Client.Services;
 using ControlBiblioteca.Client.UI;
+using Microsoft.Win32;
 
 namespace ControlBiblioteca.Client
 {
@@ -93,6 +94,34 @@ namespace ControlBiblioteca.Client
             // ── Modo kiosco normal ────────────────────────────────────────────────
             StartupConfigurator.AplicarOptimizacionesUsuario();
             RegistrarManejadoresDeError();
+
+            // ── IDENTIFICACIÓN DE TERMINAL ───────────────────────────────────────
+            var config = KioscoConfig.Leer();
+            if (string.IsNullOrWhiteSpace(config.TerminalName))
+            {
+                Security.Desbloquear(); // Permitir interacción con el diálogo
+                var dialog = new NombrePcWindow();
+                if (dialog.ShowDialog() == true)
+                {
+                    config.TerminalName = dialog.NombreResultado;
+                    config.Guardar();
+                    CambiarNombreWindows(config.TerminalName);
+                    
+                    // Separar completamente: si se configuró el nombre, reiniciamos y salimos.
+                    _mutex.ReleaseMutex();
+                    Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 5 /c \"Aplicando nombre de equipo\"") { CreateNoWindow = true, UseShellExecute = false });
+                    Environment.Exit(0);
+                    return;
+                }
+                else
+                {
+                    // Si cancela, salir
+                    _mutex.ReleaseMutex();
+                    Environment.Exit(0);
+                    return;
+                }
+            }
+
             IniciarNetworkEnsurer();
             IniciarUIWatchdog();
             _backdoor = new MantenimientoBackdoor(this);
@@ -241,6 +270,34 @@ namespace ControlBiblioteca.Client
         }
 
         // ── Cierre ───────────────────────────────────────────────────────────────
+
+        private void CambiarNombreWindows(string nuevoNombre)
+        {
+            if (!EsAdministrador()) return;
+
+            try
+            {
+                // Cambiar el nombre en el registro (método más persistente para .NET Core en Win64)
+                string root = @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName";
+                Registry.SetValue(root, "ComputerName", nuevoNombre);
+
+                string active = @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName";
+                Registry.SetValue(active, "ComputerName", nuevoNombre);
+
+                string services = @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters";
+                Registry.SetValue(services, "Hostname", nuevoNombre);
+                Registry.SetValue(services, "NV Hostname", nuevoNombre);
+
+                MessageBox.Show($"El nombre de la terminal se ha configurado como '{nuevoNombre}'.\n\n" +
+                              "IMPORTANTE: El cambio de nombre en Windows requiere un REINICIO para completarse.\n" +
+                              "El sistema usará el nuevo nombre para identificarse ante el servidor inmediatamente.",
+                              "Configuración de Sistema", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error al cambiar nombre de Windows: {ex.Message}");
+            }
+        }
 
         protected override void OnExit(ExitEventArgs e)
         {

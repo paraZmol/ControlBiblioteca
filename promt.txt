@@ -1,27 +1,29 @@
-el sistema de bloqueo y el conteo de terminales están perfectos. Ahora vamos a ampliar la información que maneja el Administrador y añadir el control remoto. Usa las reglas de ahorro de tokens.
+vamos a pulir los detalles finales del sistema para la biblioteca. Sigue las reglas de ahorro de tokens.
 
-1. Ampliación de Datos (Python/SQLAlchemy):
+1. Registro Automático de Salida (Python - Backend):
 
-Modifica el modelo de Sesion para incluir estos campos: dni, facultad, escuela, fecha_uso y hora_salida.
+En el manejador de WebSockets (ws_terminal), añade una lógica dentro del bloque except o finally de la desconexión.
 
-Asegúrate de que cuando el servidor valide al alumno con el SGA, extraiga y guarde estos datos automáticamente.
+Acción: Si una terminal se desconecta (por apagado o pérdida de red), el servidor debe buscar la última sesión activa de esa IP/Terminal y actualizar automáticamente los campos hora_salida, fin y cambiar activa = 0.
 
-2. Interfaz del Panel Admin (HTML/JS):
+Usa la hora capturada en ese instante preciso para que no quede vacía.
 
-Actualiza la tabla de Sesiones Activas. Debe tener estas columnas exactas:
+2. Advertencias Dinámicas (HTML/JS - Frontend):
 
-Estudiante | Código | DNI | Facultad | Escuela | Actividad | Inicio | Salida | Fecha
+NO uses window.confirm básico. Implementa un modal personalizado en el panel de administrador.
 
-En la columna Acciones, añade un botón rojo con un ícono de encendido que diga "Apagar PC".
+Crea un componente de advertencia con CSS moderno: Fondo oscuro semi-transparente, bordes redondeados, sombras neón y botones con transiciones suaves.
 
-Este botón debe emitir un mensaje por WebSocket: {"type": "remote_command", "action": "shutdown"}.
+Mensaje Dinámico: Al presionar "Apagar" o "Cerrar", debe salir un mensaje tipo: "⚠️ ¿Estás seguro de finalizar la sesión en la terminal [Nombre_PC]? Esta acción es irreversible."
 
-3. Control Remoto (Cliente C#):
+El botón de confirmar debe ser Rojo Vibrante y el de cancelar un Gris Elegante.
 
-En WebSocketService.cs, añade un manejador para el mensaje remote_command.
+3. Reparación de Tabla (app.js):
 
-Si la acción es shutdown, debe ejecutar: Process.Start(new ProcessStartInfo("shutdown", "/s /t 5") { CreateNoWindow = true, UseShellExecute = false });.
+Sincroniza las columnas para que la hora de salida se vea inmediatamente después de la hora de inicio, moviendo la fecha al final.
 
-4. Publicación:
+Si la sesión está activa, que el texto "En curso..." parpadee suavemente en color verde.
 
-Al terminar los cambios, ejecuta el comando dotnet publish para generar el nuevo .exe único.
+4. Cliente C# (Mejora de Robustez):
+
+Asegúrate de que el instalador no lance el error de Application al reiniciar. Separa completamente el proceso de configuración del nombre de la PC del proceso de arranque de la UI principal.
