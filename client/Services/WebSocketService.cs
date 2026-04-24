@@ -23,7 +23,7 @@ namespace ControlBiblioteca.Client.Services
         public event Action<bool>?   OnConexionCambiada;
         public event Action<string>? OnError;
 
-        private const int HEARTBEAT_MS   = 5000;    // Heartbeat cada 5 segundos para mantener conexión estable
+        private const int HEARTBEAT_MS   = 3000;    // Heartbeat cada 3 segundos para mayor estabilidad
         private const int RECONEXION_MIN = 5000;   // espera inicial entre reintentos
         private const int RECONEXION_MAX = 60000;  // tope: no reconectar más de 1 vez/minuto
 

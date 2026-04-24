@@ -18,7 +18,8 @@ class Alumno(Base):
     __tablename__ = "alumnos"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    codigo: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    codigo: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)  # código de matrícula ej: 161.2502.614
+    dni: Mapped[str] = mapped_column(String(20), nullable=True, index=True)                   # DNI del estudiante ej: 71926257
     nombres: Mapped[str] = mapped_column(String(100), nullable=False)
     apellidos: Mapped[str] = mapped_column(String(100), nullable=False)
     escuela: Mapped[str] = mapped_column(String(100), nullable=True)
@@ -62,6 +63,7 @@ class Sesion(Base):
     hora_inicio: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # hora capturada del administrador
     hora_salida: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # hora capturada del administrador
     activa: Mapped[bool] = mapped_column(Boolean, default=True)
+    confirmada: Mapped[bool] = mapped_column(Boolean, default=False)  # True cuando el cliente confirma el desbloqueo
     motivo_cierre: Mapped[str] = mapped_column(String(50), nullable=True)  # manual, timeout, admin
     razon_uso: Mapped[str] = mapped_column(String(200), nullable=True)  # razon de uso seleccionada en login
     # Campos desnormalizados del alumno (snapshots al momento del ingreso)

@@ -62,9 +62,13 @@
             <div id="terminalesGrid" class="terminales-grid"></div>
         </section>
 
-        <!-- Sesiones activas -->
+        <!-- Historial de Sesiones -->
         <section class="section">
-            <h2>Sesiones Activas</h2>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <h2 style="margin:0">Historial de Sesiones</h2>
+                <button onclick="exportarExcel()" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;font-size:14px;transition:background .2s" onmouseover="this.style.background='#15803d'" onmouseout="this.style.background='#16a34a'">📊 Exportar Excel</button>
+                <button onclick="exportarPdf()" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;font-size:14px;transition:background .2s" onmouseover="this.style.background='#b91c1c'" onmouseout="this.style.background='#dc2626'">📄 Exportar PDF</button>
+            </div>
             <table id="tablaSesiones" class="tabla">
                 <thead>
                     <tr>
@@ -77,11 +81,12 @@
                         <th>Inicio</th>
                         <th>Salida</th>
                         <th>Fecha</th>
+                        <th>Estado</th>
                     </tr>
                 </thead>
                 <tbody id="sesionesBody"></tbody>
             </table>
-            <p id="sinSesiones" class="empty-msg">No hay sesiones activas</p>
+            <p id="sinSesiones" class="empty-msg">No hay sesiones registradas</p>
         </section>
 
         <!-- Consolas de Eventos (Footer Monitoreo) -->
@@ -109,6 +114,50 @@
             <div class="modal-buttons">
                 <button id="btn-modal-cancelar" class="btn-cancelar">Cancelar</button>
                 <button id="btn-modal-confirmar" class="btn-confirmar-rojo">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Bloqueo Administrativo -->
+    <div id="modal-bloqueo" class="modal-overlay" style="display:none;background:rgba(0,0,0,0.75)">
+        <div class="modal-content" style="border:2px solid transparent;border-radius:12px;background:linear-gradient(#1a1a2e,#1a1a2e) padding-box,linear-gradient(135deg,#ef4444,#f97316,#ef4444) border-box;box-shadow:0 0 30px rgba(239,68,68,0.4);min-width:360px">
+            <h3 style="color:#ef4444;margin-bottom:8px">⚠️ Confirmar Bloqueo</h3>
+            <p id="modal-bloqueo-mensaje" style="color:#e5e7eb;font-size:14px;line-height:1.5;margin-bottom:20px"></p>
+            <div class="modal-buttons">
+                <button id="btn-bloqueo-cancelar" style="background:#374151;color:#d1d5db;border:none;border-radius:6px;padding:10px 20px;cursor:pointer;font-size:14px;font-weight:600">Cancelar</button>
+                <button id="btn-bloqueo-confirmar" style="background:#ef4444;color:#fff;border:none;border-radius:6px;padding:10px 20px;cursor:pointer;font-size:14px;font-weight:700;box-shadow:0 0 12px rgba(239,68,68,0.5)">🔒 Confirmar Bloqueo</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Desbloqueo con Actividad -->
+    <div id="modal-desbloqueo" class="modal-overlay" style="display:none">
+        <div class="modal-content" style="min-width:340px">
+            <h3>🔓 Desbloquear Terminal</h3>
+            <p id="modal-desbloqueo-nombre" style="color:#6b7280;font-size:13px;margin-bottom:12px"></p>
+            <label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px">DNI del alumno</label>
+            <input id="modal-dni" type="text" placeholder="8 dígitos" maxlength="8"
+                style="width:100%;padding:8px;border-radius:4px;border:1px solid #d1d5db;margin-bottom:12px;box-sizing:border-box;font-size:14px">
+            <label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px">Actividad a realizar</label>
+            <select id="modal-actividad"
+                style="width:100%;padding:8px;border-radius:4px;border:1px solid #d1d5db;margin-bottom:12px;font-size:14px;background:#fff">
+                <option value="">-- Seleccione una actividad --</option>
+                <option value="Investigación">Investigación</option>
+                <option value="Lectura de libros digitales">Lectura de libros digitales</option>
+                <option value="Uso de base de datos">Uso de base de datos</option>
+                <option value="Trabajos académicos">Trabajos académicos</option>
+                <option value="Uso de AutoCAD y/o Civil 3D">Uso de AutoCAD y/o Civil 3D</option>
+                <option value="Clases virtuales">Clases virtuales</option>
+                <option value="Otros">Otros (Especificar)</option>
+            </select>
+            <div id="modal-otros-panel" style="display:none;margin-bottom:12px">
+                <input id="modal-otros-texto" type="text" placeholder="Especifique la actividad..."
+                    style="width:100%;padding:8px;border-radius:4px;border:1px solid #d1d5db;box-sizing:border-box;font-size:14px">
+            </div>
+            <p id="modal-desbloqueo-error" style="color:#ef4444;font-size:12px;min-height:16px;margin-bottom:8px"></p>
+            <div class="modal-buttons">
+                <button id="btn-desbloqueo-cancelar" class="btn-cancelar">Cancelar</button>
+                <button id="btn-desbloqueo-confirmar" class="btn-confirmar" style="background:#10b981">Desbloquear</button>
             </div>
         </div>
     </div>

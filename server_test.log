@@ -1,0 +1,10 @@
+2026-04-23 18:43:07,124 [control] INFO: [IP] IP Local detectada: 10.67.161.246
+INFO:     Started server process [16216]
+INFO:     Waiting for application startup.
+2026-04-23 18:43:07,145 [control] INFO: Base de datos inicializada
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8002 (Press CTRL+C to quit)
+INFO:     127.0.0.1:63376 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63377 - "GET /api/admin/exportar-excel HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63404 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63405 - "GET /api/admin/exportar-excel HTTP/1.1" 200 OK
