@@ -62,9 +62,14 @@ async function login() {
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
     const errorEl  = document.getElementById('loginError');
+    const btn      = document.getElementById('btnLogin');
     errorEl.textContent = '';
 
     if (!username || !password) { errorEl.textContent = 'Ingrese usuario y contraseña'; return; }
+
+    // Estado de carga
+    btn.disabled = true;
+    btn.textContent = 'Verificando...';
 
     try {
         const form = new URLSearchParams({ username, password });
@@ -77,6 +82,8 @@ async function login() {
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             errorEl.textContent = err.detail || 'Credenciales incorrectas';
+            btn.disabled = false;
+            btn.textContent = 'Iniciar Sesión';
             return;
         }
 
@@ -86,6 +93,8 @@ async function login() {
         document.getElementById('loginPanel').style.display  = 'none';
         document.getElementById('dashboard').style.display   = 'block';
         document.body.classList.remove('login-screen');
+        btn.disabled = false;
+        btn.textContent = 'Iniciar Sesión';
 
         // Obtener y mostrar IP real del servidor
         await obtenerYMostrarIpServidor();
@@ -99,6 +108,8 @@ async function login() {
     } catch (e) {
         errorEl.textContent = 'No se pudo conectar al servidor (¿está corriendo en :8000?)';
         addLog('error', `❌ Login fallido: ${e.message || 'sin conexión'}`);
+        btn.disabled = false;
+        btn.textContent = 'Iniciar Sesión';
     }
 }
 
@@ -132,7 +143,7 @@ function logout() {
     if (wsAdmin) { wsAdmin.onclose = null; wsAdmin.close(); wsAdmin = null; }
     clearTimeout(_reconnectTimer);
     document.getElementById('dashboard').style.display  = 'none';
-    document.getElementById('loginPanel').style.display = 'block';
+    document.getElementById('loginPanel').style.display = 'flex';
     document.getElementById('username').value = '';
     document.getElementById('password').value = '';
     document.body.classList.add('login-screen');

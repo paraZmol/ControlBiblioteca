@@ -8,13 +8,55 @@
 </head>
 <body>
     <!-- Login -->
-    <div id="loginPanel" class="login-container">
-        <h1>📚 Control Biblioteca</h1>
-        <h3>Panel de Administración</h3>
-        <input type="text" id="username" placeholder="Usuario" autocomplete="username">
-        <input type="password" id="password" placeholder="Contraseña" autocomplete="current-password">
-        <button onclick="login()">Iniciar Sesión</button>
-        <p id="loginError" class="error"></p>
+    <div id="loginPanel" class="login-fullscreen">
+        <div class="login-bg"></div>
+        <main class="login-main">
+            <!-- Logo / Identidad -->
+            <div class="login-header">
+                <div class="login-icon-wrap">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L3 7V12C3 17.5 7 21 12 22C17 21 21 17.5 21 12V7L12 2Z" stroke="#00B4DB" stroke-width="2" fill="rgba(0,180,219,0.15)"/>
+                        <path d="M12 6V12L16 14" stroke="#00B4DB" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </div>
+                <h1 class="login-title">Control Biblioteca</h1>
+                <p class="login-subtitle">UNASAM &mdash; PANEL DE ADMINISTRACIÓN</p>
+            </div>
+
+            <!-- Tarjeta glass -->
+            <div class="login-card">
+                <div class="login-field">
+                    <label class="login-label">Nombre de Usuario</label>
+                    <div class="login-input-wrap">
+                        <span class="login-input-icon">
+                            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                            </svg>
+                        </span>
+                        <input type="text" id="username" placeholder="Usuario de red" class="login-input" autocomplete="username">
+                    </div>
+                </div>
+
+                <div class="login-field">
+                    <label class="login-label">Contraseña</label>
+                    <div class="login-input-wrap">
+                        <span class="login-input-icon">
+                            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                            </svg>
+                        </span>
+                        <input type="password" id="password" placeholder="••••••••" class="login-input" autocomplete="current-password">
+                    </div>
+                </div>
+
+                <button id="btnLogin" class="login-btn" onclick="login()">Iniciar Sesión</button>
+                <p id="loginError" class="error login-error"></p>
+
+                <div class="login-footer">
+                    <p>© 2026 UNASAM &mdash; Dirección de Biblioteca Central</p>
+                </div>
+            </div>
+        </main>
     </div>
 
     <!-- Dashboard -->
