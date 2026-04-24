@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Biblioteca UNASAM - Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f172a; /* Fallback */
+            overflow: hidden;
+        }
+
+        /* Simulación del fondo de biblioteca con overlay azulado profundo */
+        .library-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: linear-gradient(rgba(15, 23, 42, 0.75), rgba(15, 23, 42, 0.9)), 
+                              url('https://images.unsplash.com/photo-1507842217343-583bb7270b66?ixlib=rb-1.2.1&auto=format&fit=crop&w=2000&q=80');
+            background-size: cover;
+            background-position: center;
+            z-index: -1;
+            filter: saturate(0.8);
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+        }
+
+        .unasam-gradient {
+            background: linear-gradient(135deg, #00B4DB 0%, #0083B0 100%);
+        }
+
+        .input-field {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .input-field:focus {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: #00B4DB;
+            box-shadow: 0 0 0 2px rgba(0, 180, 219, 0.2);
+            outline: none;
+        }
+
+        /* Animación suave para el botón */
+        .btn-hover {
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn-hover:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 15px -3px rgba(0, 180, 219, 0.4);
+        }
+        .btn-hover:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="library-bg"></div>
+
+    <main class="w-full max-w-md">
+        <!-- Logo / Identidad Institucional -->
+        <div class="text-center mb-8">
+            <div class="inline-flex items-center justify-center p-3 bg-white/10 backdrop-blur-md rounded-2xl mb-4 border border-white/20">
+                <!-- Icono representativo (Libro/Escudo) -->
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L3 7V12C3 17.5 7 21 12 22C17 21 21 17.5 21 12V7L12 2Z" stroke="#00B4DB" stroke-width="2" fill="rgba(0,180,219,0.1)"/>
+                    <path d="M12 6V12L16 14" stroke="#00B4DB" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <h1 class="text-3xl font-bold text-white tracking-tight">Control Biblioteca</h1>
+            <p class="text-cyan-400 font-medium tracking-widest text-sm uppercase mt-1">UNASAM - Panel de Administración</p>
+        </div>
+
+        <!-- Tarjeta de Login Simplificada -->
+        <div class="glass-card rounded-3xl p-8 md:p-10">
+            <form id="loginForm" class="space-y-6" onsubmit="event.preventDefault();">
+                
+                <!-- Campo de Usuario -->
+                <div class="space-y-2">
+                    <label for="username" class="text-xs font-semibold text-gray-400 uppercase ml-1">Nombre de Usuario</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-4 text-gray-500">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                            </svg>
+                        </span>
+                        <input 
+                            type="text" 
+                            id="username" 
+                            placeholder="Usuario de red"
+                            class="input-field w-full pl-11 pr-4 py-3.5 rounded-xl text-white placeholder-gray-600"
+                            required
+                        >
+                    </div>
+                </div>
+
+                <!-- Campo de Contraseña -->
+                <div class="space-y-2">
+                    <label for="password" class="text-xs font-semibold text-gray-400 uppercase ml-1">Contraseña</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-4 text-gray-500">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                            </svg>
+                        </span>
+                        <input 
+                            type="password" 
+                            id="password" 
+                            placeholder="••••••••"
+                            class="input-field w-full pl-11 pr-4 py-3.5 rounded-xl text-white placeholder-gray-600"
+                            required
+                        >
+                    </div>
+                </div>
+
+                <!-- Botón de Inicio de Sesión -->
+                <button 
+                    type="submit" 
+                    class="unasam-gradient btn-hover w-full py-4 mt-4 rounded-xl text-white font-bold text-lg shadow-lg"
+                >
+                    Iniciar Sesión
+                </button>
+            </form>
+
+            <!-- Footer del Formulario -->
+            <div class="mt-10 pt-6 border-t border-white/5 text-center">
+                <p class="text-gray-500 text-sm">
+                    © 2026 UNASAM - Dirección de Biblioteca Central
+                </p>
+            </div>
+        </div>
+
+        <!-- Enlaces de navegación rápida -->
+        <div class="mt-8 flex justify-center space-x-6">
+            <a href="#" class="text-gray-500 hover:text-white transition-colors text-sm flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                Catálogo
+            </a>
+            <a href="#" class="text-gray-500 hover:text-white transition-colors text-sm flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                Asistencia
+            </a>
+        </div>
+    </main>
+
+    <script>
+        // Manejador del formulario con feedback visual
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            const btn = e.target.querySelector('button');
+            const originalText = btn.innerText;
+            
+            // Efecto de carga
+            btn.innerHTML = `
+                <svg class="animate-spin h-5 w-5 text-white inline-block mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Verificando...
+            `;
+            btn.disabled = true;
+            btn.classList.add('opacity-80', 'cursor-not-allowed');
+            
+            // Simulación de validación
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                btn.classList.remove('opacity-80', 'cursor-not-allowed');
+            }, 1500);
+        });
+    </script>
+</body>
+</html>

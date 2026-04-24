@@ -10,9 +10,7 @@ class ConnectionManager:
     """Gestiona conexiones de terminales (kioscos) y paneles admin."""
 
     def __init__(self):
-        # clave = terminal_id (hostname si disponible, IP como fallback)
         self.conexiones_activas: Dict[str, WebSocket] = {}
-        # mapeo terminal_id → ip real del socket
         self.terminal_ips: Dict[str, str] = {}
         self._admins: List[WebSocket] = []
 
@@ -69,11 +67,10 @@ class ConnectionManager:
 
     async def desconectar_todo(self):
         """Cierra todas las conexiones de terminales."""
-        muertos = list(self.conexiones_activas.items())
-        for tid, ws in muertos:
+        for tid, ws in list(self.conexiones_activas.items()):
             try:
                 await ws.close()
-            except:
+            except Exception:
                 pass
             self.desconectar(tid)
         await self.notificar_admins()
@@ -87,9 +84,6 @@ class ConnectionManager:
                 muertos.append(ip)
         for ip in muertos:
             self.desconectar(ip)
-
-    def obtener_estado(self) -> list:
-        return list(self.conexiones_activas.keys())
 
     # ── Panel Admin ───────────────────────────────────────────────────
 
@@ -106,10 +100,8 @@ class ConnectionManager:
             pass
         logger.info("Panel admin desconectado")
 
-    async def notificar_admins(self):
-        if not self._admins:
-            return
-        payload = self._estado_actual()
+    async def _broadcast_admins(self, payload: dict):
+        """Envía payload a todos los admins conectados, limpiando los caídos."""
         muertos = []
         for ws in self._admins:
             try:
@@ -118,6 +110,29 @@ class ConnectionManager:
                 muertos.append(ws)
         for ws in muertos:
             self.desconectar_admin(ws)
+
+    async def notificar_admins(self):
+        if not self._admins:
+            return
+        await self._broadcast_admins(self._estado_actual())
+
+    async def notificar_evento(self, mensaje: str, nivel: str = "info"):
+        """Envía un mensaje de evento a todos los paneles admin."""
+        await self._broadcast_admins({
+            "tipo": "evento_log",
+            "mensaje": mensaje,
+            "nivel": nivel,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        })
+
+    async def enviar_log(self, category: str, message: str):
+        """Envía un log al panel admin: activity o error."""
+        await self._broadcast_admins({
+            "tipo": "evento_log",
+            "mensaje": message,
+            "nivel": category,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        })
 
     def _estado_actual(self) -> dict:
         return {
@@ -125,40 +140,6 @@ class ConnectionManager:
             "terminales": list(self.conexiones_activas.keys()),
             "total": len(self.conexiones_activas)
         }
-
-    async def notificar_evento(self, mensaje: str, nivel: str = "info"):
-        """Envía un mensaje de log/evento a todos los paneles admin conectados."""
-        payload = {
-            "tipo": "evento_log",
-            "mensaje": mensaje,
-            "nivel": nivel,
-            "timestamp": datetime.now().strftime("%H:%M:%S")
-        }
-        muertos = []
-        for ws in self._admins:
-            try:
-                await ws.send_json(payload)
-            except Exception:
-                muertos.append(ws)
-        for ws in muertos:
-            self.desconectar_admin(ws)
-
-    async def enviar_log(self, category: str, message: str):
-        """Envía un log al panel admin: activity o error."""
-        payload = {
-            "type": "log",
-            "category": category,
-            "message": message,
-            "timestamp": datetime.now().strftime("%H:%M:%S")
-        }
-        muertos = []
-        for ws in self._admins:
-            try:
-                await ws.send_json(payload)
-            except Exception:
-                muertos.append(ws)
-        for ws in muertos:
-            self.desconectar_admin(ws)
 
     async def _enviar_estado(self, ws: WebSocket):
         await ws.send_json(self._estado_actual())

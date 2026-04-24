@@ -6,8 +6,15 @@
         WindowState="Normal"
         Topmost="True"
         ResizeMode="NoResize"
-        AllowsTransparency="False"
-        Background="#1a1a2e">
+        AllowsTransparency="False">
+
+    <Window.Background>
+        <ImageBrush ImageSource="pack://application:,,,/images/fondo_3.png"
+                    Stretch="UniformToFill"
+                    AlignmentX="Center"
+                    AlignmentY="Center"
+                    Opacity="0.55"/>
+    </Window.Background>
 
     <!-- ── Estilos globales ────────────────────────────────────────── -->
     <Window.Resources>
@@ -171,6 +178,10 @@
     </Window.Resources>
 
     <Grid>
+        <!-- Overlay oscuro sobre la imagen de fondo para legibilidad -->
+        <Rectangle Fill="#CC0f0f23" Panel.ZIndex="0"/>
+
+        <Grid Panel.ZIndex="1">
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
@@ -189,9 +200,10 @@
                        Foreground="#e94560" HorizontalAlignment="Center"
                        Margin="0,0,0,10"/>
             
-            <TextBlock Text="Terminal de Consulta" 
-                       FontSize="18" Foreground="#c4c4c4" 
-                       HorizontalAlignment="Center" Margin="0,0,0,40"/>
+            <TextBlock x:Name="TxtNombreEquipo"
+                       Text="Equipo: —"
+                       FontSize="16" Foreground="#9ca3af"
+                       HorizontalAlignment="Center" Margin="0,4,0,36"/>
 
             <!-- Campo de código -->
             <TextBlock Text="Ingrese su número de DNI:"
@@ -303,5 +315,6 @@
                            VerticalAlignment="Top"/>
             </ScrollViewer>
         </Border>
+        </Grid><!-- fin inner Grid con contenido -->
     </Grid>
 </Window>

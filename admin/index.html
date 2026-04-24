@@ -25,6 +25,7 @@
                 <span id="serverIpBadge" class="server-badge">IP SERVIDOR: ...</span>
                 <span id="wsStatus" class="ws-badge off">○ WS Desconectado</span>
                 <span id="usuarioActual"></span>
+                <button id="btnTema" class="btn-tema" onclick="toggleTema()" title="Cambiar tema">🌙</button>
                 <button onclick="logout()" class="btn-logout">Cerrar Sesión</button>
             </div>
         </header>
@@ -33,7 +34,7 @@
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="stat-number" id="totalTerminales">0</div>
-                <div class="stat-label">Terminales</div>
+                <div class="stat-label">Equipos</div>
             </div>
             <div class="stat-card active">
                 <div class="stat-number" id="terminalesActivas">0</div>
@@ -49,10 +50,10 @@
             </div>
         </div>
 
-        <!-- Terminales -->
+        <!-- Equipos -->
         <section class="section">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px">
-                <h2 style="margin:0">Terminales</h2>
+                <h2 style="margin:0">Equipos</h2>
                 <div style="display:flex; gap:10px">
                     <button onclick="finalizarTodo()" class="btn-finalizar">🏁 Finalizar Todas</button>
                     <button onclick="limpiarTodo()" class="btn-limpiar">🧹 Limpiar Todo</button>
@@ -64,23 +65,52 @@
 
         <!-- Historial de Sesiones -->
         <section class="section">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <!-- Barra de periodos -->
+            <div class="periodo-bar">
+                <span class="periodo-label">Período:</span>
+                <button id="btn-hoy"   data-periodo="dia"   onclick="setPeriodo('dia')"   class="btn-periodo btn-periodo-activo">Hoy</button>
+                <button id="btn-mes"   data-periodo="mes"   onclick="setPeriodo('mes')"   class="btn-periodo">Mes</button>
+                <button id="btn-anio"  data-periodo="anio"  onclick="setPeriodo('anio')"  class="btn-periodo">Año</button>
+                <button id="btn-todo"  data-periodo="todo"  onclick="setPeriodo('todo')"  class="btn-periodo">Todo</button>
+                <button id="btn-rango" data-periodo="rango" onclick="setPeriodo('rango')" class="btn-periodo">Rango</button>
+                <div id="panelRango" style="display:none;gap:6px;align-items:center">
+                    <input id="rangoDesde" type="date" onchange="aplicarRango()" class="input-rango">
+                    <span class="periodo-label">→</span>
+                    <input id="rangoHasta" type="date" onchange="aplicarRango()" class="input-rango">
+                </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
                 <h2 style="margin:0">Historial de Sesiones</h2>
-                <button onclick="exportarExcel()" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;font-size:14px;transition:background .2s" onmouseover="this.style.background='#15803d'" onmouseout="this.style.background='#16a34a'">📊 Exportar Excel</button>
-                <button onclick="exportarPdf()" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;font-size:14px;transition:background .2s" onmouseover="this.style.background='#b91c1c'" onmouseout="this.style.background='#dc2626'">📄 Exportar PDF</button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                    <input id="filtroSearch" type="text" placeholder="🔍 Buscar nombre, DNI o código..."
+                        class="input-filtro"
+                        oninput="aplicarFiltros()">
+                    <select id="filtroActividad" class="select-filtro" onchange="aplicarFiltros()">
+                        <option value="">📋 Todas las actividades</option>
+                        <option value="Investigación">Investigación</option>
+                        <option value="Lectura de libros digitales">Lectura de libros digitales</option>
+                        <option value="Uso de base de datos">Uso de base de datos</option>
+                        <option value="Trabajos académicos">Trabajos académicos</option>
+                        <option value="Uso de AutoCAD y/o Civil 3D">Uso de AutoCAD y/o Civil 3D</option>
+                        <option value="Clases virtuales">Clases virtuales</option>
+                        <option value="Otros">Otros</option>
+                    </select>
+                    <button onclick="exportarExcel()" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px">📊 Excel</button>
+                    <button onclick="exportarPdfFiltrado()" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px">📄 PDF</button>
+                </div>
             </div>
             <table id="tablaSesiones" class="tabla">
                 <thead>
                     <tr>
-                        <th>Estudiante</th>
-                        <th>Código</th>
-                        <th>DNI</th>
-                        <th>Facultad</th>
-                        <th>Escuela</th>
-                        <th>Actividad</th>
-                        <th>Inicio</th>
+                        <th class="th-sortable" onclick="ordenarPor('estudiante')" data-col="estudiante">Estudiante <span class="sort-arrow"></span></th>
+                        <th class="th-sortable" onclick="ordenarPor('codigo')"     data-col="codigo">Código <span class="sort-arrow"></span></th>
+                        <th class="th-sortable" onclick="ordenarPor('dni')"        data-col="dni">DNI <span class="sort-arrow"></span></th>
+                        <th class="th-sortable" onclick="ordenarPor('facultad')"   data-col="facultad">Facultad <span class="sort-arrow"></span></th>
+                        <th class="th-sortable" onclick="ordenarPor('escuela')" data-col="escuela">Escuela <span class="sort-arrow"></span></th>
+                        <th class="th-sortable" onclick="ordenarPor('actividad')"  data-col="actividad">Actividad <span class="sort-arrow"></span></th>
+                        <th class="th-sortable" onclick="ordenarPor('inicio')"     data-col="inicio">Inicio <span class="sort-arrow"></span></th>
                         <th>Salida</th>
-                        <th>Fecha</th>
+                        <th class="th-sortable" onclick="ordenarPor('fecha')"      data-col="fecha">Fecha <span class="sort-arrow"></span></th>
                         <th>Estado</th>
                     </tr>
                 </thead>
@@ -120,12 +150,12 @@
 
     <!-- Modal de Bloqueo Administrativo -->
     <div id="modal-bloqueo" class="modal-overlay" style="display:none;background:rgba(0,0,0,0.75)">
-        <div class="modal-content" style="border:2px solid transparent;border-radius:12px;background:linear-gradient(#1a1a2e,#1a1a2e) padding-box,linear-gradient(135deg,#ef4444,#f97316,#ef4444) border-box;box-shadow:0 0 30px rgba(239,68,68,0.4);min-width:360px">
-            <h3 style="color:#ef4444;margin-bottom:8px">⚠️ Confirmar Bloqueo</h3>
-            <p id="modal-bloqueo-mensaje" style="color:#e5e7eb;font-size:14px;line-height:1.5;margin-bottom:20px"></p>
+        <div class="modal-content modal-bloqueo-content">
+            <h3 class="modal-bloqueo-titulo">⚠️ Confirmar Bloqueo</h3>
+            <p id="modal-bloqueo-mensaje" class="modal-bloqueo-msg"></p>
             <div class="modal-buttons">
-                <button id="btn-bloqueo-cancelar" style="background:#374151;color:#d1d5db;border:none;border-radius:6px;padding:10px 20px;cursor:pointer;font-size:14px;font-weight:600">Cancelar</button>
-                <button id="btn-bloqueo-confirmar" style="background:#ef4444;color:#fff;border:none;border-radius:6px;padding:10px 20px;cursor:pointer;font-size:14px;font-weight:700;box-shadow:0 0 12px rgba(239,68,68,0.5)">🔒 Confirmar Bloqueo</button>
+                <button id="btn-bloqueo-cancelar" class="btn-cancelar">Cancelar</button>
+                <button id="btn-bloqueo-confirmar" class="btn-confirmar-rojo">🔒 Confirmar Bloqueo</button>
             </div>
         </div>
     </div>
@@ -134,13 +164,11 @@
     <div id="modal-desbloqueo" class="modal-overlay" style="display:none">
         <div class="modal-content" style="min-width:340px">
             <h3>🔓 Desbloquear Terminal</h3>
-            <p id="modal-desbloqueo-nombre" style="color:#6b7280;font-size:13px;margin-bottom:12px"></p>
-            <label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px">DNI del alumno</label>
-            <input id="modal-dni" type="text" placeholder="8 dígitos" maxlength="8"
-                style="width:100%;padding:8px;border-radius:4px;border:1px solid #d1d5db;margin-bottom:12px;box-sizing:border-box;font-size:14px">
-            <label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px">Actividad a realizar</label>
-            <select id="modal-actividad"
-                style="width:100%;padding:8px;border-radius:4px;border:1px solid #d1d5db;margin-bottom:12px;font-size:14px;background:#fff">
+            <p id="modal-desbloqueo-nombre" class="modal-desbloqueo-sub"></p>
+            <label class="modal-field-label">DNI del alumno</label>
+            <input id="modal-dni" type="text" placeholder="8 dígitos" maxlength="8" class="modal-input">
+            <label class="modal-field-label">Actividad a realizar</label>
+            <select id="modal-actividad" class="modal-select">
                 <option value="">-- Seleccione una actividad --</option>
                 <option value="Investigación">Investigación</option>
                 <option value="Lectura de libros digitales">Lectura de libros digitales</option>
@@ -151,13 +179,12 @@
                 <option value="Otros">Otros (Especificar)</option>
             </select>
             <div id="modal-otros-panel" style="display:none;margin-bottom:12px">
-                <input id="modal-otros-texto" type="text" placeholder="Especifique la actividad..."
-                    style="width:100%;padding:8px;border-radius:4px;border:1px solid #d1d5db;box-sizing:border-box;font-size:14px">
+                <input id="modal-otros-texto" type="text" placeholder="Especifique la actividad..." class="modal-input">
             </div>
             <p id="modal-desbloqueo-error" style="color:#ef4444;font-size:12px;min-height:16px;margin-bottom:8px"></p>
             <div class="modal-buttons">
                 <button id="btn-desbloqueo-cancelar" class="btn-cancelar">Cancelar</button>
-                <button id="btn-desbloqueo-confirmar" class="btn-confirmar" style="background:#10b981">Desbloquear</button>
+                <button id="btn-desbloqueo-confirmar" class="btn-confirmar">Desbloquear</button>
             </div>
         </div>
     </div>

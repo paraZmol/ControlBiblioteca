@@ -37,4 +37,9 @@
     </Content>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Imagen de fondo embebida como recurso WPF -->
+    <Resource Include="images\fondo_3.png" />
+  </ItemGroup>
+
 </Project>

@@ -9,7 +9,34 @@ let _reconnectTimer = null;
 let _serverIp = 'localhost';
 let _reconnectAttempts = 0;
 const _MAX_RECONNECT_ATTEMPTS = 10;
-let _reconnectDelay = 2000; // Comenzar con 2 segundos
+let _reconnectDelay = 2000;
+
+let _pendingUnlockModal = null; // referencia al modal de desbloqueo abierto
+
+// ── Estado de filtros/orden/periodo ───────────────────────────────
+let _sortBy      = 'fecha';
+let _sortDir     = 'desc';
+let _periodo     = 'dia';       // dia | mes | anio | rango | todo
+let _fechaInicio = '';
+let _fechaFin    = '';
+
+// ── Tema claro / oscuro ───────────────────────────────────────────
+function toggleTema() {
+    const isLight = document.body.classList.toggle('light-mode');
+    localStorage.setItem('tema', isLight ? 'light' : 'dark');
+    const btn = document.getElementById('btnTema');
+    if (btn) btn.textContent = isLight ? '☀️' : '🌙';
+}
+
+(function _initTema() {
+    // Marcar body como pantalla de login al cargar
+    document.body.classList.add('login-screen');
+    if (localStorage.getItem('tema') === 'light') {
+        document.body.classList.add('light-mode');
+        const btn = document.getElementById('btnTema');
+        if (btn) btn.textContent = '☀️';
+    }
+})();
 
 // ── CONSOLA DE MONITOREO (disponible globalmente) ──────────────────
 function addLog(category, message) {
@@ -58,6 +85,7 @@ async function login() {
         document.getElementById('usuarioActual').textContent = username;
         document.getElementById('loginPanel').style.display  = 'none';
         document.getElementById('dashboard').style.display   = 'block';
+        document.body.classList.remove('login-screen');
 
         // Obtener y mostrar IP real del servidor
         await obtenerYMostrarIpServidor();
@@ -107,6 +135,7 @@ function logout() {
     document.getElementById('loginPanel').style.display = 'block';
     document.getElementById('username').value = '';
     document.getElementById('password').value = '';
+    document.body.classList.add('login-screen');
     setWsStatus(false);
 }
 
@@ -116,12 +145,92 @@ function authHeaders() {
     return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
+function _buildParams() {
+    const search    = document.getElementById('filtroSearch')?.value.trim()    || '';
+    const actividad = document.getElementById('filtroActividad')?.value.trim() || '';
+    const params = new URLSearchParams({ sort_by: _sortBy, order: _sortDir, periodo: _periodo });
+    if (search)    params.set('search',    search);
+    if (actividad) params.set('actividad', actividad);
+    if (_periodo === 'rango' && _fechaInicio && _fechaFin) {
+        params.set('fecha_inicio', _fechaInicio);
+        params.set('fecha_fin',    _fechaFin);
+    }
+    return params;
+}
+
+function _sesionesUrl() {
+    return `${API_BASE}/sesiones/activas?${_buildParams()}`;
+}
+
+function setPeriodo(p) {
+    _periodo = p;
+    // Mostrar/ocultar panel de rango
+    const panelRango = document.getElementById('panelRango');
+    if (panelRango) panelRango.style.display = p === 'rango' ? 'flex' : 'none';
+    // Actualizar botón activo
+    ['btn-hoy','btn-mes','btn-anio','btn-todo','btn-rango'].forEach(id => {
+        const b = document.getElementById(id);
+        if (b) b.classList.toggle('btn-periodo-activo', b.dataset.periodo === p);
+    });
+    aplicarFiltros();
+}
+
+async function aplicarFiltros() {
+    try {
+        const res = await fetch(_sesionesUrl(), { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok) return;
+        const sesiones = await res.json();
+        renderSesiones(sesiones);
+        _actualizarFlechas();
+    } catch (e) {
+        addLog('error', `❌ Error al filtrar sesiones: ${e.message}`);
+    }
+}
+
+function ordenarPor(col) {
+    if (_sortBy === col) {
+        _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        _sortBy  = col;
+        _sortDir = 'asc';
+    }
+    aplicarFiltros();
+}
+
+function _actualizarFlechas() {
+    document.querySelectorAll('.th-sortable').forEach(th => {
+        const arrow = th.querySelector('.sort-arrow');
+        if (!arrow) return;
+        if (th.dataset.col === _sortBy) {
+            arrow.textContent = _sortDir === 'asc' ? ' ▲' : ' ▼';
+            th.style.color = '#1d4ed8';
+        } else {
+            arrow.textContent = '';
+            th.style.color = '';
+        }
+    });
+}
+
+function aplicarRango() {
+    _fechaInicio = document.getElementById('rangoDesde')?.value || '';
+    _fechaFin    = document.getElementById('rangoHasta')?.value || '';
+    if (_fechaInicio && _fechaFin) aplicarFiltros();
+}
+
+function exportarPdfFiltrado() {
+    _descargarArchivo(
+        `${API_BASE}/admin/exportar-pdf?${_buildParams()}`,
+        '📄 Descargando PDF filtrado...',
+        'historial.pdf'
+    );
+}
+
 async function cargarDashboard() {
     try {
         const [statsRes, termRes, sesRes] = await Promise.all([
             fetch(`${API_BASE}/dashboard/stats`,  { headers: authHeaders(), cache: 'no-store' }),
             fetch(`${API_BASE}/terminales`,        { headers: authHeaders(), cache: 'no-store' }),
-            fetch(`${API_BASE}/sesiones/activas`,  { headers: authHeaders(), cache: 'no-store' })
+            fetch(_sesionesUrl(),                  { headers: authHeaders(), cache: 'no-store' })
         ]);
 
         let terminales = [];
@@ -177,20 +286,33 @@ function conectarWebSocket() {
             addLog('activity', `📡 Status update: ${data.total} terminal(es) conectada(s) [${(data.terminales||[]).join(', ')}]`);
             cargarDashboard();
         } else if (data.tipo === 'evento_log') {
-            addLog(data.nivel === 'error' ? 'error' : 'activity', data.mensaje);
-            // Refresco inmediato del historial al detectar desconexión de terminal
+            const cat = (data.nivel === 'error' || data.nivel === 'offline') ? 'error' : 'activity';
+            addLog(cat, data.mensaje);
             if (data.nivel === 'offline' || (data.mensaje && data.mensaje.includes('desconectada'))) {
                 cargarDashboard();
             }
-        } else if (data.type === 'log') {
-            addLog(data.category, data.message);
         } else if (data.tipo === 'ok') {
             addLog('activity', `✅ Servidor: ${data.mensaje}`);
             mostrarNotificacion(data.mensaje, 'ok');
+            // Cerrar modal de desbloqueo si estaba esperando
+            if (_pendingUnlockModal) { _pendingUnlockModal.style.display = 'none'; _pendingUnlockModal = null; }
             cargarDashboard();
+        } else if (data.tipo === 'info') {
+            addLog('activity', `ℹ️ ${data.motivo}`);
         } else if (data.tipo === 'error') {
             addLog('error', `❌ Servidor: ${data.motivo}`);
-            mostrarNotificacion(data.motivo, 'error');
+            // Si hay modal de desbloqueo abierto, mostrar el error dentro en lugar de cerrar
+            if (_pendingUnlockModal) {
+                const errEl = document.getElementById('modal-desbloqueo-error');
+                if (errEl) { errEl.style.color = '#ef4444'; errEl.textContent = data.motivo; }
+                const btnC = document.getElementById('btn-desbloqueo-cancelar');
+                const btnX = document.getElementById('btn-desbloqueo-confirmar');
+                if (btnC) btnC.disabled = false;
+                if (btnX) btnX.disabled = false;
+                _pendingUnlockModal = null;
+            } else {
+                mostrarNotificacion(data.motivo, 'error');
+            }
         } else {
             addLog('activity', `📨 WS msg: ${JSON.stringify(data).substring(0, 120)}`);
         }
@@ -257,24 +379,9 @@ function bloquearTerminal(ip, nombrePc, nombreAlumno) {
 function mostrarConfirmacionBloqueo(htmlMensaje, onConfirm) {
     const modal = document.getElementById('modal-bloqueo');
     document.getElementById('modal-bloqueo-mensaje').innerHTML = htmlMensaje;
-
-    const btnC = document.getElementById('btn-bloqueo-cancelar');
-    const btnX = document.getElementById('btn-bloqueo-confirmar');
-    const newC = btnC.cloneNode(true);
-    const newX = btnX.cloneNode(true);
-    btnC.parentNode.replaceChild(newC, btnC);
-    btnX.parentNode.replaceChild(newX, btnX);
-
-    newC.addEventListener('click', () => { modal.style.display = 'none'; });
-    newX.addEventListener('click', () => { modal.style.display = 'none'; onConfirm(); });
-
+    _rebindBtn('btn-bloqueo-cancelar',  () => { modal.style.display = 'none'; });
+    _rebindBtn('btn-bloqueo-confirmar', () => { modal.style.display = 'none'; onConfirm(); });
     modal.style.display = 'flex';
-}
-
-function desbloquearTerminal(ip) {
-    // La función se llama desde el botón Confirmar dentro del card (flujo antiguo si queda).
-    // Redirigir al modal.
-    mostrarModalDesbloqueo(ip);
 }
 
 function mostrarModalDesbloqueo(ip, nombrePc) {
@@ -292,6 +399,10 @@ function mostrarModalDesbloqueo(ip, nombrePc) {
     otrosPanel.style.display = 'none';
     otrosTxt.value     = '';
     errorEl.textContent = '';
+    errorEl.style.color = '#ef4444';
+    document.getElementById('btn-desbloqueo-confirmar').disabled = false;
+    document.getElementById('btn-desbloqueo-cancelar').disabled  = false;
+    _pendingUnlockModal = null;
     labelPc.textContent = nombrePc ? `Terminal: ${nombrePc}` : `Terminal: ${ip}`;
 
     selectAct.onchange = () => {
@@ -300,18 +411,9 @@ function mostrarModalDesbloqueo(ip, nombrePc) {
         errorEl.textContent = '';
     };
 
-    const btnCancelar  = document.getElementById('btn-desbloqueo-cancelar');
-    const btnConfirmar = document.getElementById('btn-desbloqueo-confirmar');
+    _rebindBtn('btn-desbloqueo-cancelar', () => { modal.style.display = 'none'; });
 
-    // Reemplazar listeners para evitar duplicados
-    const newBtnC = btnCancelar.cloneNode(true);
-    const newBtnX = btnConfirmar.cloneNode(true);
-    btnCancelar.parentNode.replaceChild(newBtnC, btnCancelar);
-    btnConfirmar.parentNode.replaceChild(newBtnX, btnConfirmar);
-
-    newBtnC.addEventListener('click', () => { modal.style.display = 'none'; });
-
-    newBtnX.addEventListener('click', () => {
+    _rebindBtn('btn-desbloqueo-confirmar', () => {
         const dni = inputDni.value.trim();
         if (!dni || !/^\d{8}$/.test(dni)) {
             errorEl.textContent = 'Ingrese un DNI válido (8 dígitos)';
@@ -334,9 +436,25 @@ function mostrarModalDesbloqueo(ip, nombrePc) {
             }
             razon = `Otros: ${esp}`;
         }
-        modal.style.display = 'none';
+        // Mostrar estado de espera dentro del modal antes de cerrar
+        errorEl.style.color = '#60a5fa';
+        errorEl.textContent = '⏳ Verificando en la UNASAM...';
+        document.getElementById('btn-desbloqueo-confirmar').disabled = true;
+        document.getElementById('btn-desbloqueo-cancelar').disabled  = true;
+
         addLog('activity', `🔓 Desbloquear terminal: ${ip} | DNI: ${dni} | Actividad: ${razon}`);
-        wsEnviar({ tipo: 'desbloquear_terminal', ip, codigo: dni, razon_uso: razon });
+        wsEnviar({ tipo: 'desbloquear_terminal', ip, dni, razon_uso: razon });
+
+        // El modal se cierra al recibir ok/error desde el WS (ver onmessage)
+        // Guardamos contexto para poder cerrarlo desde el handler
+        _pendingUnlockModal = modal;
+        setTimeout(() => {
+            // Seguridad: cerrar si no hubo respuesta en 15s
+            if (_pendingUnlockModal) {
+                _pendingUnlockModal = null;
+                modal.style.display = 'none';
+            }
+        }, 15000);
     });
 
     // Enter en input DNI pasa al select
@@ -453,7 +571,7 @@ async function apagarPc(ip, sesionId = null, nombrePc = null, nombreAlumno = nul
 function renderTerminales(terminales, sesiones = []) {
     const grid = document.getElementById('terminalesGrid');
     if (!terminales.length) {
-        grid.innerHTML = '<p class="empty-msg" style="grid-column:1/-1">No hay terminales registradas</p>';
+        grid.innerHTML = '<p class="empty-msg" style="grid-column:1/-1">No hay equipos registrados</p>';
         return;
     }
 
@@ -472,47 +590,35 @@ function renderTerminales(terminales, sesiones = []) {
 
         if (!online) {
             botonesPrimarios = `
-                <button class="btn-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:4px;padding:8px;cursor:pointer;font-weight:bold">⏻ Apagar PC</button>
+                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')">⏻ Apagar PC</button>
             `;
         } else if (faltaDesbloqueo) {
             botonesPrimarios = `
-                <button class="btn-desbloquear" style="width:100%;background:#10b981;color:#fff;border:none;border-radius:4px;padding:10px;cursor:pointer;font-weight:bold;margin-bottom:6px" onclick="mostrarModalDesbloqueo('${esc(t.ip)}', '${pcNombre}')">🔓 Desbloquear</button>
-                <button class="btn-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:4px;padding:8px;cursor:pointer;font-weight:bold">⏻ Apagar PC</button>
+                <button class="btn-card-desbloquear" onclick="mostrarModalDesbloqueo('${esc(t.ip)}', '${pcNombre}')">🔓 Desbloquear</button>
+                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')">⏻ Apagar PC</button>
             `;
         } else {
             botonesPrimarios = `
-                <button class="btn-bloquear" style="width:100%;background:#ef4444;color:#fff;border:none;border-radius:4px;padding:10px;cursor:pointer;font-weight:bold;margin-bottom:6px" onclick="bloquearTerminal('${esc(t.ip)}', '${pcNombre}', '${alumnoNombre}')">🔒 Bloquear</button>
-                <button class="btn-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:4px;padding:8px;cursor:pointer;font-weight:bold">⏻ Apagar PC</button>
+                <button class="btn-card-bloquear" onclick="bloquearTerminal('${esc(t.ip)}', '${pcNombre}', '${alumnoNombre}')">🔒 Bloquear</button>
+                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')">⏻ Apagar PC</button>
             `;
         }
 
         return `
             <div class="terminal-card ${t.estado}">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
-                    <div>
-                        <div class="terminal-nombre">${escapeHtml(t.nombre || t.ip)}</div>
-                        <div class="terminal-estado estado-${t.estado}" style="font-size:12px;margin-top:4px">${estadoLabel(t.estado)}</div>
-                    </div>
+                <div class="tc-header">
+                    <div class="terminal-nombre">${escapeHtml(t.nombre || t.ip)}</div>
+                    <div class="terminal-estado estado-${t.estado}">${estadoLabel(t.estado)}</div>
                 </div>
-                <div style="border-top:1px solid #f3f4f6;padding-top:8px;margin-bottom:10px">
-                    <div class="terminal-ip" style="font-size:13px;color:#4b5563;margin-bottom:4px"><strong>IP:</strong> ${escapeHtml(t.ip)}</div>
-                    <div style="font-size:13px;font-weight:bold;color:${sesion ? '#22d3ee' : '#9ca3af'};margin-top:2px">${sesion ? escapeHtml(sesion.alumno_nombre) : 'Disponible'}</div>
+                <div class="tc-info">
+                    <div class="terminal-ip"><strong>IP:</strong> ${escapeHtml(t.ip)}</div>
+                    <div class="tc-alumno ${sesion ? 'tc-alumno-activo' : ''}">${sesion ? escapeHtml(sesion.alumno_nombre) : 'Disponible'}</div>
                 </div>
-                <div style="display:flex;flex-direction:column">
+                <div class="tc-acciones">
                     ${botonesPrimarios}
                 </div>
             </div>`;
     }).join('');
-}
-
-function mostrarInputDesbloqueo(ip, inputId) {
-    const inputDiv = document.getElementById(`unlock-input-${inputId}`);
-    if (inputDiv) {
-        inputDiv.style.display = inputDiv.style.display === 'none' ? 'block' : 'none';
-        if (inputDiv.style.display === 'block') {
-            document.getElementById(inputId)?.focus();
-        }
-    }
 }
 
 function renderSesiones(sesiones) {
@@ -557,89 +663,61 @@ function renderSesiones(sesiones) {
             <td>${estadoBadge}</td>
         </tr>`;
     }).join('');
+    _actualizarFlechas();
 }
 
-function exportarExcel() {
-    addLog('activity', '📊 Descargando historial Excel...');
-    const url = `${API_BASE}/admin/exportar-excel`;
-    const a   = document.createElement('a');
-    a.href    = url;
-    a.setAttribute('download', '');
-    // Incluir token en header no es posible con <a>, usamos fetch + blob
+function _descargarArchivo(url, logMsg, fallbackName) {
+    addLog('activity', logMsg);
     fetch(url, { headers: authHeaders() })
         .then(r => {
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             const disp = r.headers.get('Content-Disposition') || '';
             const match = disp.match(/filename=([^;]+)/);
-            const filename = match ? match[1] : 'historial.xlsx';
+            const filename = match ? match[1] : fallbackName;
             return r.blob().then(b => ({ b, filename }));
         })
         .then(({ b, filename }) => {
-            const url2 = URL.createObjectURL(b);
-            const link  = document.createElement('a');
-            link.href   = url2;
+            const blobUrl = URL.createObjectURL(b);
+            const link = document.createElement('a');
+            link.href = blobUrl;
             link.download = filename;
             link.click();
-            URL.revokeObjectURL(url2);
-            addLog('activity', '✅ Excel descargado correctamente');
+            URL.revokeObjectURL(blobUrl);
+            addLog('activity', `✅ ${fallbackName.split('.').pop().toUpperCase()} descargado correctamente`);
         })
         .catch(e => {
-            addLog('error', `❌ Error al exportar Excel: ${e.message}`);
-            mostrarNotificacion('Error al exportar Excel', 'error');
+            addLog('error', `❌ Error al exportar: ${e.message}`);
+            mostrarNotificacion('Error al exportar archivo', 'error');
         });
 }
 
+function exportarExcel() {
+    _descargarArchivo(`${API_BASE}/admin/exportar-excel`, '📊 Descargando historial Excel...', 'historial.xlsx');
+}
+
 function exportarPdf() {
-    addLog('activity', '📄 Descargando historial PDF...');
-    fetch(`${API_BASE}/admin/exportar-pdf`, { headers: authHeaders() })
-        .then(r => {
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            const disp = r.headers.get('Content-Disposition') || '';
-            const match = disp.match(/filename=([^;]+)/);
-            const filename = match ? match[1] : 'historial.pdf';
-            return r.blob().then(b => ({ b, filename }));
-        })
-        .then(({ b, filename }) => {
-            const url = URL.createObjectURL(b);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = filename;
-            link.click();
-            URL.revokeObjectURL(url);
-            addLog('activity', '✅ PDF descargado correctamente');
-        })
-        .catch(e => {
-            addLog('error', `❌ Error al exportar PDF: ${e.message}`);
-            mostrarNotificacion('Error al exportar PDF', 'error');
-        });
+    _descargarArchivo(`${API_BASE}/admin/exportar-pdf`, '📄 Descargando historial PDF...', 'historial.pdf');
+}
+
+// ── UI helpers ─────────────────────────────────────────────────────
+
+// Reemplaza un botón por un clon limpio y le asigna el nuevo handler.
+// Evita acumulación de listeners duplicados al reusar modales.
+function _rebindBtn(id, handler) {
+    const btn = document.getElementById(id);
+    const clone = btn.cloneNode(true);
+    btn.parentNode.replaceChild(clone, btn);
+    clone.addEventListener('click', handler);
+    return clone;
 }
 
 function mostrarConfirmacion(mensaje, onConfirm) {
     const modal = document.getElementById('modal-advertencia');
     document.getElementById('modal-mensaje').textContent = mensaje;
-    
-    const btnConfirm = document.getElementById('btn-modal-confirmar');
-    const btnCancel = document.getElementById('btn-modal-cancelar');
-    
-    const newBtnConfirm = btnConfirm.cloneNode(true);
-    btnConfirm.parentNode.replaceChild(newBtnConfirm, btnConfirm);
-    
-    const newBtnCancel = btnCancel.cloneNode(true);
-    btnCancel.parentNode.replaceChild(newBtnCancel, btnCancel);
-    
-    newBtnConfirm.addEventListener('click', () => {
-        modal.style.display = 'none';
-        onConfirm();
-    });
-    
-    newBtnCancel.addEventListener('click', () => {
-        modal.style.display = 'none';
-    });
-    
+    _rebindBtn('btn-modal-confirmar', () => { modal.style.display = 'none'; onConfirm(); });
+    _rebindBtn('btn-modal-cancelar',  () => { modal.style.display = 'none'; });
     modal.style.display = 'flex';
 }
-
-// ── UI helpers ─────────────────────────────────────────────────────
 
 function estadoLabel(estado) {
     return { activo: '● Activo', bloqueado: '● Bloqueado', offline: '○ Offline' }[estado] ?? estado;
