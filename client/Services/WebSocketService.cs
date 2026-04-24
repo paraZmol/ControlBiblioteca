@@ -1,6 +1,7 @@
 using System;
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -108,10 +109,7 @@ namespace ControlBiblioteca.Client.Services
             try
             {
                 if (EstaConectado)
-                {
-                    var msg = "{\"type\":\"error_report\", \"message\":\"" + detalle.Replace("\"", "'").Replace("\\", "/") + "\"}";
-                    await EnviarAsync(msg);
-                }
+                    await EnviarAsync(JsonSerializer.Serialize(new { tipo = "error_report", message = detalle }));
             }
             catch { /* evitar bucles infinitos de error */ }
         }

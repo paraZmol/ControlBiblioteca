@@ -5,9 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
-from models import Alumno, Terminal, Sesion, Usuario, ahora_lima
-import pytz
-import socket
+from models import Alumno, Terminal, Sesion, Usuario
 from auth_service import (
     verificar_password, hashear_password, crear_token, obtener_usuario_actual
 )
@@ -15,16 +13,6 @@ from core.websocket_manager import manager
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api")
-
-
-def _obtener_ip_local() -> str:
-    """Detecta la IP de la interfaz de red local (no 127.0.0.1)."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-    except Exception:
-        return "127.0.0.1"
 
 
 # ── Esquemas Pydantic ──────────────────────────────────────────────
@@ -56,12 +44,6 @@ class UsuarioCrear(BaseModel):
 
 
 # ── Server Info ────────────────────────────────────────────────────
-
-@router.get("/server-info")
-async def server_info():
-    """Retorna la IP real de la interfaz de red del servidor."""
-    return {"ip": _obtener_ip_local()}
-
 
 # ── Auth ────────────────────────────────────────────────────────────
 
@@ -162,10 +144,10 @@ async def registrar_terminal(
     terminal = result.scalar_one_or_none()
     if terminal:
         terminal.nombre = datos.nombre
-        terminal.ultima_conexion = ahora_lima()
+        terminal.ultima_conexion = datetime.now()
         terminal.estado = "bloqueado"
     else:
-        terminal = Terminal(nombre=datos.nombre, ip=datos.ip, estado="bloqueado", ultima_conexion=ahora_lima())
+        terminal = Terminal(nombre=datos.nombre, ip=datos.ip, estado="bloqueado", ultima_conexion=datetime.now())
         db.add(terminal)
     await db.flush()
     return {"id": terminal.id, "nombre": terminal.nombre}
@@ -199,7 +181,7 @@ async def iniciar_sesion(
         dni=alumno.codigo,
         facultad=alumno.facultad,
         escuela=alumno.escuela,
-        inicio=ahora_lima()
+        inicio=datetime.now()
     )
     terminal.estado = "activo"
     db.add(sesion)
@@ -235,42 +217,106 @@ async def cerrar_sesion(
     return {"mensaje": "Sesión cerrada", "duracion_min": duracion_min, "hora_salida": ahora.strftime("%I:%M:%S %p")}
 
 
+# Mapeo columna → campos ORM para ORDER BY.
+# "escuela" y "estudiante" usan Alumno para agrupación real con JOIN.
+_SORT_MAP = {
+    "estudiante": (Alumno.apellidos, Alumno.nombres),
+    "codigo":     (Alumno.codigo,),
+    "dni":        (Alumno.dni,),
+    "facultad":   (Sesion.facultad,),
+    "escuela":    (Alumno.escuela, Alumno.apellidos, Alumno.nombres),
+    "actividad":  (Sesion.razon_uso,),
+    "fecha":      (Sesion.inicio,),
+    "inicio":     (Sesion.inicio,),
+}
+
+
+def _aplicar_filtro_fecha(q, periodo: str | None, fecha_inicio: str | None, fecha_fin: str | None):
+    """Aplica filtro de fecha sobre Sesion.fecha_uso (cadena YYYY-MM-DD en SQLite)."""
+    from sqlalchemy import func, cast, String
+    from datetime import date
+
+    hoy = date.today()
+
+    if periodo == "dia" or periodo is None:
+        # Por defecto: sólo hoy
+        q = q.where(cast(Sesion.fecha_uso, String).like(hoy.strftime("%Y-%m-%d") + "%"))
+    elif periodo == "mes":
+        prefijo = hoy.strftime("%Y-%m")
+        q = q.where(cast(Sesion.fecha_uso, String).like(prefijo + "%"))
+    elif periodo == "anio":
+        prefijo = hoy.strftime("%Y")
+        q = q.where(cast(Sesion.fecha_uso, String).like(prefijo + "%"))
+    elif periodo == "rango" and fecha_inicio and fecha_fin:
+        q = q.where(
+            cast(Sesion.fecha_uso, String) >= fecha_inicio,
+            cast(Sesion.fecha_uso, String) <= fecha_fin,
+        )
+    # Si periodo == "todo" no aplica filtro
+    return q
+
+
 @router.get("/sesiones/activas")
 async def sesiones_activas(
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual)
+    _: Usuario = Depends(obtener_usuario_actual),
+    search:       str | None = None,
+    actividad:    str | None = None,
+    sort_by:      str = "fecha",
+    order:        str = "desc",
+    periodo:      str | None = None,   # dia | mes | anio | rango | todo
+    fecha_inicio: str | None = None,   # YYYY-MM-DD (solo con periodo=rango)
+    fecha_fin:    str | None = None,   # YYYY-MM-DD (solo con periodo=rango)
 ):
-    """Historial completo de sesiones (activas e inactivas), más recientes primero."""
-    result = await db.execute(
-        select(Sesion, Alumno, Terminal)
-        .join(Alumno)
-        .join(Terminal)
-        .order_by(Sesion.inicio.desc())
-    )
+    """Historial con filtros de búsqueda, actividad, fecha y ordenamiento."""
+    from sqlalchemy import or_
+
+    q = select(Sesion, Alumno, Terminal).join(Alumno).join(Terminal)
+
+    # ── Filtro temporal ───────────────────────────────────────────────
+    q = _aplicar_filtro_fecha(q, periodo, fecha_inicio, fecha_fin)
+
+    # ── Filtro de texto ───────────────────────────────────────────────
+    if search:
+        like = f"%{search}%"
+        q = q.where(or_(
+            (Alumno.nombres + " " + Alumno.apellidos).ilike(like),
+            Alumno.apellidos.ilike(like),
+            Alumno.dni.ilike(like),
+            Alumno.codigo.ilike(like),
+        ))
+    if actividad:
+        q = q.where(Sesion.razon_uso.ilike(f"%{actividad}%"))
+
+    # ── Ordenamiento ──────────────────────────────────────────────────
+    cols = _SORT_MAP.get(sort_by.lower(), (Sesion.inicio,))
+    q = q.order_by(*cols) if order.lower() == "asc" else q.order_by(*[c.desc() for c in cols])
+
+    result = await db.execute(q)
     rows = []
     for s, a, t in result.all():
-        inicio_naive  = s.inicio.replace(tzinfo=None)     if s.inicio     else None
-        salida_naive  = (s.hora_salida or s.fin)
-        salida_naive  = salida_naive.replace(tzinfo=None)  if salida_naive else None
-        duracion_min  = int((salida_naive - inicio_naive).total_seconds() / 60) if (inicio_naive and salida_naive) else None
+        inicio_naive = s.inicio.replace(tzinfo=None)     if s.inicio     else None
+        salida_naive = (s.hora_salida or s.fin)
+        salida_naive = salida_naive.replace(tzinfo=None)  if salida_naive else None
+        duracion_min = int((salida_naive - inicio_naive).total_seconds() / 60) if (inicio_naive and salida_naive) else None
         rows.append({
-            "id": s.id,
-            "inicio": s.inicio,
-            "hora_salida": s.hora_salida,
+            "id":              s.id,
+            "inicio":          s.inicio,
+            "hora_salida":     s.hora_salida,
             "hora_salida_fmt": salida_naive.strftime("%I:%M:%S %p") if salida_naive else None,
-            "fin": s.fin,
-            "fecha_uso": s.fecha_uso or (s.inicio.date() if s.inicio else None),
-            "alumno_codigo": a.codigo,          # código de matrícula ej: 161.2502.614
-            "alumno_dni": a.dni or s.dni or "",  # DNI del estudiante ej: 71926257
-            "alumno_nombre": f"{a.nombres} {a.apellidos}",
-            "dni": s.dni or a.dni or a.codigo,
-            "facultad": s.facultad or "",
-            "escuela": s.escuela or a.escuela or "",
+            "fin":             s.fin,
+            "fecha_uso":       s.fecha_uso or (s.inicio.date() if s.inicio else None),
+            "alumno_codigo":   a.codigo,
+            "alumno_dni":      a.dni or s.dni or "",
+            "alumno_nombre":   f"{a.nombres} {a.apellidos}",
+            "dni":             s.dni or a.dni or a.codigo,
+            "facultad":        s.facultad or "",
+            "escuela":         s.escuela or a.escuela or "",
             "terminal_nombre": t.nombre,
-            "terminal_ip": t.ip,
-            "razon_uso": s.razon_uso or "",
-            "activa": s.activa,
-            "duracion_min": duracion_min,
+            "terminal_ip":     t.ip,
+            "razon_uso":       s.razon_uso or "",
+            "activa":          s.activa,
+            "duracion_min":    duracion_min,
         })
     return rows
 
@@ -298,7 +344,7 @@ async def exportar_excel(
     ws = wb.active
     ws.title = "Historial de Sesiones"
 
-    headers = ["Estudiante", "Código", "DNI", "Escuela", "Facultad", "Actividad", "Terminal", "Inicio", "Salida", "Fecha", "Duración (min)"]
+    headers = ["Estudiante", "Código", "DNI", "Escuela", "Facultad", "Actividad", "Equipo/PC", "Inicio", "Salida", "Fecha", "Duración (min)"]
     header_fill = PatternFill("solid", fgColor="1E40AF")
     header_font = Font(color="FFFFFF", bold=True)
     for col, h in enumerate(headers, 1):
@@ -345,10 +391,18 @@ async def exportar_excel(
 @router.get("/admin/exportar-pdf")
 async def exportar_pdf(
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual)
+    _: Usuario = Depends(obtener_usuario_actual),
+    search:       str | None = None,
+    actividad:    str | None = None,
+    sort_by:      str = "fecha",
+    order:        str = "desc",
+    periodo:      str | None = None,
+    fecha_inicio: str | None = None,
+    fecha_fin:    str | None = None,
 ):
-    """Genera y descarga un PDF con el historial completo de sesiones."""
+    """Genera PDF con estadísticas rápidas + tabla filtrada/ordenada."""
     import io
+    from collections import Counter
     from fastapi.responses import StreamingResponse
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
@@ -356,49 +410,112 @@ async def exportar_pdf(
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER
+    from sqlalchemy import or_
 
-    result = await db.execute(
-        select(Sesion, Alumno, Terminal)
-        .join(Alumno)
-        .join(Terminal)
-        .order_by(Sesion.inicio.desc())
-    )
+    q = select(Sesion, Alumno, Terminal).join(Alumno).join(Terminal)
+    q = _aplicar_filtro_fecha(q, periodo, fecha_inicio, fecha_fin)
+    if search:
+        like = f"%{search}%"
+        q = q.where(or_(
+            (Alumno.nombres + " " + Alumno.apellidos).ilike(like),
+            Alumno.dni.ilike(like),
+            Alumno.codigo.ilike(like),
+        ))
+    if actividad:
+        q = q.where(Sesion.razon_uso.ilike(f"%{actividad}%"))
+
+    cols = _SORT_MAP.get(sort_by.lower(), (Sesion.inicio,))
+    q = q.order_by(*cols) if order.lower() == "asc" else q.order_by(*[c.desc() for c in cols])
+
+    result = await db.execute(q)
     rows = result.all()
 
+    # ── Calcular estadísticas ─────────────────────────────────────────
+    alumnos_unicos  = len({a.id for _, a, _ in rows})
+    razones         = [s.razon_uso for s, _, _ in rows if s.razon_uso]
+    actividad_top   = Counter(razones).most_common(1)[0][0] if razones else "—"
+    total_min       = 0
+    for s, _, _ in rows:
+        ini = s.inicio.replace(tzinfo=None)       if s.inicio    else None
+        sal = (s.hora_salida or s.fin)
+        sal = sal.replace(tzinfo=None)             if sal         else None
+        if ini and sal:
+            total_min += int((sal - ini).total_seconds() / 60)
+    horas, mins = divmod(total_min, 60)
+
+    # ── Estilos ───────────────────────────────────────────────────────
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
                             leftMargin=1*cm, rightMargin=1*cm,
                             topMargin=1.5*cm, bottomMargin=1.5*cm)
-
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("titulo", parent=styles["Title"],
-                                 fontSize=14, textColor=colors.HexColor("#1E40AF"),
-                                 alignment=TA_CENTER)
-    sub_style = ParagraphStyle("sub", parent=styles["Normal"],
-                               fontSize=8, textColor=colors.grey, alignment=TA_CENTER)
+    styles  = getSampleStyleSheet()
+    c_azul  = colors.HexColor("#1E40AF")
+    c_claro = colors.HexColor("#EFF6FF")
+    title_st = ParagraphStyle("titulo", parent=styles["Title"],
+                              fontSize=14, textColor=c_azul, alignment=TA_CENTER)
+    sub_st   = ParagraphStyle("sub", parent=styles["Normal"],
+                              fontSize=8, textColor=colors.grey, alignment=TA_CENTER)
+    _periodos = {"dia": "Hoy", "mes": "Este mes", "anio": "Este año",
+                 "rango": f"{fecha_inicio} → {fecha_fin}", "todo": "Todo el historial"}
+    filtro_txt = [_periodos.get(periodo or "dia", "Hoy")]
+    if search:    filtro_txt.append(f"Búsqueda: «{search}»")
+    if actividad: filtro_txt.append(f"Actividad: «{actividad}»")
+    filtro_desc = " | ".join(filtro_txt)
 
     elementos = [
-        Paragraph("Historial de Sesiones — Biblioteca UNASAM", title_style),
-        Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %I:%M:%S %p')}", sub_style),
-        Spacer(1, 0.4*cm),
+        Paragraph("Historial de Sesiones — Biblioteca UNASAM", title_st),
+        Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %I:%M:%S %p')}  |  Filtro: {filtro_desc}", sub_st),
+        Spacer(1, 0.3*cm),
     ]
 
-    headers = ["Estudiante", "Código", "DNI", "Escuela", "Actividad", "Terminal", "Inicio", "Salida", "Fecha", "Min"]
-    col_widths = [5*cm, 2.8*cm, 2.2*cm, 4*cm, 3.5*cm, 2.2*cm, 2.2*cm, 2.2*cm, 2.2*cm, 1.2*cm]
+    # ── Cuadro de estadísticas ────────────────────────────────────────
+    stats_data = [
+        ["📋 Total sesiones", "👥 Alumnos únicos", "⭐ Actividad frecuente", "⏱ Tiempo total de uso"],
+        [str(len(rows)), str(alumnos_unicos), actividad_top, f"{horas}h {mins}min"],
+    ]
+    stats_table = Table(stats_data, colWidths=[6*cm, 5*cm, 9*cm, 5.5*cm])
+    stats_table.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, 0),  c_azul),
+        ("TEXTCOLOR",     (0, 0), (-1, 0),  colors.white),
+        ("FONTNAME",      (0, 0), (-1, 0),  "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, 0),  8),
+        ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME",      (0, 1), (-1, 1),  "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 1), (-1, 1),  12),
+        ("TEXTCOLOR",     (0, 1), (-1, 1),  c_azul),
+        ("BACKGROUND",    (0, 1), (-1, 1),  c_claro),
+        ("BOX",           (0, 0), (-1, -1), 1,   c_azul),
+        ("INNERGRID",     (0, 0), (-1, -1), 0.5, colors.HexColor("#93C5FD")),
+        ("TOPPADDING",    (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elementos += [stats_table, Spacer(1, 0.4*cm)]
 
-    data = [headers]
+    # ── Tabla principal ───────────────────────────────────────────────
+    # Estilos de párrafo para word-wrap en celdas
+    cell_st = ParagraphStyle("cell", parent=styles["Normal"],
+                             fontSize=6.5, leading=9, wordWrap="LTR")
+    hdr_st  = ParagraphStyle("hdr",  parent=styles["Normal"],
+                             fontSize=7, fontName="Helvetica-Bold",
+                             textColor=colors.white, alignment=TA_CENTER, leading=9)
+
+    headers_p  = [Paragraph(h, hdr_st) for h in
+                  ["Estudiante", "Código", "DNI", "Escuela", "Actividad", "Equipo/PC", "Inicio", "Salida", "Fecha", "Min"]]
+    # Widths: más espacio a Estudiante y Escuela; DNI/Código/Equipo más estrecho
+    col_widths = [5.5*cm, 2.5*cm, 2.0*cm, 4.5*cm, 3.2*cm, 2.0*cm, 2.0*cm, 2.0*cm, 2.0*cm, 1.3*cm]
+    data = [headers_p]
     for s, a, t in rows:
-        inicio_naive = s.inicio.replace(tzinfo=None) if s.inicio else None
+        inicio_naive = s.inicio.replace(tzinfo=None)    if s.inicio    else None
         fin_naive    = (s.hora_salida or s.fin)
-        fin_naive    = fin_naive.replace(tzinfo=None) if fin_naive else None
+        fin_naive    = fin_naive.replace(tzinfo=None)   if fin_naive   else None
         duracion     = str(int((fin_naive - inicio_naive).total_seconds() / 60)) if (inicio_naive and fin_naive) else "—"
         data.append([
-            f"{a.nombres} {a.apellidos}",
-            a.codigo,
-            a.dni or s.dni or "",
-            s.escuela or a.escuela or "",
-            s.razon_uso or "—",
-            t.nombre,
+            Paragraph(f"{a.nombres} {a.apellidos}", cell_st),
+            Paragraph(a.codigo or "", cell_st),
+            Paragraph(a.dni or s.dni or "", cell_st),
+            Paragraph(s.escuela or a.escuela or "", cell_st),
+            Paragraph(s.razon_uso or "—", cell_st),
+            Paragraph(t.nombre or "", cell_st),
             inicio_naive.strftime("%I:%M %p") if inicio_naive else "",
             fin_naive.strftime("%I:%M %p")    if fin_naive    else "En curso",
             inicio_naive.strftime("%d/%m/%Y") if inicio_naive else "",
@@ -407,22 +524,22 @@ async def exportar_pdf(
 
     table = Table(data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
-        # Cabecera
-        ("BACKGROUND",    (0, 0), (-1, 0),  colors.HexColor("#1E40AF")),
+        ("BACKGROUND",    (0, 0), (-1, 0),  c_azul),
         ("TEXTCOLOR",     (0, 0), (-1, 0),  colors.white),
         ("FONTNAME",      (0, 0), (-1, 0),  "Helvetica-Bold"),
         ("FONTSIZE",      (0, 0), (-1, 0),  7),
         ("ALIGN",         (0, 0), (-1, 0),  "CENTER"),
         ("BOTTOMPADDING", (0, 0), (-1, 0),  5),
         ("TOPPADDING",    (0, 0), (-1, 0),  5),
-        # Filas de datos
         ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
         ("FONTSIZE",      (0, 1), (-1, -1), 6.5),
-        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, colors.HexColor("#EFF6FF")]),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, c_claro]),
         ("GRID",          (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
         ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING",    (0, 1), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 1), (-1, -1), 3),
+        ("TOPPADDING",    (0, 1), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
     ]))
     elementos.append(table)
 
@@ -430,8 +547,7 @@ async def exportar_pdf(
     buf.seek(0)
     filename = f"historial_sesiones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     return StreamingResponse(
-        buf,
-        media_type="application/pdf",
+        buf, media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 

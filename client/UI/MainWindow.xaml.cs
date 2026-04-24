@@ -59,6 +59,7 @@ namespace ControlBiblioteca.Client.UI
 
             Loaded += (_, _) =>
             {
+                TxtNombreEquipo.Text = $"Equipo: {hostname}";
                 LogDebug(cfgDiag);
                 LogDebug($"IP local  : {localIp}");
                 LogDebug($"Hostname  : {hostname}");
