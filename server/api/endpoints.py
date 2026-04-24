@@ -211,39 +211,28 @@ async def iniciar_sesion(
 async def cerrar_sesion(
     sesion_id: int,
     motivo: str = "manual",
-    hora_salida: str = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Cerrar una sesión activa."""
+    """Cerrar una sesión activa usando exclusivamente el reloj del servidor."""
     result = await db.execute(select(Sesion).where(Sesion.id == sesion_id, Sesion.activa == True))
     sesion = result.scalar_one_or_none()
     if not sesion:
         raise HTTPException(status_code=404, detail="Sesión no encontrada o ya cerrada")
 
-    # Usar hora_salida del administrador si se proporciona, sino hora del servidor
-    if hora_salida:
-        try:
-            # Intentar parsear el formato locale del navegador (ej: "21/4/2026, 15:34:45" o "2026-04-21T...")
-            import dateutil.parser
-            sesion.hora_salida = dateutil.parser.parse(hora_salida, dayfirst=True)
-        except:
-            sesion.hora_salida = ahora_lima()
-    else:
-        sesion.hora_salida = ahora_lima()
-    
-    sesion.fin = sesion.hora_salida # Sincronizar fin con hora_salida
-    sesion.activa = False
+    ahora = datetime.now().replace(tzinfo=None)
+    sesion.hora_salida = ahora
+    sesion.fin         = ahora
+    sesion.activa      = False
     sesion.motivo_cierre = motivo
 
-    # Bloquear terminal
     await db.execute(
         update(Terminal).where(Terminal.id == sesion.terminal_id).values(estado="bloqueado")
     )
-    # Asegurar que ambos sean offset-naive para el cálculo
-    inicio_naive = sesion.inicio.replace(tzinfo=None) if sesion.inicio else ahora_lima().replace(tzinfo=None)
-    fin_naive = sesion.fin.replace(tzinfo=None) if sesion.fin else ahora_lima().replace(tzinfo=None)
-    
-    return {"mensaje": "Sesión cerrada", "duracion_min": int((fin_naive - inicio_naive).total_seconds() / 60)}
+    inicio_naive = sesion.inicio.replace(tzinfo=None) if sesion.inicio else ahora
+    duracion_min = int((ahora - inicio_naive).total_seconds() / 60)
+
+    await db.commit()
+    return {"mensaje": "Sesión cerrada", "duracion_min": duracion_min, "hora_salida": ahora.strftime("%I:%M:%S %p")}
 
 
 @router.get("/sesiones/activas")
@@ -251,31 +240,200 @@ async def sesiones_activas(
     db: AsyncSession = Depends(get_db),
     _: Usuario = Depends(obtener_usuario_actual)
 ):
-    """Listar sesiones activas (para dashboard admin)."""
+    """Historial completo de sesiones (activas e inactivas), más recientes primero."""
     result = await db.execute(
         select(Sesion, Alumno, Terminal)
         .join(Alumno)
         .join(Terminal)
-        .where(Sesion.activa == True)
         .order_by(Sesion.inicio.desc())
     )
-    return [
-        {
-            "id": s.id, "inicio": s.inicio,
+    rows = []
+    for s, a, t in result.all():
+        inicio_naive  = s.inicio.replace(tzinfo=None)     if s.inicio     else None
+        salida_naive  = (s.hora_salida or s.fin)
+        salida_naive  = salida_naive.replace(tzinfo=None)  if salida_naive else None
+        duracion_min  = int((salida_naive - inicio_naive).total_seconds() / 60) if (inicio_naive and salida_naive) else None
+        rows.append({
+            "id": s.id,
+            "inicio": s.inicio,
+            "hora_salida": s.hora_salida,
+            "hora_salida_fmt": salida_naive.strftime("%I:%M:%S %p") if salida_naive else None,
             "fin": s.fin,
-            "fecha_uso": s.fecha_uso or s.inicio.date() if s.inicio else None,
-            "alumno_codigo": a.codigo,
+            "fecha_uso": s.fecha_uso or (s.inicio.date() if s.inicio else None),
+            "alumno_codigo": a.codigo,          # código de matrícula ej: 161.2502.614
+            "alumno_dni": a.dni or s.dni or "",  # DNI del estudiante ej: 71926257
             "alumno_nombre": f"{a.nombres} {a.apellidos}",
-            "dni": s.dni or a.codigo,
+            "dni": s.dni or a.dni or a.codigo,
             "facultad": s.facultad or "",
             "escuela": s.escuela or a.escuela or "",
             "terminal_nombre": t.nombre,
             "terminal_ip": t.ip,
             "razon_uso": s.razon_uso or "",
-            "hora_salida": s.hora_salida
-        }
-        for s, a, t in result.all()
+            "activa": s.activa,
+            "duracion_min": duracion_min,
+        })
+    return rows
+
+
+@router.get("/admin/exportar-excel")
+async def exportar_excel(
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual)
+):
+    """Genera y descarga un archivo Excel con el historial completo de sesiones."""
+    import io
+    from fastapi.responses import StreamingResponse
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    result = await db.execute(
+        select(Sesion, Alumno, Terminal)
+        .join(Alumno)
+        .join(Terminal)
+        .order_by(Sesion.inicio.desc())
+    )
+    rows = result.all()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Historial de Sesiones"
+
+    headers = ["Estudiante", "Código", "DNI", "Escuela", "Facultad", "Actividad", "Terminal", "Inicio", "Salida", "Fecha", "Duración (min)"]
+    header_fill = PatternFill("solid", fgColor="1E40AF")
+    header_font = Font(color="FFFFFF", bold=True)
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    for row_idx, (s, a, t) in enumerate(rows, 2):
+        inicio_naive = s.inicio.replace(tzinfo=None) if s.inicio else None
+        fin_naive    = (s.hora_salida or s.fin)
+        fin_naive    = fin_naive.replace(tzinfo=None) if fin_naive else None
+        duracion     = int((fin_naive - inicio_naive).total_seconds() / 60) if (inicio_naive and fin_naive) else ""
+        ws.append([
+            f"{a.nombres} {a.apellidos}",
+            a.codigo,                          # código de matrícula ej: 161.2502.614
+            a.dni or s.dni or a.codigo,        # DNI del estudiante ej: 71926257
+            s.escuela or a.escuela or "",
+            s.facultad or "",
+            s.razon_uso or "",
+            t.nombre,
+            inicio_naive.strftime("%I:%M:%S %p") if inicio_naive else "",
+            fin_naive.strftime("%I:%M:%S %p")    if fin_naive    else "En curso",
+            inicio_naive.strftime("%d/%m/%Y")    if inicio_naive else "",
+            duracion,
+        ])
+
+    # Ajustar ancho de columnas
+    for col in ws.columns:
+        max_len = max((len(str(c.value or "")) for c in col), default=0)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"historial_sesiones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.get("/admin/exportar-pdf")
+async def exportar_pdf(
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual)
+):
+    """Genera y descarga un PDF con el historial completo de sesiones."""
+    import io
+    from fastapi.responses import StreamingResponse
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+
+    result = await db.execute(
+        select(Sesion, Alumno, Terminal)
+        .join(Alumno)
+        .join(Terminal)
+        .order_by(Sesion.inicio.desc())
+    )
+    rows = result.all()
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                            leftMargin=1*cm, rightMargin=1*cm,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("titulo", parent=styles["Title"],
+                                 fontSize=14, textColor=colors.HexColor("#1E40AF"),
+                                 alignment=TA_CENTER)
+    sub_style = ParagraphStyle("sub", parent=styles["Normal"],
+                               fontSize=8, textColor=colors.grey, alignment=TA_CENTER)
+
+    elementos = [
+        Paragraph("Historial de Sesiones — Biblioteca UNASAM", title_style),
+        Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %I:%M:%S %p')}", sub_style),
+        Spacer(1, 0.4*cm),
     ]
+
+    headers = ["Estudiante", "Código", "DNI", "Escuela", "Actividad", "Terminal", "Inicio", "Salida", "Fecha", "Min"]
+    col_widths = [5*cm, 2.8*cm, 2.2*cm, 4*cm, 3.5*cm, 2.2*cm, 2.2*cm, 2.2*cm, 2.2*cm, 1.2*cm]
+
+    data = [headers]
+    for s, a, t in rows:
+        inicio_naive = s.inicio.replace(tzinfo=None) if s.inicio else None
+        fin_naive    = (s.hora_salida or s.fin)
+        fin_naive    = fin_naive.replace(tzinfo=None) if fin_naive else None
+        duracion     = str(int((fin_naive - inicio_naive).total_seconds() / 60)) if (inicio_naive and fin_naive) else "—"
+        data.append([
+            f"{a.nombres} {a.apellidos}",
+            a.codigo,
+            a.dni or s.dni or "",
+            s.escuela or a.escuela or "",
+            s.razon_uso or "—",
+            t.nombre,
+            inicio_naive.strftime("%I:%M %p") if inicio_naive else "",
+            fin_naive.strftime("%I:%M %p")    if fin_naive    else "En curso",
+            inicio_naive.strftime("%d/%m/%Y") if inicio_naive else "",
+            duracion,
+        ])
+
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        # Cabecera
+        ("BACKGROUND",    (0, 0), (-1, 0),  colors.HexColor("#1E40AF")),
+        ("TEXTCOLOR",     (0, 0), (-1, 0),  colors.white),
+        ("FONTNAME",      (0, 0), (-1, 0),  "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, 0),  7),
+        ("ALIGN",         (0, 0), (-1, 0),  "CENTER"),
+        ("BOTTOMPADDING", (0, 0), (-1, 0),  5),
+        ("TOPPADDING",    (0, 0), (-1, 0),  5),
+        # Filas de datos
+        ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE",      (0, 1), (-1, -1), 6.5),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, colors.HexColor("#EFF6FF")]),
+        ("GRID",          (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 1), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 3),
+    ]))
+    elementos.append(table)
+
+    doc.build(elementos)
+    buf.seek(0)
+    filename = f"historial_sesiones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 # ── Dashboard Stats ─────────────────────────────────────────────────

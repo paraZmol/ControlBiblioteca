@@ -84,9 +84,16 @@ async def consultar_sga(dni: str) -> Optional[dict]:
             logger.warning(f"[SGA] Campos de nombre vacíos en: {alumno_data}")
             return None
 
-        logger.info(f"[SGA] Alumno encontrado: {nombres} {apellidos} | DNI={dni}")
+        # Extraer código de matrícula y DNI como campos DISTINTOS
+        codigo_matricula = str(alumno_data.get("codigo", "")).strip()  # ej: "161.2502.614"
+        dni_real         = str(data.get("dni", dni)).strip()           # ej: "71926257"
+        if not codigo_matricula:
+            codigo_matricula = dni_real  # fallback si el SGA no devuelve código
+
+        logger.info(f"[SGA] Alumno: {nombres} {apellidos} | código={codigo_matricula} | DNI={dni_real}")
         return {
-            "codigo":    dni,       # DNI es el identificador en nuestra DB
+            "codigo":    codigo_matricula,
+            "dni":       dni_real,
             "nombres":   nombres,
             "apellidos": apellidos,
             "escuela":   escuela,
@@ -101,11 +108,62 @@ async def consultar_sga(dni: str) -> Optional[dict]:
         return None
 
 
+async def _migrar_columnas():
+    """Migraciones seguras: agrega columnas nuevas si no existen."""
+    from database import engine
+    from sqlalchemy import text
+    migraciones = [
+        ("ALTER TABLE alumnos   ADD COLUMN dni        VARCHAR(20)",  "alumnos.dni"),
+        ("ALTER TABLE sesiones  ADD COLUMN confirmada INTEGER DEFAULT 0", "sesiones.confirmada"),
+    ]
+    async with engine.begin() as conn:
+        for sql, nombre in migraciones:
+            try:
+                await conn.execute(text(sql))
+                logger.info(f"[DB] Columna '{nombre}' agregada")
+            except Exception:
+                pass  # ya existe
+
+
+async def _limpiar_sesiones_fantasma():
+    """Cancela sesiones que llevan más de 10s sin confirmación del cliente."""
+    from sqlalchemy import text
+    while True:
+        await asyncio.sleep(10)
+        try:
+            async with async_session() as db:
+                res = await db.execute(
+                    text("SELECT id, terminal_id FROM sesiones WHERE activa=1 AND confirmada=0 AND (julianday('now') - julianday(inicio)) * 86400 > 10")
+                )
+                fantasmas = res.fetchall()
+                for row in fantasmas:
+                    sesion_id, terminal_id_db = row
+                    res_s = await db.execute(select(Sesion).where(Sesion.id == sesion_id))
+                    s = res_s.scalar_one_or_none()
+                    if s:
+                        s.activa = False
+                        s.motivo_cierre = "sin_confirmacion"
+                        s.fin = datetime.now().replace(tzinfo=None)
+                        # Revertir terminal a bloqueado via ORM
+                        res_t = await db.execute(select(Terminal).where(Terminal.id == s.terminal_id))
+                        t = res_t.scalar_one_or_none()
+                        if t:
+                            t.estado = "bloqueado"
+                        logger.warning(f"[FANTASMA] Sesión #{sesion_id} cancelada por falta de confirmación")
+                if fantasmas:
+                    await db.commit()
+                    await manager.notificar_admins()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[FANTASMA] Error en limpieza: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Eventos de inicio y cierre del servidor."""
-    # Inicio: crear tablas y usuario admin por defecto
     await init_db()
+    await _migrar_columnas()
     logger.info("Base de datos inicializada")
 
     # Crear usuario admin si no existe
@@ -122,7 +180,9 @@ async def lifespan(_app: FastAPI):
             await db.commit()
             logger.info("Usuario admin creado (admin/admin123)")
 
+    tarea_limpieza = asyncio.create_task(_limpiar_sesiones_fantasma())
     yield
+    tarea_limpieza.cancel()
     logger.info("Servidor detenido")
 
 
@@ -241,10 +301,8 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
     try:
         while True:
             try:
-                # Timeout de 60 segundos para recibir mensajes (heartbeat o comandos)
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=60.0)
             except asyncio.TimeoutError:
-                # Si pasa 1 minuto sin mensajes, considerar desconexión
                 logger.warning(f"[WS] Timeout 60s sin mensajes de {terminal_id}")
                 break
             except WebSocketDisconnect:
@@ -328,19 +386,24 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     continue
 
                 async with async_session() as db:
-                    logger.info(f"[WS] {terminal_id} buscando alumno {codigo} en DB...")
-                    res_a = await db.execute(select(Alumno).where(Alumno.codigo == codigo))
+                    logger.info(f"[WS] {terminal_id} buscando alumno DNI={codigo} en DB...")
+                    # Buscar por DNI primero, luego por código de matrícula como fallback
+                    res_a = await db.execute(select(Alumno).where(Alumno.dni == codigo))
                     alumno = res_a.scalar_one_or_none()
+                    if alumno is None:
+                        res_a2 = await db.execute(select(Alumno).where(Alumno.codigo == codigo))
+                        alumno = res_a2.scalar_one_or_none()
 
                     # ── Fallback SGA: si no está en DB, consultamos la API externa ──
                     if alumno is None:
-                        logger.info(f"[WS] {terminal_id} alumno {codigo} no en DB → consultando SGA...")
+                        logger.info(f"[WS] {terminal_id} alumno DNI={codigo} no en DB → consultando SGA...")
                         await websocket.send_json({"tipo": "info", "motivo": "Verificando en sistema universitario..."})
                         sga = await consultar_sga(codigo)
                         if sga:
-                            logger.info(f"[SGA] Registrando nuevo alumno: {sga['nombres']} {sga['apellidos']}")
+                            logger.info(f"[SGA] Registrando: {sga['nombres']} {sga['apellidos']} | código={sga['codigo']} | DNI={sga['dni']}")
                             alumno = Alumno(
                                 codigo    = sga["codigo"],
+                                dni       = sga["dni"],
                                 nombres   = sga["nombres"],
                                 apellidos = sga["apellidos"],
                                 escuela   = sga["escuela"],
@@ -348,21 +411,20 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                                 habilitado= True,
                             )
                             db.add(alumno)
-                            await db.flush()   # obtener alumno.id sin cerrar la sesión
-                            logger.info(f"[SGA] Alumno {alumno.codigo} registrado en DB con id={alumno.id}")
+                            await db.flush()
+                            logger.info(f"[SGA] Alumno registrado: código={alumno.codigo} DNI={alumno.dni} id={alumno.id}")
                         else:
-                            logger.warning(f"[WS] {terminal_id} alumno {codigo} no encontrado en DB ni en SGA")
+                            logger.warning(f"[WS] {terminal_id} alumno DNI={codigo} no encontrado en DB ni en SGA")
                             await websocket.send_json({"tipo": "login_rechazado", "motivo": "Alumno no registrado en el sistema"})
                             continue
 
                     if not alumno.habilitado:
-                        logger.warning(f"[WS] {terminal_id} alumno {codigo} no habilitado")
+                        logger.warning(f"[WS] {terminal_id} alumno DNI={codigo} no habilitado")
                         await websocket.send_json({"tipo": "login_rechazado", "motivo": "Alumno no habilitado para usar la biblioteca"})
                         continue
 
-                    logger.info(f"[WS] {terminal_id} alumno OK: {alumno.nombres} {alumno.apellidos}")
+                    logger.info(f"[WS] {terminal_id} alumno OK: {alumno.nombres} {alumno.apellidos} | código={alumno.codigo} | DNI={alumno.dni}")
 
-                    # Buscar terminal en DB por nombre (hostname) o por IP como fallback
                     res_t = await db.execute(select(Terminal).where(Terminal.nombre == terminal_id))
                     t = res_t.scalar_one_or_none()
                     if not t:
@@ -371,13 +433,13 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
 
                     if t:
                         sesion = Sesion(
-                            alumno_id = alumno.id,
+                            alumno_id   = alumno.id,
                             terminal_id = t.id,
-                            razon_uso = razon or None,
-                            dni       = alumno.codigo,
-                            facultad  = alumno.facultad or "",
-                            escuela   = alumno.escuela or "",
-                            fecha_uso = datetime.utcnow().date(),
+                            razon_uso   = razon or None,
+                            dni         = alumno.dni or alumno.codigo,
+                            facultad    = alumno.facultad or "",
+                            escuela     = alumno.escuela or "",
+                            fecha_uso   = datetime.now().date(),
                         )
                         t.estado = "activo"
                         db.add(sesion)
@@ -396,6 +458,26 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
 
                 await manager.notificar_admins()
 
+            elif tipo == "unlock_confirmed":
+                # El cliente C# confirmó que el desbloqueo fue exitoso
+                async with async_session() as db:
+                    res_t = await db.execute(select(Terminal).where(Terminal.nombre == terminal_id))
+                    t = res_t.scalar_one_or_none()
+                    if not t:
+                        res_t2 = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
+                        t = res_t2.scalar_one_or_none()
+                    if t:
+                        res_s = await db.execute(
+                            select(Sesion).where(Sesion.terminal_id == t.id, Sesion.activa == True, Sesion.confirmada == False)
+                        )
+                        sesion = res_s.scalar_one_or_none()
+                        if sesion:
+                            sesion.confirmada = True
+                            await db.commit()
+                            logger.info(f"[WS] Sesión #{sesion.id} confirmada por {terminal_id}")
+                            await manager.notificar_evento(f"✅ Desbloqueo confirmado en {terminal_id}", "login")
+                await manager.notificar_admins()
+
             elif tipo == "logout":
                 logger.info(f"[WS] {terminal_id} logout recibido")
                 async with async_session() as db:
@@ -411,48 +493,50 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         )
                         sesion = res_s.scalar_one_or_none()
                         if sesion:
-                            sesion.fin = datetime.utcnow()
+                            ahora_logout = datetime.now().replace(tzinfo=None)
+                            sesion.hora_salida = ahora_logout
+                            sesion.fin = ahora_logout
                             sesion.activa = False
                             sesion.motivo_cierre = "logout"
                             await db.commit()
-                            logger.info(f"[WS] {terminal_id} sesión cerrada en DB")
+                            logger.info(f"[WS] {terminal_id} sesión cerrada: {ahora_logout.strftime('%I:%M:%S %p')}")
                             await manager.notificar_evento(f"SALIDA: Terminal {terminal_id} (manual logout)", "logout")
                 await manager.bloquear_terminal(terminal_id)
                 await manager.notificar_admins()
 
     except WebSocketDisconnect:
-        logger.info(f"[WS] Terminal desconectada: {terminal_id}")
-        manager.desconectar(terminal_id)
-        async with async_session() as db:
-            # Buscar por nombre o IP
-            res = await db.execute(select(Terminal).where(Terminal.nombre == terminal_id))
-            t = res.scalar_one_or_none()
-            if not t:
-                res2 = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
-                t = res2.scalar_one_or_none()
-            if t:
-                t.estado = "offline"
-                
-                # CIERRE AUTOMÁTICO DE SESIÓN AL DESCONECTAR
-                res_s = await db.execute(
-                    select(Sesion).where(Sesion.terminal_id == t.id, Sesion.activa == True)
-                )
-                sesion = res_s.scalar_one_or_none()
-                if sesion:
-                    ahora = datetime.utcnow().replace(tzinfo=None)
-                    sesion.hora_salida = ahora
-                    sesion.fin = ahora
-                    sesion.activa = False
-                    sesion.motivo_cierre = "desconexion_red"
-                    logger.info(f"[WS] Sesion en {terminal_id} cerrada por desconexion")
-                    
-                await db.commit()
-        await manager.notificar_evento(f"Terminal '{terminal_id}' se ha desconectado (offline)", "offline")
-        await manager.enviar_log("error", f"⚠️ Terminal '{terminal_id}' perdió conexión con el servidor")
-        await manager.notificar_admins()
+        logger.info(f"[WS] Terminal desconectada (WebSocketDisconnect): {terminal_id}")
     except Exception as exc:
         logger.error(f"[WS] Error inesperado en {terminal_id}: {exc}", exc_info=True)
+    finally:
+        # Limpieza garantizada: se ejecuta en desconexión normal, timeout, apagado o error
         manager.desconectar(terminal_id)
+        try:
+            async with async_session() as db:
+                res = await db.execute(select(Terminal).where(Terminal.nombre == terminal_id))
+                t = res.scalar_one_or_none()
+                if not t:
+                    res2 = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
+                    t = res2.scalar_one_or_none()
+                if t:
+                    t.estado = "offline"
+                    res_s = await db.execute(
+                        select(Sesion).where(Sesion.terminal_id == t.id, Sesion.activa == True)
+                    )
+                    sesion = res_s.scalar_one_or_none()
+                    if sesion:
+                        ahora = datetime.now().replace(tzinfo=None)
+                        sesion.hora_salida = ahora
+                        sesion.fin = ahora
+                        sesion.activa = False
+                        sesion.motivo_cierre = "desconexion_red"
+                        logger.info(f"[WS] Sesión cerrada por desconexión en {terminal_id}: {ahora.strftime('%I:%M:%S %p')}")
+                    await db.commit()
+            await manager.notificar_evento(f"⚠️ Terminal '{terminal_id}' desconectada (offline)", "offline")
+            await manager.enviar_log("error", f"⚠️ Terminal '{terminal_id}' perdió conexión")
+            await manager.notificar_admins()
+        except Exception as cleanup_exc:
+            logger.error(f"[WS] Error en cleanup de {terminal_id}: {cleanup_exc}")
 
 
 # ── WebSocket para panel admin ──────────────────────────────────────
@@ -484,12 +568,12 @@ async def websocket_admin(websocket: WebSocket):
                 # target puede ser hostname o IP — buscar en conexiones
                 tid = target
                 if tid not in manager.conexiones_activas:
-                    # buscar por IP en el mapeo inverso
                     for k, v in manager.terminal_ips.items():
                         if v == target:
                             tid = k
                             break
                 ok = await manager.bloquear_terminal(tid)
+                # Acción atómica: bloquear terminal + cerrar sesión activa en una transacción
                 async with async_session() as db:
                     res = await db.execute(select(Terminal).where(Terminal.nombre == tid))
                     t = res.scalar_one_or_none()
@@ -498,18 +582,30 @@ async def websocket_admin(websocket: WebSocket):
                         t = res2.scalar_one_or_none()
                     if t:
                         t.estado = "bloqueado"
+                        res_s = await db.execute(
+                            select(Sesion).where(Sesion.terminal_id == t.id, Sesion.activa == True)
+                        )
+                        sesion_activa = res_s.scalar_one_or_none()
+                        if sesion_activa:
+                            ahora_bloqueo = datetime.now().replace(tzinfo=None)
+                            sesion_activa.hora_salida   = ahora_bloqueo
+                            sesion_activa.fin           = ahora_bloqueo
+                            sesion_activa.activa        = False
+                            sesion_activa.motivo_cierre = "bloqueo_admin"
+                            logger.info(f"[WS-Admin] Sesión cerrada por bloqueo admin en {tid}: {ahora_bloqueo.strftime('%I:%M:%S %p')}")
                         await db.commit()
-                msg = f"Terminal {tid} bloqueada" if ok else f"Terminal {tid} no conectada"
+                msg = f"Terminal {tid} bloqueada" if ok else f"Terminal {tid} no conectada (BD actualizada)"
                 await websocket.send_json({"tipo": "ok", "mensaje": msg})
                 await manager.notificar_admins()
 
             elif tipo == "desbloquear_terminal":
-                target = str(data.get("ip", "")).strip()
-                codigo = str(data.get("codigo", "")).strip().upper()
-                if not target or not codigo or not codigo.isalnum() or len(codigo) > 20:
+                target    = str(data.get("ip", "")).strip()
+                codigo    = str(data.get("codigo", "")).strip()
+                razon_uso = str(data.get("razon_uso", "")).strip() or None
+                if not target or not codigo:
                     await websocket.send_json({"tipo": "error", "motivo": "Identificador o código inválido"})
                     continue
-                # Resolver terminal_id
+                # Resolver terminal_id desde IP o nombre
                 tid = target
                 if tid not in manager.conexiones_activas:
                     for k, v in manager.terminal_ips.items():
@@ -517,32 +613,50 @@ async def websocket_admin(websocket: WebSocket):
                             tid = k
                             break
                 async with async_session() as db:
-                    from models import Alumno, Sesion
-                    from datetime import datetime as dt
-                    res_a = await db.execute(select(Alumno).where(Alumno.codigo == codigo))
+                    # PASO 1: Buscar alumno por DNI primero, luego por código de matrícula
+                    res_a = await db.execute(select(Alumno).where(Alumno.dni == codigo))
                     alumno = res_a.scalar_one_or_none()
-                    if not alumno or not alumno.habilitado:
-                        await websocket.send_json({"tipo": "error", "motivo": "Código inválido o alumno no habilitado"})
+                    if alumno is None:
+                        res_a2 = await db.execute(select(Alumno).where(Alumno.codigo == codigo))
+                        alumno = res_a2.scalar_one_or_none()
+                    # PASO 2: Validar ANTES de crear nada
+                    if alumno is None:
+                        await websocket.send_json({"tipo": "error", "motivo": f"Alumno con código '{codigo}' no encontrado"})
                         continue
+                    if not alumno.habilitado:
+                        await websocket.send_json({"tipo": "error", "motivo": f"Alumno '{alumno.nombres} {alumno.apellidos}' no está habilitado"})
+                        continue
+                    # PASO 3: Verificar terminal conectada ANTES de crear sesión
                     ok = await manager.desbloquear_terminal(tid, {
                         "codigo": alumno.codigo,
                         "nombres": alumno.nombres,
                         "apellidos": alumno.apellidos
                     })
-                    if ok:
-                        res_t = await db.execute(select(Terminal).where(Terminal.nombre == tid))
-                        terminal_db = res_t.scalar_one_or_none()
-                        if not terminal_db:
-                            res_t2 = await db.execute(select(Terminal).where(Terminal.ip == target))
-                            terminal_db = res_t2.scalar_one_or_none()
-                        if terminal_db:
-                            sesion = Sesion(alumno_id=alumno.id, terminal_id=terminal_db.id)
-                            terminal_db.estado = "activo"
-                            db.add(sesion)
-                            await db.commit()
-                        await websocket.send_json({"tipo": "ok", "mensaje": f"Terminal {tid} desbloqueada para {alumno.nombres}"})
-                    else:
-                        await websocket.send_json({"tipo": "error", "motivo": f"Terminal {tid} no conectada"})
+                    if not ok:
+                        await websocket.send_json({"tipo": "error", "motivo": f"Terminal '{tid}' no está conectada"})
+                        continue
+                    # PASO 4: Solo crear sesión si el comando WS llegó a la terminal
+                    res_t = await db.execute(select(Terminal).where(Terminal.nombre == tid))
+                    terminal_db = res_t.scalar_one_or_none()
+                    if not terminal_db:
+                        res_t2 = await db.execute(select(Terminal).where(Terminal.ip == target))
+                        terminal_db = res_t2.scalar_one_or_none()
+                    if terminal_db:
+                        sesion = Sesion(
+                            alumno_id   = alumno.id,
+                            terminal_id = terminal_db.id,
+                            dni         = alumno.dni or alumno.codigo,
+                            facultad    = alumno.facultad or "",
+                            escuela     = alumno.escuela or "",
+                            fecha_uso   = datetime.now().date(),
+                            razon_uso   = razon_uso,
+                            confirmada  = False,  # pendiente hasta unlock_confirmed
+                        )
+                        terminal_db.estado = "activo"
+                        db.add(sesion)
+                        await db.commit()
+                        logger.info(f"[WS-Admin] Sesión creada id={sesion.id} para {alumno.nombres}, esperando confirmación")
+                    await websocket.send_json({"tipo": "ok", "mensaje": f"Terminal {tid} desbloqueada para {alumno.nombres} {alumno.apellidos}"})
                 await manager.notificar_admins()
 
             elif tipo == "remote_command":

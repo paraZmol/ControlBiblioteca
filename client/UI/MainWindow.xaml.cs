@@ -97,7 +97,11 @@ namespace ControlBiblioteca.Client.UI
             // aunque el TextBox tenga el foco.
             PreviewKeyDown += MainWindow_PreviewKeyDown;
 
-            Loaded  += (_, _) => TxtCodigo.Focus();
+            Loaded  += (_, _) => {
+                FocusManager.SetFocusedElement(this, TxtCodigo);
+                TxtCodigo.Focus();
+                Keyboard.Focus(TxtCodigo);
+            };
             Closing += (_, e) => { if (!_desbloqueado && !_cerrandoPorEscape) e.Cancel = true; };
         }
 
@@ -390,7 +394,22 @@ namespace ControlBiblioteca.Client.UI
                             string nom = alumno.GetProperty("nombres").GetString()   ?? "";
                             string ape = alumno.GetProperty("apellidos").GetString() ?? "";
                             string cod = alumno.GetProperty("codigo").GetString()    ?? "";
-                            Desbloquear(nom, ape, cod);
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    Desbloquear(nom, ape, cod);
+                                    // Confirmar desbloqueo exitoso al servidor
+                                    await _wsService.EnviarAsync("{\"tipo\":\"unlock_confirmed\"}");
+                                    LogDebug("unlock_confirmed enviado al servidor");
+                                }
+                                catch (Exception ex)
+                                {
+                                    string errorMsg = $"Fallo en desbloqueo local: {ex.Message}";
+                                    LogDebug($"ERROR: {errorMsg}");
+                                    await _wsService.ReportarErrorAsync(errorMsg);
+                                }
+                            });
                         }
                         catch (Exception ex)
                         {
@@ -402,7 +421,8 @@ namespace ControlBiblioteca.Client.UI
                     case "bloquear":
                         try
                         {
-                            Bloquear();
+                            // Mover a hilo secundario para no bloquear el WebSocket principal
+                            _ = Task.Run(() => Bloquear());
                         }
                         catch (Exception ex)
                         {

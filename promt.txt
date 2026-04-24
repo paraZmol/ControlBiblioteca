@@ -1,29 +1,32 @@
-vamos a pulir los detalles finales del sistema para la biblioteca. Sigue las reglas de ahorro de tokens.
+vamos a implementar la lógica de "Bloqueo Administrativo = Cierre de Sesión" y mejorar la experiencia visual. Sigue las reglas de ahorro de tokens.
 
-1. Registro Automático de Salida (Python - Backend):
+1. Lógica de Bloqueo (Backend - main.py / endpoints.py):
 
-En el manejador de WebSockets (ws_terminal), añade una lógica dentro del bloque except o finally de la desconexión.
+Acción Atómica: Cuando el administrador presione "Bloquear", el servidor debe realizar dos acciones en una sola transacción:
 
-Acción: Si una terminal se desconecta (por apagado o pérdida de red), el servidor debe buscar la última sesión activa de esa IP/Terminal y actualizar automáticamente los campos hora_salida, fin y cambiar activa = 0.
+Enviar el comando de bloqueo vía WebSocket a la terminal.
 
-Usa la hora capturada en ese instante preciso para que no quede vacía.
+Buscar la sesión activa de esa terminal en la base de datos, poner activa = 0 y registrar hora_salida = datetime.now().
 
-2. Advertencias Dinámicas (HTML/JS - Frontend):
+Justificación: El historial debe reflejar que la sesión terminó en el momento exacto del bloqueo.
 
-NO uses window.confirm básico. Implementa un modal personalizado en el panel de administrador.
+2. Modal de Advertencia Pro (Frontend - app.js):
 
-Crea un componente de advertencia con CSS moderno: Fondo oscuro semi-transparente, bordes redondeados, sombras neón y botones con transiciones suaves.
+Diseño: Crea un modal personalizado (sustituyendo cualquier confirm) con fondo oscuro, bordes con degradado neón y botones de alto contraste.
 
-Mensaje Dinámico: Al presionar "Apagar" o "Cerrar", debe salir un mensaje tipo: "⚠️ ¿Estás seguro de finalizar la sesión en la terminal [Nombre_PC]? Esta acción es irreversible."
+Contenido Dinámico: El modal debe detectar si hay un estudiante usando la PC y mostrar:
+"⚠️ ¿Estás seguro de BLOQUEAR la terminal [Nombre_PC]? Se finalizará la sesión de [Nombre_Estudiante] y se registrará su hora de salida."
 
-El botón de confirmar debe ser Rojo Vibrante y el de cancelar un Gris Elegante.
+Acciones: Botón "Confirmar Bloqueo" (Rojo vibrante) y "Cancelar" (Gris neutro).
 
-3. Reparación de Tabla (app.js):
+3. Actualización de Interfaz (Frontend):
 
-Sincroniza las columnas para que la hora de salida se vea inmediatamente después de la hora de inicio, moviendo la fecha al final.
+Tras un bloqueo exitoso, el panel de administración debe refrescar automáticamente el Historial de Sesiones para mostrar la nueva hora de salida capturada.
 
-Si la sesión está activa, que el texto "En curso..." parpadee suavemente en color verde.
+La tarjeta de la terminal debe volver al estado "Disponible" o "Bloqueado" (color naranja/rojo) y limpiar el nombre del estudiante de la vista de la tarjeta.
 
-4. Cliente C# (Mejora de Robustez):
+4. Robustez en el Cliente (C#):
 
-Asegúrate de que el instalador no lance el error de Application al reiniciar. Separa completamente el proceso de configuración del nombre de la PC del proceso de arranque de la UI principal.
+Asegura que al recibir la señal de bloqueo, la aplicación oculte inmediatamente la sesión activa y vuelva a la pantalla de login, poniendo el foco del teclado en el campo de DNI de nuevo.
+
+Genera el nuevo .exe y actualiza el servidor.

@@ -178,6 +178,10 @@ function conectarWebSocket() {
             cargarDashboard();
         } else if (data.tipo === 'evento_log') {
             addLog(data.nivel === 'error' ? 'error' : 'activity', data.mensaje);
+            // Refresco inmediato del historial al detectar desconexión de terminal
+            if (data.nivel === 'offline' || (data.mensaje && data.mensaje.includes('desconectada'))) {
+                cargarDashboard();
+            }
         } else if (data.type === 'log') {
             addLog(data.category, data.message);
         } else if (data.tipo === 'ok') {
@@ -236,19 +240,110 @@ function obtenerHoraActual() {
 
 // ── Acciones de terminal ───────────────────────────────────────────
 
-function bloquearTerminal(ip) {
-    addLog('activity', `🔒 Botón BLOQUEAR terminal: ${ip}`);
-    wsEnviar({ tipo: 'bloquear_terminal', ip });
+function bloquearTerminal(ip, nombrePc, nombreAlumno) {
+    const pcLabel      = nombrePc    || ip;
+    const alumnoLinea  = nombreAlumno
+        ? `Se finalizará la sesión de <strong>${escapeHtml(nombreAlumno)}</strong> y se registrará su hora de salida.`
+        : 'La terminal quedará disponible.';
+    mostrarConfirmacionBloqueo(
+        `<strong>[${escapeHtml(pcLabel)}]</strong><br>${alumnoLinea}`,
+        () => {
+            addLog('activity', `🔒 Confirmado BLOQUEAR terminal: ${ip}`);
+            wsEnviar({ tipo: 'bloquear_terminal', ip });
+        }
+    );
+}
+
+function mostrarConfirmacionBloqueo(htmlMensaje, onConfirm) {
+    const modal = document.getElementById('modal-bloqueo');
+    document.getElementById('modal-bloqueo-mensaje').innerHTML = htmlMensaje;
+
+    const btnC = document.getElementById('btn-bloqueo-cancelar');
+    const btnX = document.getElementById('btn-bloqueo-confirmar');
+    const newC = btnC.cloneNode(true);
+    const newX = btnX.cloneNode(true);
+    btnC.parentNode.replaceChild(newC, btnC);
+    btnX.parentNode.replaceChild(newX, btnX);
+
+    newC.addEventListener('click', () => { modal.style.display = 'none'; });
+    newX.addEventListener('click', () => { modal.style.display = 'none'; onConfirm(); });
+
+    modal.style.display = 'flex';
 }
 
 function desbloquearTerminal(ip) {
-    const inputId = `unlock-${ip.replace(/\./g, '-')}`;
-    const input   = document.getElementById(inputId);
-    const codigo  = input ? input.value.trim().toUpperCase() : '';
-    if (!codigo) { if (input) input.focus(); return; }
-    addLog('activity', `🔓 Botón DESBLOQUEAR terminal: ${ip} con código ${codigo}`);
-    wsEnviar({ tipo: 'desbloquear_terminal', ip, codigo });
-    if (input) input.value = '';
+    // La función se llama desde el botón Confirmar dentro del card (flujo antiguo si queda).
+    // Redirigir al modal.
+    mostrarModalDesbloqueo(ip);
+}
+
+function mostrarModalDesbloqueo(ip, nombrePc) {
+    const modal      = document.getElementById('modal-desbloqueo');
+    const inputDni   = document.getElementById('modal-dni');
+    const selectAct  = document.getElementById('modal-actividad');
+    const otrosPanel = document.getElementById('modal-otros-panel');
+    const otrosTxt   = document.getElementById('modal-otros-texto');
+    const errorEl    = document.getElementById('modal-desbloqueo-error');
+    const labelPc    = document.getElementById('modal-desbloqueo-nombre');
+
+    // Resetear estado
+    inputDni.value     = '';
+    selectAct.value    = '';
+    otrosPanel.style.display = 'none';
+    otrosTxt.value     = '';
+    errorEl.textContent = '';
+    labelPc.textContent = nombrePc ? `Terminal: ${nombrePc}` : `Terminal: ${ip}`;
+
+    selectAct.onchange = () => {
+        otrosPanel.style.display = selectAct.value === 'Otros' ? 'block' : 'none';
+        if (selectAct.value !== 'Otros') otrosTxt.value = '';
+        errorEl.textContent = '';
+    };
+
+    const btnCancelar  = document.getElementById('btn-desbloqueo-cancelar');
+    const btnConfirmar = document.getElementById('btn-desbloqueo-confirmar');
+
+    // Reemplazar listeners para evitar duplicados
+    const newBtnC = btnCancelar.cloneNode(true);
+    const newBtnX = btnConfirmar.cloneNode(true);
+    btnCancelar.parentNode.replaceChild(newBtnC, btnCancelar);
+    btnConfirmar.parentNode.replaceChild(newBtnX, btnConfirmar);
+
+    newBtnC.addEventListener('click', () => { modal.style.display = 'none'; });
+
+    newBtnX.addEventListener('click', () => {
+        const dni = inputDni.value.trim();
+        if (!dni || !/^\d{8}$/.test(dni)) {
+            errorEl.textContent = 'Ingrese un DNI válido (8 dígitos)';
+            inputDni.focus();
+            return;
+        }
+        const actividad = selectAct.value;
+        if (!actividad) {
+            errorEl.textContent = 'Seleccione una actividad';
+            selectAct.focus();
+            return;
+        }
+        let razon = actividad;
+        if (actividad === 'Otros') {
+            const esp = otrosTxt.value.trim();
+            if (!esp) {
+                errorEl.textContent = 'Especifique la actividad';
+                otrosTxt.focus();
+                return;
+            }
+            razon = `Otros: ${esp}`;
+        }
+        modal.style.display = 'none';
+        addLog('activity', `🔓 Desbloquear terminal: ${ip} | DNI: ${dni} | Actividad: ${razon}`);
+        wsEnviar({ tipo: 'desbloquear_terminal', ip, codigo: dni, razon_uso: razon });
+    });
+
+    // Enter en input DNI pasa al select
+    inputDni.onkeydown = (e) => { if (e.key === 'Enter') selectAct.focus(); };
+
+    modal.style.display = 'flex';
+    setTimeout(() => inputDni.focus(), 50);
 }
 
 function bloquearTodas() {
@@ -312,11 +407,13 @@ async function limpiarTodo() {
     });
 }
 
-async function cerrarSesion(sesionId, motivo = 'admin', silent = false) {
+async function cerrarSesion(sesionId, motivo = 'admin', silent = false, nombrePc = null, nombreAlumno = null) {
     if (silent) {
         await ejecutarCierre(sesionId, motivo, true);
     } else {
-        mostrarConfirmacion('¿Estás seguro de finalizar esta sesión? Esta acción es irreversible.', async () => {
+        const pcPart = nombrePc ? ` en [${nombrePc}]` : '';
+        const alumnoPart = nombreAlumno ? ` de ${nombreAlumno}` : '';
+        mostrarConfirmacion(`⚠️ ¿Estás seguro de finalizar la sesión${alumnoPart}${pcPart}? Esta acción es irreversible.`, async () => {
             await ejecutarCierre(sesionId, motivo, false);
         });
     }
@@ -339,8 +436,10 @@ async function ejecutarCierre(sesionId, motivo, silent) {
     }
 }
 
-async function apagarPc(ip, sesionId = null) {
-    mostrarConfirmacion(`⚠️ ¿Estás seguro de apagar la terminal [${ip}]? Esta acción es irreversible.`, async () => {
+async function apagarPc(ip, sesionId = null, nombrePc = null, nombreAlumno = null) {
+    const pcLabel = nombrePc || ip;
+    const alumnoLine = nombreAlumno ? `\nSe cerrará la sesión de: ${nombreAlumno}` : '';
+    mostrarConfirmacion(`⚠️ ¿Confirmas el apagado de [${pcLabel}]?${alumnoLine}`, async () => {
         addLog('activity', `⏻ Botón APAGAR PC: ${ip}`);
         if (sesionId) {
             await cerrarSesion(sesionId, 'apagar', true);
@@ -368,25 +467,22 @@ function renderTerminales(terminales, sesiones = []) {
         const sesion = sesiones.find(s => s.terminal_ip === t.ip);
 
         let botonesPrimarios = '';
+        const pcNombre = esc(t.nombre || t.ip);
+        const alumnoNombre = sesion ? esc(sesion.alumno_nombre) : '';
+
         if (!online) {
             botonesPrimarios = `
-                <button class="btn-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'})" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:4px;padding:8px;cursor:pointer;font-weight:bold">⏻ Apagar PC</button>
+                <button class="btn-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:4px;padding:8px;cursor:pointer;font-weight:bold">⏻ Apagar PC</button>
             `;
         } else if (faltaDesbloqueo) {
             botonesPrimarios = `
-                <button class="btn-desbloquear" style="width:100%;background:#10b981;color:#fff;border:none;border-radius:4px;padding:10px;cursor:pointer;font-weight:bold;margin-bottom:6px" onclick="mostrarInputDesbloqueo('${esc(t.ip)}', '${inputId}')">🔓 Desbloquear</button>
-                <div id="unlock-input-${inputId}" style="display:none;margin-bottom:6px">
-                    <input id="${inputId}" type="text" placeholder="Código alumno" maxlength="20" style="width:100%;padding:8px;margin-bottom:4px;border-radius:4px;border:1px solid #ccc" onkeydown="if(event.key==='Enter') desbloquearTerminal('${esc(t.ip)}')">
-                    <button class="btn-confirm" style="width:100%;background:#059669;color:#fff;border:none;border-radius:4px;padding:6px;cursor:pointer" onclick="desbloquearTerminal('${esc(t.ip)}')">Confirmar</button>
-                </div>
-                <button class="btn-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'})" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:4px;padding:8px;cursor:pointer;font-weight:bold">⏻ Apagar PC</button>
+                <button class="btn-desbloquear" style="width:100%;background:#10b981;color:#fff;border:none;border-radius:4px;padding:10px;cursor:pointer;font-weight:bold;margin-bottom:6px" onclick="mostrarModalDesbloqueo('${esc(t.ip)}', '${pcNombre}')">🔓 Desbloquear</button>
+                <button class="btn-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:4px;padding:8px;cursor:pointer;font-weight:bold">⏻ Apagar PC</button>
             `;
         } else {
-            // Estado activo o libre
             botonesPrimarios = `
-                <button class="btn-bloquear" style="width:100%;background:#ef4444;color:#fff;border:none;border-radius:4px;padding:10px;cursor:pointer;font-weight:bold;margin-bottom:6px" onclick="bloquearTerminal('${esc(t.ip)}')">🔒 Bloquear</button>
-                ${sesion ? `<button class="btn-cerrar" onclick="cerrarSesion(${sesion.id})" style="width:100%;background:#6366f1;color:#fff;border:none;border-radius:4px;padding:8px;cursor:pointer;font-weight:bold;margin-bottom:6px">🚪 Cerrar Sesión</button>` : ''}
-                <button class="btn-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'})" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:4px;padding:8px;cursor:pointer;font-weight:bold">⏻ Apagar PC</button>
+                <button class="btn-bloquear" style="width:100%;background:#ef4444;color:#fff;border:none;border-radius:4px;padding:10px;cursor:pointer;font-weight:bold;margin-bottom:6px" onclick="bloquearTerminal('${esc(t.ip)}', '${pcNombre}', '${alumnoNombre}')">🔒 Bloquear</button>
+                <button class="btn-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')" style="width:100%;background:#f59e0b;color:#fff;border:none;border-radius:4px;padding:8px;cursor:pointer;font-weight:bold">⏻ Apagar PC</button>
             `;
         }
 
@@ -400,7 +496,7 @@ function renderTerminales(terminales, sesiones = []) {
                 </div>
                 <div style="border-top:1px solid #f3f4f6;padding-top:8px;margin-bottom:10px">
                     <div class="terminal-ip" style="font-size:13px;color:#4b5563;margin-bottom:4px"><strong>IP:</strong> ${escapeHtml(t.ip)}</div>
-                    ${sesion ? `<div class="terminal-user" style="font-size:13px;color:#1f2937"><strong>Usuario:</strong> ${escapeHtml(sesion.alumno_nombre)}</div>` : ''}
+                    <div style="font-size:13px;font-weight:bold;color:${sesion ? '#22d3ee' : '#9ca3af'};margin-top:2px">${sesion ? escapeHtml(sesion.alumno_nombre) : 'Disponible'}</div>
                 </div>
                 <div style="display:flex;flex-direction:column">
                     ${botonesPrimarios}
@@ -420,7 +516,7 @@ function mostrarInputDesbloqueo(ip, inputId) {
 }
 
 function renderSesiones(sesiones) {
-    const body       = document.getElementById('sesionesBody');
+    const body        = document.getElementById('sesionesBody');
     const sinSesiones = document.getElementById('sinSesiones');
 
     if (!sesiones.length) {
@@ -430,23 +526,92 @@ function renderSesiones(sesiones) {
     }
 
     sinSesiones.style.display = 'none';
+    // Log de verificación de identidad del alumno
+    sesiones.filter(s => s.activa).forEach(s =>
+        addLog('activity', `🎓 [ID] ${s.alumno_nombre} | Código: ${s.alumno_codigo} | DNI: ${s.alumno_dni || s.dni || '—'}`)
+    );
     body.innerHTML = sesiones.map(s => {
         const inicio  = new Date(s.inicio).toLocaleTimeString('es-PE');
-        const salida  = s.hora_salida ? new Date(s.hora_salida).toLocaleTimeString('es-PE') : '<span class="pulsar-verde">En curso...</span>';
-        const fecha   = s.fecha_uso ? new Date(s.fecha_uso + 'T00:00:00').toLocaleDateString('es-PE') : new Date(s.inicio).toLocaleDateString('es-PE');
+        const salida  = s.hora_salida_fmt
+            ? s.hora_salida_fmt
+            : (s.hora_salida
+                ? new Date(s.hora_salida).toLocaleTimeString('es-PE')
+                : '<span class="pulsar-verde">🟢 En curso...</span>');
+        const fecha   = s.fecha_uso
+            ? new Date(s.fecha_uso + 'T00:00:00').toLocaleDateString('es-PE')
+            : new Date(s.inicio).toLocaleDateString('es-PE');
+        const estadoBadge = s.activa
+            ? '<span style="color:#16a34a;font-weight:bold">● Activa</span>'
+            : '<span style="color:#6b7280">○ Cerrada</span>';
         return `
-        <tr>
-            <td>${escapeHtml(s.alumno_nombre)}</td>
-            <td>${escapeHtml(s.alumno_codigo)}</td>
-            <td>${escapeHtml(s.dni || s.alumno_codigo)}</td>
-            <td>${escapeHtml(s.facultad || '—')}</td>
-            <td>${escapeHtml(s.escuela || '—')}</td>
-            <td>${escapeHtml(s.razon_uso || '—')}</td>
+        <tr style="${s.activa ? '' : 'opacity:0.75'}">
+            <td>${esc(s.alumno_nombre)}</td>
+            <td>${esc(s.alumno_codigo)}</td>
+            <td>${esc(s.alumno_dni || s.dni || '—')}</td>
+            <td>${esc(s.facultad || '—')}</td>
+            <td>${esc(s.escuela || '—')}</td>
+            <td>${esc(s.razon_uso || '—')}</td>
             <td>${inicio}</td>
             <td>${salida}</td>
             <td>${fecha}</td>
+            <td>${estadoBadge}</td>
         </tr>`;
     }).join('');
+}
+
+function exportarExcel() {
+    addLog('activity', '📊 Descargando historial Excel...');
+    const url = `${API_BASE}/admin/exportar-excel`;
+    const a   = document.createElement('a');
+    a.href    = url;
+    a.setAttribute('download', '');
+    // Incluir token en header no es posible con <a>, usamos fetch + blob
+    fetch(url, { headers: authHeaders() })
+        .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const disp = r.headers.get('Content-Disposition') || '';
+            const match = disp.match(/filename=([^;]+)/);
+            const filename = match ? match[1] : 'historial.xlsx';
+            return r.blob().then(b => ({ b, filename }));
+        })
+        .then(({ b, filename }) => {
+            const url2 = URL.createObjectURL(b);
+            const link  = document.createElement('a');
+            link.href   = url2;
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(url2);
+            addLog('activity', '✅ Excel descargado correctamente');
+        })
+        .catch(e => {
+            addLog('error', `❌ Error al exportar Excel: ${e.message}`);
+            mostrarNotificacion('Error al exportar Excel', 'error');
+        });
+}
+
+function exportarPdf() {
+    addLog('activity', '📄 Descargando historial PDF...');
+    fetch(`${API_BASE}/admin/exportar-pdf`, { headers: authHeaders() })
+        .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const disp = r.headers.get('Content-Disposition') || '';
+            const match = disp.match(/filename=([^;]+)/);
+            const filename = match ? match[1] : 'historial.pdf';
+            return r.blob().then(b => ({ b, filename }));
+        })
+        .then(({ b, filename }) => {
+            const url = URL.createObjectURL(b);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(url);
+            addLog('activity', '✅ PDF descargado correctamente');
+        })
+        .catch(e => {
+            addLog('error', `❌ Error al exportar PDF: ${e.message}`);
+            mostrarNotificacion('Error al exportar PDF', 'error');
+        });
 }
 
 function mostrarConfirmacion(mensaje, onConfirm) {
