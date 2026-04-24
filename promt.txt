@@ -1,25 +1,37 @@
-vamos a integrar una imagen de fondo (fondo_3.png) en las pantallas de login. Sigue estas instrucciones técnicas:
+aplica estos ajustes de diseño estricto para unificar la estética de la UNASAM y mejorar la experiencia de usuario. Sigue las reglas de ahorro de tokens.
 
-1. Panel de Administración (CSS - server/static/css/style.css):
+1. Corrección de Foco en Cliente .exe (WPF/XAML - LoginWindow.xaml):
 
-Pantalla de Login Admin: Aplica la imagen de fondo específicamente al body o al contenedor principal de la página de login (login.html).
+Problema: El cursor no aparece automáticamente al abrir el programa.
 
-Estilos: Usa background-image: url('../images/fondo_3.png');, background-size: cover;, background-position: center; y background-repeat: no-repeat;.
+Solución: En el evento Window_Loaded del archivo .xaml.cs, añade txtDni.Focus(); y Keyboard.Focus(txtDni);. Asegúrate de que el campo de texto reciba el foco del teclado inmediatamente para que el alumno pueda escribir sin usar el mouse.
 
-Legibilidad: Asegúrate de que el formulario de login tenga un fondo semi-transparente (ej: rgba(0,0,0,0.7)) para que el texto siga siendo legible sobre el fondo oscuro de la imagen.
+2. Unificación del Escudo y Diseño del Kiosco (C# - LoginWindow.xaml):
 
-Contexto Light/Dark: La imagen es oscura, por lo que el formulario de login siempre debe mantener texto claro en esta pantalla específica, independientemente de si el panel general está en Light Mode.
+El Escudo: Integra el escudo azul con el icono de reloj en la parte superior central de la tarjeta de login del ejecutable.
 
-2. Cliente .exe (XAML - client/ControlBiblioteca/LoginWindow.xaml):
+Estilo de Tarjeta: Modifica el contenedor de login en el .exe para que sea idéntico al del administrador:
 
-Recursos: Importa la imagen images/fondo_3.png como un recurso del proyecto WPF. Asegúrate de configurar su "Acción de compilación" como "Recurso".
+Bordes redondeados más suaves (CornerRadius="20").
 
-Diseño: En la ventana principal de login (LoginWindow), usa un ImageBrush para el fondo del Grid o Border principal.
+Fondo oscuro semi-transparente (rgba(40, 40, 45, 0.85)).
 
-Estilos: Establece ImageSource="pack://application:,,,/images/fondo_3.png" y Stretch="UniformToFill".
+Sombra paralela (DropShadow) sutil para dar profundidad.
 
-3. Mantener Funcionalidad:
+Mantén el contenido original (DNI y Razón de uso), pero usa la distribución de espaciado y márgenes del diseño web.
 
-No modifiques ninguna lógica de autenticación ni de conexión WebSocket. Solo aplica cambios visuales.
+3. Visibilidad y Accesibilidad en Admin (Web CSS - style.css):
 
-Actualiza los archivos y genera el nuevo ejecutable .exe.
+Contraste de Inputs: Los campos de usuario y contraseña en el login del admin no son visibles.
+
+Añade un fondo ligeramente más claro a los inputs (background: rgba(255, 255, 255, 0.05);).
+
+Añade un borde sutil (border: 1px solid rgba(255, 255, 255, 0.1);).
+
+Placeholders Legibles: Cambia el color de los textos de sugerencia ("Usuario de red", "••••••••") usando el selector ::placeholder para que tengan un gris claro de alto contraste que sea legible bajo la luz.
+
+Centrado Dinámico: Asegura que la tarjeta de login esté perfectamente centrada y que los iconos de usuario/candado dentro de los campos se vean nítidos.
+
+Restricción: No modifiques ninguna función de red, sockets o base de datos. Solo céntrate en los estilos y el foco del cursor.
+
+Genera el nuevo .exe y actualiza el servidor.

@@ -12,22 +12,21 @@
         <ImageBrush ImageSource="pack://application:,,,/images/fondo_3.png"
                     Stretch="UniformToFill"
                     AlignmentX="Center"
-                    AlignmentY="Center"
-                    Opacity="0.55"/>
+                    AlignmentY="Center"/>
     </Window.Background>
 
-    <!-- ── Estilos globales ────────────────────────────────────────── -->
+    <!-- ── Recursos / Estilos ────────────────────────────────────────── -->
     <Window.Resources>
-        <!-- TextBox moderno -->
+        <!-- TextBox glass — estilo nuevo -->
         <Style x:Key="ModernTextBox" TargetType="TextBox">
-            <Setter Property="Height" Value="45"/>
-            <Setter Property="Background" Value="#2B2D42"/>
+            <Setter Property="Height" Value="48"/>
+            <Setter Property="Background" Value="#14FFFFFF"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="#8D99AE"/>
-            <Setter Property="BorderThickness" Value="2"/>
             <Setter Property="CaretBrush" Value="White"/>
-            <Setter Property="Padding" Value="15,0"/>
-            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="BorderBrush" Value="#28FFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="FontSize" Value="15"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -35,25 +34,31 @@
                         <Border Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6">
+                                CornerRadius="10">
                             <ScrollViewer x:Name="PART_ContentHost"
                                           Margin="{TemplateBinding Padding}"
-                                          VerticalAlignment="Stretch"/>
+                                          VerticalAlignment="Center"/>
                         </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter Property="BorderBrush" Value="#00B4DB"/>
+                                <Setter Property="Background"  Value="#1EFFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
 
-        <!-- ComboBox moderno -->
+        <!-- ComboBox glass -->
         <Style x:Key="ModernComboBox" TargetType="ComboBox">
-            <Setter Property="Height" Value="45"/>
-            <Setter Property="Background" Value="#2B2D42"/>
+            <Setter Property="Height" Value="48"/>
+            <Setter Property="Background" Value="#14FFFFFF"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="#8D99AE"/>
-            <Setter Property="BorderThickness" Value="2"/>
-            <Setter Property="FontSize" Value="16"/>
-            <Setter Property="Padding" Value="15,0"/>
+            <Setter Property="BorderBrush" Value="#28FFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Padding" Value="14,0"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -63,44 +68,32 @@
                                     Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="6"/>
-                            <ToggleButton x:Name="ToggleButton"
-                                          Focusable="False"
+                                    CornerRadius="10"/>
+                            <ToggleButton x:Name="ToggleButton" Focusable="False"
                                           IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
                                           ClickMode="Press">
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
                                         <Grid>
                                             <Border Background="Transparent"/>
-                                            <Path x:Name="Arrow"
-                                                  HorizontalAlignment="Right"
-                                                  VerticalAlignment="Center"
-                                                  Margin="0,0,12,0"
-                                                  Fill="#8D99AE"
-                                                  Data="M 0 0 L 6 6 L 12 0 Z"/>
+                                            <Path x:Name="Arrow" HorizontalAlignment="Right"
+                                                  VerticalAlignment="Center" Margin="0,0,14,0"
+                                                  Fill="#8D99AE" Data="M 0 0 L 6 6 L 12 0 Z"/>
                                         </Grid>
                                     </ControlTemplate>
                                 </ToggleButton.Template>
                             </ToggleButton>
-                            <ContentPresenter x:Name="ContentSite"
-                                              IsHitTestVisible="False"
+                            <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False"
                                               Content="{TemplateBinding SelectionBoxItem}"
                                               ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                                               Margin="{TemplateBinding Padding}"
-                                              VerticalAlignment="Center"
-                                              HorizontalAlignment="Left"/>
-                            <Popup x:Name="Popup"
-                                   Placement="Bottom"
+                                              VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                            <Popup x:Name="Popup" Placement="Bottom"
                                    IsOpen="{TemplateBinding IsDropDownOpen}"
-                                   AllowsTransparency="True"
-                                   Focusable="False"
-                                   PopupAnimation="Slide">
-                                <Border x:Name="DropDownBorder"
-                                        Background="#2B2D42"
-                                        BorderBrush="#8D99AE"
-                                        BorderThickness="1"
-                                        CornerRadius="0,0,6,6"
-                                        MaxHeight="300"
+                                   AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                <Border x:Name="DropDownBorder" Background="#1E293B"
+                                        BorderBrush="#334155" BorderThickness="1"
+                                        CornerRadius="0,0,10,10" MaxHeight="300"
                                         MinWidth="{TemplateBinding ActualWidth}">
                                     <ScrollViewer SnapsToDevicePixels="True">
                                         <StackPanel IsItemsHost="True"
@@ -114,26 +107,24 @@
             </Setter>
         </Style>
 
-        <!-- ComboBoxItem moderno -->
+        <!-- ComboBoxItem -->
         <Style TargetType="ComboBoxItem">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="Padding" Value="10,8"/>
-            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Padding" Value="14,9"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ComboBoxItem">
-                        <Border x:Name="Bd"
-                                Background="{TemplateBinding Background}"
-                                Padding="{TemplateBinding Padding}">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
                             <ContentPresenter/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsHighlighted" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#3D405B"/>
+                                <Setter TargetName="Bd" Property="Background" Value="#1EFFFFFF"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#e94560"/>
+                                <Setter TargetName="Bd" Property="Background" Value="#00B4DB"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -141,34 +132,60 @@
             </Setter>
         </Style>
 
-        <!-- Botón moderno -->
+        <!-- Botón gradiente cyan UNASAM -->
         <Style x:Key="ModernButton" TargetType="Button">
-            <Setter Property="Background" Value="#e94560"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontSize" Value="15"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="BtnBorder"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="6"
-                                Padding="0">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"/>
+                        <Border x:Name="BtnBorder" CornerRadius="10" Padding="0">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#00B4DB" Offset="0"/>
+                                    <GradientStop Color="#0083B0" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="BtnBorder" Property="Background" Value="#d63651"/>
+                                <Setter TargetName="BtnBorder" Property="Opacity" Value="0.88"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="BtnBorder" Property="Background" Value="#c12a45"/>
+                                <Setter TargetName="BtnBorder" Property="Opacity" Value="0.75"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="BtnBorder" Property="Background" Value="#555"/>
-                                <Setter Property="Foreground" Value="#999"/>
+                                <Setter TargetName="BtnBorder" Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Botón cerrar sesión (rojo) -->
+        <Style x:Key="DangerButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="BtnBorder" Background="#e94560" CornerRadius="10" Padding="0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#c73a52"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#a82d43"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -178,143 +195,183 @@
     </Window.Resources>
 
     <Grid>
-        <!-- Overlay oscuro sobre la imagen de fondo para legibilidad -->
-        <Rectangle Fill="#CC0f0f23" Panel.ZIndex="0"/>
-
         <Grid Panel.ZIndex="1">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-        <!-- Panel de bloqueo (visible cuando está bloqueado) -->
-        <StackPanel x:Name="PanelBloqueo" Grid.Row="1" 
-                    HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Visibility="Visible">
-            
-            <!-- Logo / Título -->
-            <TextBlock Text="📚 Biblioteca UNASAM" 
-                       FontSize="36" FontWeight="Bold" 
-                       Foreground="#e94560" HorizontalAlignment="Center"
-                       Margin="0,0,0,10"/>
-            
-            <TextBlock x:Name="TxtNombreEquipo"
-                       Text="Equipo: —"
-                       FontSize="16" Foreground="#9ca3af"
-                       HorizontalAlignment="Center" Margin="0,4,0,36"/>
+            <!-- ══ PANEL DE BLOQUEO (pantalla de login del alumno) ══ -->
+            <StackPanel x:Name="PanelBloqueo" Grid.Row="1"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Visibility="Visible" Width="360">
 
-            <!-- Campo de código -->
-            <TextBlock Text="Ingrese su número de DNI:"
-                       FontSize="16" Foreground="White"
-                       HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                <!-- Logo / Identidad -->
+                <StackPanel HorizontalAlignment="Center" Margin="0,0,0,24">
+                    <!-- Escudo UNASAM — equivalente al SVG del panel web -->
+                    <Border Width="76" Height="76" CornerRadius="18" HorizontalAlignment="Center"
+                            Margin="0,0,0,14">
+                        <Border.Background>
+                            <SolidColorBrush Color="#1A00B4DB"/>
+                        </Border.Background>
+                        <Border.BorderBrush>
+                            <SolidColorBrush Color="#4400B4DB"/>
+                        </Border.BorderBrush>
+                        <Border.BorderThickness>1</Border.BorderThickness>
+                        <Viewbox Width="46" Height="46" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Canvas Width="24" Height="24">
+                                <!-- Escudo -->
+                                <Path Data="M12 2L3 7V12C3 17.5 7 21 12 22C17 21 21 17.5 21 12V7L12 2Z"
+                                      Stroke="#00B4DB" StrokeThickness="2">
+                                    <Path.Fill>
+                                        <SolidColorBrush Color="#1A00B4DB"/>
+                                    </Path.Fill>
+                                </Path>
+                                <!-- Reloj -->
+                                <Path Data="M12 6V12L16 14"
+                                      Stroke="#00B4DB" StrokeThickness="2"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                            </Canvas>
+                        </Viewbox>
+                    </Border>
+                    <TextBlock Text="Biblioteca UNASAM"
+                               FontSize="26" FontWeight="Bold" Foreground="White"
+                               HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="TxtNombreEquipo" Text="Equipo: —"
+                               FontSize="11" FontWeight="SemiBold" Foreground="#00B4DB"
+                               HorizontalAlignment="Center"                               TextOptions.TextFormattingMode="Display"/>
+                </StackPanel>
 
-            <TextBox x:Name="TxtCodigo"
-                     Width="300" Height="45" FontSize="20"
-                     HorizontalAlignment="Center"
-                     HorizontalContentAlignment="Center"
-                     MaxLength="8"
-                     Style="{StaticResource ModernTextBox}"
-                     KeyDown="TxtCodigo_KeyDown"/>
+                <!-- Tarjeta login — rgba(40,40,45,0.85) -->
+                <Border CornerRadius="20" Padding="32,28">
+                    <Border.Background>
+                        <SolidColorBrush Color="#D928282D"/>
+                    </Border.Background>
+                    <Border.BorderBrush>
+                        <SolidColorBrush Color="#40FFFFFF"/>
+                    </Border.BorderBrush>
+                    <Border.BorderThickness>1</Border.BorderThickness>
+                    <Border.Effect>
+                        <DropShadowEffect Color="Black" BlurRadius="32" ShadowDepth="0" Opacity="0.7"/>
+                    </Border.Effect>
 
-            <!-- Razón de uso -->
-            <TextBlock Text="Razón de uso:"
-                       FontSize="16" Foreground="White"
-                       HorizontalAlignment="Center" Margin="0,20,0,5"/>
+                    <StackPanel>
+                        <!-- DNI -->
+                        <TextBlock Text="NÚMERO DE DNI" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="#94A3B8"                                   Margin="2,0,0,8"/>
+                        <TextBox x:Name="TxtCodigo"
+                                 Height="48" FontSize="18"
+                                 HorizontalContentAlignment="Left"
+                                 MaxLength="8"
+                                 Style="{StaticResource ModernTextBox}"
+                                 KeyDown="TxtCodigo_KeyDown"
+                                 Margin="0,0,0,18"/>
 
-            <ComboBox x:Name="CmbRazon"
-                      Width="300" Height="40"
-                      HorizontalAlignment="Center"
-                      Style="{StaticResource ModernComboBox}"
-                      SelectionChanged="CmbRazon_SelectionChanged">
-                <ComboBoxItem Content="Investigación" IsSelected="True"/>
-                <ComboBoxItem Content="Lectura de libros digitales"/>
-                <ComboBoxItem Content="Uso de base de datos"/>
-                <ComboBoxItem Content="Trabajos académicos"/>
-                <ComboBoxItem Content="Uso de AutoCAD y/o Civil 3D"/>
-                <ComboBoxItem Content="Clases virtuales"/>
-                <ComboBoxItem Content="Otros (Especificar)"/>
-            </ComboBox>
+                        <!-- Razón -->
+                        <TextBlock Text="RAZÓN DE USO" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="#94A3B8"                                   Margin="2,0,0,8"/>
+                        <ComboBox x:Name="CmbRazon"
+                                  Height="48"
+                                  Style="{StaticResource ModernComboBox}"
+                                  SelectionChanged="CmbRazon_SelectionChanged"
+                                  Margin="0,0,0,10">
+                            <ComboBoxItem Content="Investigación" IsSelected="True"/>
+                            <ComboBoxItem Content="Lectura de libros digitales"/>
+                            <ComboBoxItem Content="Uso de base de datos"/>
+                            <ComboBoxItem Content="Trabajos académicos"/>
+                            <ComboBoxItem Content="Uso de AutoCAD y/o Civil 3D"/>
+                            <ComboBoxItem Content="Clases virtuales"/>
+                            <ComboBoxItem Content="Otros (Especificar)"/>
+                        </ComboBox>
 
-            <!-- Campo para especificar "Otros" -->
-            <Grid x:Name="PanelOtros" Width="300" Margin="0,8,0,0"
-                  HorizontalAlignment="Center" Visibility="Collapsed">
-                <TextBox x:Name="TxtOtroRazon"
-                         Height="38" FontSize="14"
-                         Style="{StaticResource ModernTextBox}"
-                         MaxLength="100"
-                         TextChanged="TxtOtroRazon_TextChanged"/>
-                <!-- Placeholder visual -->
-                <TextBlock x:Name="PlaceholderOtros"
-                           Text="Especifique la razón..."
-                           FontSize="14" Foreground="#666"
-                           IsHitTestVisible="False"
-                           VerticalAlignment="Center"
-                           Margin="12,0,0,0"/>
-            </Grid>
+                        <!-- Panel Otros -->
+                        <Grid x:Name="PanelOtros" Margin="0,0,0,10" Visibility="Collapsed">
+                            <TextBox x:Name="TxtOtroRazon"
+                                     Height="44" FontSize="13"
+                                     Style="{StaticResource ModernTextBox}"
+                                     MaxLength="100"
+                                     TextChanged="TxtOtroRazon_TextChanged"/>
+                            <TextBlock x:Name="PlaceholderOtros"
+                                       Text="Especifique la razón..."
+                                       FontSize="13" Foreground="#4B5563"
+                                       IsHitTestVisible="False"
+                                       VerticalAlignment="Center" Margin="14,0,0,0"/>
+                        </Grid>
 
-            <!-- Texto de error para "Otros" vacío -->
-            <TextBlock x:Name="TxtErrorOtros" Text=""
-                       FontSize="12" Foreground="#ff6b6b"
-                       HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                        <TextBlock x:Name="TxtErrorOtros" Text=""
+                                   FontSize="11" Foreground="#f87171"
+                                   HorizontalAlignment="Left" Margin="2,0,0,8"/>
 
-            <Button x:Name="BtnIngresar" Content="INGRESAR" 
-                    Width="300" Height="45"
-                    Margin="0,15,0,0"
-                    Style="{StaticResource ModernButton}"
-                    Click="BtnIngresar_Click"/>
+                        <!-- Botón INGRESAR -->
+                        <Button x:Name="BtnIngresar" Content="INGRESAR"
+                                Height="50" Margin="0,6,0,0"
+                                Style="{StaticResource ModernButton}"
+                                Click="BtnIngresar_Click"/>
 
-            <!-- Mensaje de estado -->
-            <TextBlock x:Name="TxtEstado" Text="" 
-                       FontSize="14" Foreground="#ffc947"
-                       HorizontalAlignment="Center" Margin="0,20,0,0"
-                       TextWrapping="Wrap" MaxWidth="400"/>
-            
-            <!-- Estado de conexión -->
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,30,0,0">
-                <Ellipse x:Name="IndicadorConexion" Width="10" Height="10" 
-                         Fill="Red" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                <TextBlock x:Name="TxtConexion" Text="Desconectado" 
-                           FontSize="12" Foreground="#888"/>
+                        <!-- Estado / error -->
+                        <TextBlock x:Name="TxtEstado" Text=""
+                                   FontSize="13" Foreground="#fbbf24"
+                                   HorizontalAlignment="Center" Margin="0,14,0,0"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
+
+                        <!-- Indicador de conexión -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
+                            <Ellipse x:Name="IndicadorConexion" Width="8" Height="8"
+                                     Fill="#ef4444" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TxtConexion" Text="Desconectado"
+                                       FontSize="11" Foreground="#64748B"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
             </StackPanel>
-        </StackPanel>
 
-        <!-- Panel de sesión activa (visible cuando está desbloqueado) -->
-        <StackPanel x:Name="PanelSesion" Grid.Row="1"
-                    HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Visibility="Collapsed">
-            
-            <TextBlock Text="✅ Sesión Activa" 
-                       FontSize="28" FontWeight="Bold"
-                       Foreground="#0f3460" HorizontalAlignment="Center"
-                       Margin="0,0,0,20"/>
+            <!-- ══ PANEL DE SESIÓN ACTIVA ══ -->
+            <StackPanel x:Name="PanelSesion" Grid.Row="1"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Visibility="Collapsed" Width="340">
 
-            <TextBlock x:Name="TxtBienvenida" Text="" 
-                       FontSize="20" Foreground="White"
-                       HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                <Border CornerRadius="20" Padding="36,30">
+                    <Border.Background>
+                        <SolidColorBrush Color="#D928282D"/>
+                    </Border.Background>
+                    <Border.BorderBrush>
+                        <SolidColorBrush Color="#40FFFFFF"/>
+                    </Border.BorderBrush>
+                    <Border.BorderThickness>1</Border.BorderThickness>
+                    <Border.Effect>
+                        <DropShadowEffect Color="Black" BlurRadius="32" ShadowDepth="0" Opacity="0.7"/>
+                    </Border.Effect>
+                    <StackPanel>
+                        <TextBlock Text="✅ Sesión Activa"
+                                   FontSize="22" FontWeight="Bold" Foreground="White"
+                                   HorizontalAlignment="Center" Margin="0,0,0,18"/>
+                        <TextBlock x:Name="TxtBienvenida" Text=""
+                                   FontSize="18" Foreground="White" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" Margin="0,0,0,8"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
+                        <TextBlock x:Name="TxtInfoAlumno" Text=""
+                                   FontSize="13" Foreground="#94A3B8"
+                                   HorizontalAlignment="Center" Margin="0,0,0,28"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
+                        <Button x:Name="BtnCerrarSesion" Content="CERRAR SESIÓN"
+                                Height="46" Style="{StaticResource DangerButton}"
+                                Click="BtnCerrarSesion_Click"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
 
-            <TextBlock x:Name="TxtInfoAlumno" Text="" 
-                       FontSize="14" Foreground="#aaa"
-                       HorizontalAlignment="Center" Margin="0,0,0,30"/>
-
-            <Button x:Name="BtnCerrarSesion" Content="CERRAR SESIÓN" 
-                    Width="250" Height="40"
-                    Style="{StaticResource ModernButton}"
-                    Click="BtnCerrarSesion_Click"/>
-        </StackPanel>
-        <!-- Consola de depuración (fila inferior) -->
-        <Border Grid.Row="3" Background="#0a0a1a" BorderBrush="#333" BorderThickness="0,1,0,0">
-            <ScrollViewer x:Name="DebugScroll"
-                          MaxHeight="120" VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Auto"
-                          Padding="8,4">
-                <TextBlock x:Name="TxtDebug"
-                           FontFamily="Consolas, Courier New" FontSize="11"
-                           Foreground="#5af78e" TextWrapping="NoWrap"
-                           VerticalAlignment="Top"/>
-            </ScrollViewer>
-        </Border>
-        </Grid><!-- fin inner Grid con contenido -->
+            <!-- Consola de depuración -->
+            <Border Grid.Row="3" Background="#0a0a1a" BorderBrush="#1E293B" BorderThickness="0,1,0,0">
+                <ScrollViewer x:Name="DebugScroll"
+                              MaxHeight="110" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Auto" Padding="8,4">
+                    <TextBlock x:Name="TxtDebug"
+                               FontFamily="Consolas, Courier New" FontSize="11"
+                               Foreground="#5af78e" TextWrapping="NoWrap" VerticalAlignment="Top"/>
+                </ScrollViewer>
+            </Border>
+        </Grid>
     </Grid>
 </Window>
