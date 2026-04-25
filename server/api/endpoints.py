@@ -5,7 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
-from models import Alumno, Terminal, Sesion, Usuario
+from models import Alumno, AlumnoMaestro, Terminal, Sesion, Usuario
 from auth_service import (
     verificar_password, hashear_password, crear_token, obtener_usuario_actual
 )
@@ -835,6 +835,187 @@ async def importar_excel_upload(
         "errores": errores,
         "detalle_errores": errores_detalle[:10]  # máx 10 para no saturar la respuesta
     }
+
+
+@router.post("/admin/importar-maestro")
+async def importar_maestro(
+    archivo: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual)
+):
+    """Importación incremental del maestro de alumnos desde Excel. Upsert por DNI."""
+    from main import logger
+    import io
+    import openpyxl
+
+    if admin.rol != "admin":
+        raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
+
+    contenido = await archivo.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
+        ws = wb.active
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Archivo Excel inválido: {e}")
+
+    headers = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+
+    def col(variantes):
+        for v in variantes:
+            if v in headers:
+                return headers.index(v)
+        return None
+
+    idx_dni     = col(["dni"])
+    idx_nombre  = col(["nombre_completo", "nombre completo", "apellidos y nombres", "apellidos nombres", "estudiante", "nombre", "nombres"])
+    idx_codigo  = col(["codigo_universitario", "código", "codigo", "cod"])
+    idx_facultad = col(["facultad"])
+    idx_escuela  = col(["escuela"])
+
+    if idx_dni is None:
+        raise HTTPException(status_code=400, detail="Columna 'dni' no encontrada en el Excel.")
+
+    def cell(fila, idx):
+        return str(fila[idx]).strip() if idx is not None and idx < len(fila) and fila[idx] is not None else ""
+
+    insertados = actualizados = errores = 0
+    errores_detalle = []
+
+    for num_fila, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if all(v is None for v in fila):
+            continue
+        try:
+            dni = cell(fila, idx_dni).replace(" ", "").replace("-", "")
+            if not dni.isdigit() or len(dni) != 8:
+                errores += 1
+                errores_detalle.append(f"Fila {num_fila}: DNI inválido '{dni}'")
+                continue
+
+            nombre   = cell(fila, idx_nombre)
+            codigo   = cell(fila, idx_codigo)
+            facultad = cell(fila, idx_facultad)
+            escuela  = cell(fila, idx_escuela)
+
+            res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni))
+            existente = res.scalar_one_or_none()
+
+            if existente:
+                existente.nombre_completo     = nombre or existente.nombre_completo
+                existente.codigo_universitario = codigo or existente.codigo_universitario
+                existente.facultad            = facultad or existente.facultad
+                existente.escuela             = escuela or existente.escuela
+                existente.fecha_actualizacion = datetime.utcnow()
+                actualizados += 1
+            else:
+                db.add(AlumnoMaestro(
+                    dni=dni,
+                    nombre_completo=nombre or "SIN NOMBRE",
+                    codigo_universitario=codigo or None,
+                    facultad=facultad or None,
+                    escuela=escuela or None,
+                ))
+                insertados += 1
+
+        except Exception as ex:
+            errores += 1
+            errores_detalle.append(f"Fila {num_fila}: {ex}")
+
+    await db.commit()
+    msg = f"Maestro importado: {insertados} nuevo(s), {actualizados} actualizado(s)"
+    if errores:
+        msg += f", {errores} fila(s) ignorada(s)"
+    logger.info(f"[ADMIN] {msg}")
+    return {"mensaje": msg, "insertados": insertados, "actualizados": actualizados,
+            "errores": errores, "detalle_errores": errores_detalle[:10]}
+
+
+@router.get("/admin/maestro")
+async def listar_maestro(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Lista paginada del maestro de alumnos con búsqueda opcional."""
+    if admin.rol != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden acceder a la base de datos")
+    from sqlalchemy import or_, func
+
+    q = select(AlumnoMaestro)
+    if search:
+        like = f"%{search}%"
+        q = q.where(or_(
+            AlumnoMaestro.dni.ilike(like),
+            AlumnoMaestro.nombre_completo.ilike(like),
+            AlumnoMaestro.codigo_universitario.ilike(like),
+        ))
+    total_q = select(func.count()).select_from(q.subquery())
+    total = (await db.execute(total_q)).scalar()
+    q = q.order_by(AlumnoMaestro.nombre_completo).offset(offset).limit(limit)
+    rows = (await db.execute(q)).scalars().all()
+    return {
+        "total": total,
+        "alumnos": [
+            {
+                "dni": r.dni,
+                "nombre_completo": r.nombre_completo,
+                "codigo_universitario": r.codigo_universitario,
+                "facultad": r.facultad,
+                "escuela": r.escuela,
+                "fecha_actualizacion": r.fecha_actualizacion,
+            }
+            for r in rows
+        ]
+    }
+
+
+class AlumnoMaestroUpdate(BaseModel):
+    nombre_completo: str | None = None
+    codigo_universitario: str | None = None
+    facultad: str | None = None
+    escuela: str | None = None
+
+
+@router.put("/admin/maestro/{dni}")
+async def actualizar_maestro(
+    dni: str,
+    datos: AlumnoMaestroUpdate,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Edición manual de un registro del maestro por DNI."""
+    if admin.rol != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden editar el maestro")
+    res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni))
+    alumno = res.scalar_one_or_none()
+    if not alumno:
+        raise HTTPException(status_code=404, detail="Alumno no encontrado en el maestro")
+    if datos.nombre_completo  is not None: alumno.nombre_completo     = datos.nombre_completo
+    if datos.codigo_universitario is not None: alumno.codigo_universitario = datos.codigo_universitario
+    if datos.facultad         is not None: alumno.facultad            = datos.facultad
+    if datos.escuela          is not None: alumno.escuela             = datos.escuela
+    alumno.fecha_actualizacion = datetime.utcnow()
+    await db.commit()
+    return {"mensaje": f"Alumno {dni} actualizado correctamente"}
+
+
+@router.delete("/admin/maestro/{dni}")
+async def eliminar_maestro(
+    dni: str,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Elimina un registro del maestro por DNI."""
+    if admin.rol != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden eliminar del maestro")
+    res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni))
+    alumno = res.scalar_one_or_none()
+    if not alumno:
+        raise HTTPException(status_code=404, detail="Alumno no encontrado")
+    await db.delete(alumno)
+    await db.commit()
+    return {"mensaje": f"Alumno {dni} eliminado del maestro"}
 
 
 @router.delete("/admin/reset-total")
