@@ -14,6 +14,7 @@ namespace ControlBiblioteca.Client
     public partial class App : Application
     {
         private static Mutex? _mutex;
+        private static bool _esDuenoMutex;
 
         // ── Bloqueo pre-ventana ───────────────────────────────────────────────────
         // El constructor estático es invocado por el CLR antes de que se cree
@@ -52,13 +53,13 @@ namespace ControlBiblioteca.Client
             Security.Bloquear();
 
             // ── Instancia única ───────────────────────────────────────────────────
-            _mutex = new Mutex(true, "Global\\ControlBiblioteca_v2", out bool esPrimero);
-            if (!esPrimero)
+            _mutex = new Mutex(true, "Global\\UNASAM_Biblioteca_Kiosco", out bool createdNew);
+            _esDuenoMutex = createdNew;
+            if (!createdNew)
             {
-                // Segunda instancia (watchdog repitió el disparo) — salir silenciosamente
-                _mutex.Dispose();
-                Security.Desbloquear(); // la instancia principal ya está corriendo
-                Environment.Exit(0);
+                // Segunda instancia ya corriendo — salir silenciosamente sin liberar
+                Security.Desbloquear();
+                Current.Shutdown();
                 return;
             }
 
@@ -80,13 +81,13 @@ namespace ControlBiblioteca.Client
                     }
                     catch { }
 
-                    _mutex.ReleaseMutex();
+                    LiberarMutex();
                     Environment.Exit(0);
                     return;
                 }
 
                 InstaladorKiosco.Ejecutar();
-                _mutex.ReleaseMutex();
+                LiberarMutex();
                 Environment.Exit(0);
                 return;
             }
@@ -106,9 +107,8 @@ namespace ControlBiblioteca.Client
                     config.TerminalName = dialog.NombreResultado;
                     config.Guardar();
                     CambiarNombreWindows(config.TerminalName);
-                    
-                    // Separar completamente: si se configuró el nombre, reiniciamos y salimos.
-                    _mutex.ReleaseMutex();
+
+                    LiberarMutex();
                     Process.Start(new ProcessStartInfo("shutdown.exe", "/r /t 5 /c \"Aplicando nombre de equipo\"") { CreateNoWindow = true, UseShellExecute = false });
                     Environment.Exit(0);
                     return;
@@ -116,7 +116,7 @@ namespace ControlBiblioteca.Client
                 else
                 {
                     // Si cancela, salir
-                    _mutex.ReleaseMutex();
+                    LiberarMutex();
                     Environment.Exit(0);
                     return;
                 }
@@ -299,14 +299,24 @@ namespace ControlBiblioteca.Client
             }
         }
 
+        private static void LiberarMutex()
+        {
+            if (_mutex != null && _esDuenoMutex)
+            {
+                try { _mutex.ReleaseMutex(); } catch { }
+                try { _mutex.Dispose(); } catch { }
+                _mutex = null;
+                _esDuenoMutex = false;
+            }
+        }
+
         protected override void OnExit(ExitEventArgs e)
         {
             CerrandoApp = true;
             _heartbeatTimer?.Stop();
             _backdoor?.Dispose();
             Security.Dispose();
-            _mutex?.ReleaseMutex();
-            _mutex?.Dispose();
+            LiberarMutex();
             base.OnExit(e);
         }
     }

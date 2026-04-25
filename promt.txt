@@ -1,37 +1,25 @@
-aplica estos ajustes de diseño estricto para unificar la estética de la UNASAM y mejorar la experiencia de usuario. Sigue las reglas de ahorro de tokens.
+tenemos dos ajustes críticos de usabilidad en el cliente C# (WPF). Sigue estas instrucciones lógicas de comportamiento para refinar la interacción:
 
-1. Corrección de Foco en Cliente .exe (WPF/XAML - LoginWindow.xaml):
+1. Restricción Numérica en DNI (TxtCodigo):
 
-Problema: El cursor no aparece automáticamente al abrir el programa.
+Requisito: El campo de DNI solo debe permitir el ingreso de números (0-9).
 
-Solución: En el evento Window_Loaded del archivo .xaml.cs, añade txtDni.Focus(); y Keyboard.Focus(txtDni);. Asegúrate de que el campo de texto reciba el foco del teclado inmediatamente para que el alumno pueda escribir sin usar el mouse.
+Instrucción: Implementa una validación en el evento PreviewTextInput. Usa una expresión regular (Regex) para bloquear cualquier carácter que no sea un dígito. Además, bloquea el pegado de texto (Paste) si el contenido no es puramente numérico.
 
-2. Unificación del Escudo y Diseño del Kiosco (C# - LoginWindow.xaml):
+2. Corrección del "Salto de Foco" al usar las flechas:
 
-El Escudo: Integra el escudo azul con el icono de reloj en la parte superior central de la tarjeta de login del ejecutable.
+Problema: Al navegar por las opciones del ComboBox (CmbRazon) con las teclas de dirección, el foco salta automáticamente de regreso al DNI, impidiendo la selección.
 
-Estilo de Tarjeta: Modifica el contenedor de login en el .exe para que sea idéntico al del administrador:
+Diagnóstico: La lógica de "Auto-Foco" es demasiado agresiva y no distingue entre "perder el foco fuera de la app" y "mover el foco a otro control legítimo".
 
-Bordes redondeados más suaves (CornerRadius="20").
+Instrucción de Lógica: Rediseña la función de mantenimiento de foco. El sistema SOLO debe forzar el foco al DNI si el elemento enfocado actualmente NO es el ComboBox de razones (CmbRazon) y NO es el cuadro de especificación de "Otro".
 
-Fondo oscuro semi-transparente (rgba(40, 40, 45, 0.85)).
+Condición: Si CmbRazon.IsFocused o CmbRazon.IsKeyboardFocusWithin es True, el timer o evento de auto-foco debe quedar suspendido inmediatamente.
 
-Sombra paralela (DropShadow) sutil para dar profundidad.
+3. Navegación fluida con Tabulador:
 
-Mantén el contenido original (DNI y Razón de uso), pero usa la distribución de espaciado y márgenes del diseño web.
+Requisito: Al presionar la tecla Tab en el campo DNI, el foco debe pasar al ComboBox. Al presionar Tab en el ComboBox, debe pasar al botón "Ingresar".
 
-3. Visibilidad y Accesibilidad en Admin (Web CSS - style.css):
+Instrucción: Configura correctamente los TabIndex en el XAML (DNI: 1, ComboBox: 2, Botón: 3) y asegúrate de que IsTabStop="True" esté habilitado en todos ellos.
 
-Contraste de Inputs: Los campos de usuario y contraseña en el login del admin no son visibles.
-
-Añade un fondo ligeramente más claro a los inputs (background: rgba(255, 255, 255, 0.05);).
-
-Añade un borde sutil (border: 1px solid rgba(255, 255, 255, 0.1);).
-
-Placeholders Legibles: Cambia el color de los textos de sugerencia ("Usuario de red", "••••••••") usando el selector ::placeholder para que tengan un gris claro de alto contraste que sea legible bajo la luz.
-
-Centrado Dinámico: Asegura que la tarjeta de login esté perfectamente centrada y que los iconos de usuario/candado dentro de los campos se vean nítidos.
-
-Restricción: No modifiques ninguna función de red, sockets o base de datos. Solo céntrate en los estilos y el foco del cursor.
-
-Genera el nuevo .exe y actualiza el servidor.
+Aplica estos cambios para que la navegación por teclado sea profesional y no confunda al estudiante.

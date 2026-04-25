@@ -13,6 +13,97 @@ let _reconnectDelay = 2000;
 
 let _pendingUnlockModal = null; // referencia al modal de desbloqueo abierto
 
+// ── Sistema de Roles (Doble Factor) ──────────────────────────────
+// 'asistente' = solo historial | 'admin' = vista completa (requiere clave nivel 2)
+// Por seguridad: SIEMPRE inicia en asistente, NO se persiste entre sesiones/recargas
+let _rol = 'asistente';
+const _PASS_NIVEL2 = 'max123';
+
+function _aplicarRol() {
+    const esAsistente = _rol === 'asistente';
+
+    // Estadísticas y equipos: siempre visibles para todos
+    const stats = document.getElementById('seccionStats');
+    if (stats) stats.style.display = 'grid';
+
+    const equipos = document.getElementById('seccionEquipos');
+    if (equipos) equipos.style.display = '';
+
+    // Botones globales: Asistente solo ve "Bloquear Todas"; Admin ve los 3
+    const btnFinalizar = document.querySelector('.btn-finalizar');
+    const btnLimpiar   = document.querySelector('.btn-limpiar');
+    if (btnFinalizar) btnFinalizar.style.display = esAsistente ? 'none' : '';
+    if (btnLimpiar)   btnLimpiar.style.display   = esAsistente ? 'none' : '';
+
+    // Botón importar Excel: solo Admin
+    const btnImportar = document.getElementById('btnImportarExcel');
+    if (btnImportar) btnImportar.style.display = esAsistente ? 'none' : 'inline-block';
+
+    // Consolas de logs: solo visibles en Vista Admin
+    const footerMonitoreo = document.getElementById('footer-monitoreo');
+    if (footerMonitoreo) footerMonitoreo.style.display = esAsistente ? 'none' : '';
+
+    const btn = document.getElementById('btnRol');
+    if (btn) btn.textContent = esAsistente ? '🔐 Vista Admin' : '👁 Vista Asistente';
+}
+
+function toggleRol() {
+    if (_rol === 'asistente') {
+        // Elevar a admin: pedir contraseña de nivel 2
+        _abrirModalNivel2();
+    } else {
+        // Bajar a asistente: directo, sin contraseña
+        _rol = 'asistente';
+        _aplicarRol();
+    }
+}
+
+function _abrirModalNivel2() {
+    const modal = document.getElementById('modal-nivel2');
+    const passInput = document.getElementById('modal-nivel2-pass');
+    const errorEl = document.getElementById('modal-nivel2-error');
+    const btnConfirmar = document.getElementById('btn-nivel2-confirmar');
+    const btnCancelar = document.getElementById('btn-nivel2-cancelar');
+
+    passInput.value = '';
+    errorEl.textContent = '';
+    modal.style.display = 'flex';
+    setTimeout(() => passInput.focus(), 50);
+
+    const confirmar = () => {
+        if (passInput.value === _PASS_NIVEL2) {
+            _rol = 'admin';
+            _aplicarRol();
+            modal.style.display = 'none';
+            passInput.removeEventListener('keydown', onKey);
+        } else {
+            errorEl.textContent = '⛔ Acceso Denegado. Contraseña incorrecta.';
+            passInput.value = '';
+            passInput.focus();
+        }
+    };
+    const cancelar = () => {
+        modal.style.display = 'none';
+        passInput.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Enter') confirmar(); if (e.key === 'Escape') cancelar(); };
+
+    // Limpiar listeners previos clonando los botones
+    const newConfirmar = btnConfirmar.cloneNode(true);
+    const newCancelar  = btnCancelar.cloneNode(true);
+    btnConfirmar.parentNode.replaceChild(newConfirmar, btnConfirmar);
+    btnCancelar.parentNode.replaceChild(newCancelar, btnCancelar);
+    newConfirmar.addEventListener('click', confirmar);
+    newCancelar.addEventListener('click', cancelar);
+    passInput.addEventListener('keydown', onKey);
+}
+
+function _initRol() {
+    // Siempre inicia en asistente por seguridad (no leer localStorage)
+    _rol = 'asistente';
+    _aplicarRol();
+}
+
 // ── Estado de filtros/orden/periodo ───────────────────────────────
 let _sortBy      = 'fecha';
 let _sortDir     = 'desc';
@@ -89,12 +180,15 @@ async function login() {
 
         const data = await res.json();
         token = data.access_token;
+
         document.getElementById('usuarioActual').textContent = username;
         document.getElementById('loginPanel').style.display  = 'none';
         document.getElementById('dashboard').style.display   = 'block';
         document.body.classList.remove('login-screen');
         btn.disabled = false;
         btn.textContent = 'Iniciar Sesión';
+
+        _initRol(); // siempre inicia en Vista Asistente
 
         // Obtener y mostrar IP real del servidor
         await obtenerYMostrarIpServidor();
@@ -147,6 +241,7 @@ function logout() {
     document.getElementById('username').value = '';
     document.getElementById('password').value = '';
     document.body.classList.add('login-screen');
+    _rol = 'asistente';
     setWsStatus(false);
 }
 
@@ -476,64 +571,74 @@ function mostrarModalDesbloqueo(ip, nombrePc) {
 }
 
 function bloquearTodas() {
-    mostrarConfirmacion('⚠️ ¿Bloquear TODAS las terminales activas?', () => {
-        addLog('activity', '🔒 Botón BLOQUEAR TODAS las terminales');
-        wsEnviar({ tipo: 'bloquear_todas' });
-    });
+    mostrarConfirmacion(
+        'Esta acción enviará una orden de bloqueo inmediato a todos los equipos conectados. Los alumnos no podrán usar las PCs hasta que sean desbloqueadas manualmente o por el administrador.',
+        () => {
+            addLog('activity', '🔒 Botón BLOQUEAR TODAS las terminales');
+            wsEnviar({ tipo: 'bloquear_todas' });
+        },
+        { titulo: '🔒 Bloquear Todos los Equipos', textoConfirmar: 'Confirmar Bloqueo Global' }
+    );
 }
 
 async function finalizarTodo() {
-    mostrarConfirmacion('🏁 ¿CERRAR TODAS LAS SESIONES ACTIVAS?\n\nEsto finalizará el cronómetro de todos los alumnos pero NO borrará los registros históricos.', async () => {
-        addLog('activity', '🏁 Botón FINALIZAR TODAS — solicitando cierre masivo...');
-        try {
-            const res = await fetch(`${API_BASE}/admin/cerrar-todas`, {
-                method: 'POST',
-                headers: authHeaders(),
-                cache: 'no-store'
-            });
-            
-            if (res.ok) {
-                const body = await res.json();
-                addLog('activity', `✅ Servidor: ${body.mensaje}`);
-                mostrarNotificacion('✅ Sesiones finalizadas correctamente', 'ok');
-                cargarDashboard();
-            } else {
-                const err = await res.json();
-                addLog('error', `❌ Finalizar todo: HTTP ${res.status} — ${err.detail || 'Fallo'}`);
-                mostrarNotificacion('❌ ERROR: ' + (err.detail || 'Fallo al finalizar'), 'error');
+    mostrarConfirmacion(
+        '⚠️ Advertencia: Se cerrarán todas las sesiones activas en este momento. Se registrará la hora de salida actual para todos los alumnos, pero los registros de la base de datos se mantendrán intactos.',
+        async () => {
+            addLog('activity', '🏁 Botón FINALIZAR TODAS — solicitando cierre masivo...');
+            try {
+                const res = await fetch(`${API_BASE}/admin/cerrar-todas`, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    cache: 'no-store'
+                });
+                if (res.ok) {
+                    const body = await res.json();
+                    addLog('activity', `✅ Servidor: ${body.mensaje}`);
+                    mostrarNotificacion('✅ Sesiones finalizadas correctamente', 'ok');
+                    cargarDashboard();
+                } else {
+                    const err = await res.json();
+                    addLog('error', `❌ Finalizar todo: HTTP ${res.status} — ${err.detail || 'Fallo'}`);
+                    mostrarNotificacion('❌ ERROR: ' + (err.detail || 'Fallo al finalizar'), 'error');
+                }
+            } catch (e) {
+                addLog('error', `❌ Error de red al finalizar todo: ${e.message}`);
+                mostrarNotificacion('❌ ERROR: Problema de conexión', 'error');
             }
-        } catch (e) {
-            addLog('error', `❌ Error de red al finalizar todo: ${e.message}`);
-            mostrarNotificacion('❌ ERROR: Problema de conexión', 'error');
-        }
-    });
+        },
+        { titulo: '🏁 Finalizar Sesiones', textoConfirmar: 'Finalizar Sesiones' }
+    );
 }
 
 async function limpiarTodo() {
-    mostrarConfirmacion('⚠️ ¿BORRAR TODO EL SISTEMA?\n\nEsta acción eliminará terminales, alumnos y sesiones permanentemente.', async () => {
-        addLog('activity', '🧹 Botón LIMPIAR TODO — solicitando reset total...');
-        try {
-            const res = await fetch(`${API_BASE}/admin/reset-total`, {
-                method: 'DELETE',
-                headers: authHeaders(),
-                cache: 'no-store'
-            });
-            
-            if (res.ok) {
-                const body = await res.json();
-                addLog('activity', `✅ Servidor: ${body.mensaje}`);
-                mostrarNotificacion('✅ SISTEMA RESETEADO. Recargando...', 'ok');
-                setTimeout(() => { location.reload(); }, 1500);
-            } else {
-                const err = await res.json().catch(() => ({}));
-                addLog('error', `❌ Reset total: HTTP ${res.status} — ${err.mensaje || err.detail || 'Fallo'}`);
-                mostrarNotificacion('❌ ERROR: ' + (err.detail || 'Fallo al limpiar'), 'error');
+    mostrarConfirmacion(
+        '🔥 PELIGRO: Esta acción finalizará todas las sesiones activas Y BORRARÁ permanentemente el historial de sesiones actual de la base de datos. Use esto solo si desea iniciar un nuevo periodo desde cero.',
+        async () => {
+            addLog('activity', '🧹 Botón LIMPIAR TODO — borrando historial de sesiones...');
+            try {
+                const res = await fetch(`${API_BASE}/admin/limpiar-sesiones`, {
+                    method: 'DELETE',
+                    headers: authHeaders(),
+                    cache: 'no-store'
+                });
+                if (res.ok) {
+                    const body = await res.json();
+                    addLog('activity', `✅ Servidor: ${body.mensaje}`);
+                    mostrarNotificacion('✅ Historial borrado. Nuevo periodo iniciado.', 'ok');
+                    cargarDashboard();
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    addLog('error', `❌ Limpiar sesiones: HTTP ${res.status} — ${err.mensaje || err.detail || 'Fallo'}`);
+                    mostrarNotificacion('❌ ERROR: ' + (err.detail || 'Fallo al limpiar'), 'error');
+                }
+            } catch (e) {
+                addLog('error', `❌ Error de red al limpiar: ${e.message}`);
+                mostrarNotificacion('❌ ERROR: Problema de conexión', 'error');
             }
-        } catch (e) {
-            addLog('error', `❌ Error de red al limpiar todo: ${e.message}`);
-            mostrarNotificacion('❌ ERROR: Problema de conexión', 'error');
-        }
-    });
+        },
+        { titulo: '🔥 Limpiar Historial', textoConfirmar: 'BORRAR TODO Y REINICIAR', critico: true }
+    );
 }
 
 async function cerrarSesion(sesionId, motivo = 'admin', silent = false, nombrePc = null, nombreAlumno = null) {
@@ -623,7 +728,13 @@ function renderTerminales(terminales, sesiones = []) {
                 </div>
                 <div class="tc-info">
                     <div class="terminal-ip"><strong>IP:</strong> ${escapeHtml(t.ip)}</div>
-                    <div class="tc-alumno ${sesion ? 'tc-alumno-activo' : ''}">${sesion ? escapeHtml(sesion.alumno_nombre) : 'Disponible'}</div>
+                    <div class="tc-alumno ${sesion && sesion.activa ? 'tc-alumno-activo' : ''}">${
+                        sesion && sesion.activa
+                            ? escapeHtml(sesion.alumno_nombre)
+                            : t.estado === 'bloqueado'
+                                ? '<span class="text-warning">PC Bloqueada por Admin</span>'
+                                : 'Disponible'
+                    }</div>
                 </div>
                 <div class="tc-acciones">
                     ${botonesPrimarios}
@@ -706,6 +817,49 @@ function exportarExcel() {
     _descargarArchivo(`${API_BASE}/admin/exportar-excel`, '📊 Descargando historial Excel...', 'historial.xlsx');
 }
 
+function abrirImportarExcel() {
+    mostrarConfirmacion(
+        '⚠️ Esta acción insertará registros masivos en el historial. Asegúrese de que el Excel siga el formato de exportación estándar para evitar errores.',
+        () => { document.getElementById('inputImportarExcel').click(); },
+        { titulo: '📥 Importar Historial (Excel)', textoConfirmar: 'Seleccionar archivo' }
+    );
+}
+
+async function ejecutarImportacion(input) {
+    const archivo = input.files[0];
+    if (!archivo) return;
+    input.value = '';
+
+    mostrarNotificacion('⏳ Importando Excel...', 'ok');
+    addLog('activity', `📥 Importando archivo: ${archivo.name}`);
+
+    const form = new FormData();
+    form.append('archivo', archivo);
+
+    try {
+        const res = await fetch(`${API_BASE}/admin/importar-excel`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: form
+        });
+        const body = await res.json();
+        if (res.ok) {
+            mostrarNotificacion(`✅ ${body.mensaje}`, 'ok');
+            addLog('activity', `✅ Importación: ${body.mensaje}`);
+            if (body.detalle_errores && body.detalle_errores.length > 0) {
+                body.detalle_errores.forEach(e => addLog('error', `⚠️ ${e}`));
+            }
+            cargarDashboard();
+        } else {
+            mostrarNotificacion(`❌ ${body.detail || 'Error al importar'}`, 'error');
+            addLog('error', `❌ Importación fallida: ${body.detail}`);
+        }
+    } catch (e) {
+        mostrarNotificacion('❌ Error de conexión al importar', 'error');
+        addLog('error', `❌ Error de red al importar: ${e.message}`);
+    }
+}
+
 function exportarPdf() {
     _descargarArchivo(`${API_BASE}/admin/exportar-pdf`, '📄 Descargando historial PDF...', 'historial.pdf');
 }
@@ -722,9 +876,19 @@ function _rebindBtn(id, handler) {
     return clone;
 }
 
-function mostrarConfirmacion(mensaje, onConfirm) {
+function mostrarConfirmacion(mensaje, onConfirm, { titulo = '⚠️ Advertencia', textoConfirmar = 'Confirmar', critico = false } = {}) {
     const modal = document.getElementById('modal-advertencia');
-    document.getElementById('modal-mensaje').textContent = mensaje;
+    const tituloEl   = document.getElementById('modal-titulo');
+    const mensajeEl  = document.getElementById('modal-mensaje');
+    const btnConfirm = document.getElementById('btn-modal-confirmar');
+
+    if (tituloEl)  tituloEl.textContent  = titulo;
+    if (mensajeEl) mensajeEl.textContent  = mensaje;
+    if (btnConfirm) {
+        btnConfirm.textContent = textoConfirmar;
+        btnConfirm.style.background = critico ? '#dc2626' : '';
+        btnConfirm.style.boxShadow  = critico ? '0 0 12px rgba(220,38,38,0.5)' : '';
+    }
     _rebindBtn('btn-modal-confirmar', () => { modal.style.display = 'none'; onConfirm(); });
     _rebindBtn('btn-modal-cancelar',  () => { modal.style.display = 'none'; });
     modal.style.display = 'flex';

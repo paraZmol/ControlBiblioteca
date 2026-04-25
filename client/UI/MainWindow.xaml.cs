@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,9 @@ namespace ControlBiblioteca.Client.UI
 {
     public partial class MainWindow : Window
     {
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
         private readonly Services.WebSocketService _wsService;
         private bool _desbloqueado;
         private bool _cerrandoPorEscape;
@@ -22,9 +26,7 @@ namespace ControlBiblioteca.Client.UI
 
         private CancellationTokenSource? _loginCts;
 
-        // Combo de emergencia offline — sin PIN, sin servidor
-        // Ctrl + Alt + F10 cierra el kiosco inmediatamente
-        private const Key MASTER_KEY       = Key.F10;
+        private const Key MASTER_KEY         = Key.F10;
         private const ModifierKeys MASTER_MOD = ModifierKeys.Control | ModifierKeys.Alt;
 
         private static readonly Dictionary<string, (string Nombres, string Apellidos, bool Habilitado)> _codigosPrueba = new()
@@ -42,20 +44,16 @@ namespace ControlBiblioteca.Client.UI
         {
             InitializeComponent();
 
-            // Garantía extra: el SecurityManager debe estar activo antes de mostrarse.
-            // App.Application_Startup ya lo hace, pero si MainWindow se instanciara
-            // por otro camino esta línea lo cubre igualmente.
             if (!AppActual.Security.EstaBloqueado)
                 AppActual.Security.Bloquear();
 
             Loaded += (_, _) => CubrirPantallaCompleta();
+            Loaded += (_, _) => FocoDNI();
 
-            // ── Configuración y conexión ──────────────────────────────
             var (cfg, cfgDiag) = Services.KioscoConfig.LeerConDiagnostico();
             string localIp     = ObtenerIpLocal();
             string wsUrl       = $"{cfg.WsBaseUrl}/ws/terminal/{localIp}";
-
-            string hostname = Environment.MachineName;
+            string hostname    = Environment.MachineName;
 
             Loaded += (_, _) =>
             {
@@ -70,8 +68,7 @@ namespace ControlBiblioteca.Client.UI
             bool primerError = true;
 
             _wsService = new Services.WebSocketService(wsUrl);
-            // Enviar hello con hostname tras cada conexión exitosa
-            _wsService.InitialGreeting = JsonSerializer.Serialize(new { tipo = "hello", hostname });
+            _wsService.InitialGreeting     = JsonSerializer.Serialize(new { tipo = "hello", hostname });
             _wsService.OnMensajeRecibido  += ProcesarMensajeServidor;
             _wsService.OnConexionCambiada += ActualizarEstadoConexion;
             _wsService.OnError += msg =>
@@ -82,10 +79,7 @@ namespace ControlBiblioteca.Client.UI
                     primerError = false;
                     Dispatcher.BeginInvoke(() =>
                         MessageBox.Show(
-                            $"No se pudo conectar al servidor WebSocket.\n\n" +
-                            $"URL intentada:\n{wsUrl}\n\n" +
-                            $"Error:\n{msg}\n\n" +
-                            $"Config:\n{cfgDiag}",
+                            $"No se pudo conectar al servidor WebSocket.\n\nURL intentada:\n{wsUrl}\n\nError:\n{msg}\n\nConfig:\n{cfgDiag}",
                             "Error de conexión — Kiosco",
                             MessageBoxButton.OK,
                             MessageBoxImage.Warning));
@@ -93,34 +87,88 @@ namespace ControlBiblioteca.Client.UI
             };
             _ = _wsService.ConectarAsync();
 
-            // PreviewKeyDown: se dispara ANTES de que TxtCodigo u otro hijo
-            // procese la tecla — garantiza que el contador de Escape funcione
-            // aunque el TextBox tenga el foco.
             PreviewKeyDown += MainWindow_PreviewKeyDown;
 
-            Loaded  += (_, _) => {
-                FocusManager.SetFocusedElement(this, TxtCodigo);
-                TxtCodigo.Focus();
-                Keyboard.Focus(TxtCodigo);
+            // Foco inteligente event-driven — sin timers
+            this.Activated += (_, _) =>
+            {
+                PonerVentanaAlFrente();
+                FocoDNI();
             };
+
+            this.IsVisibleChanged += (_, _) =>
+            {
+                if (IsVisible && !_desbloqueado)
+                {
+                    PonerVentanaAlFrente();
+                    FocoDNI();
+                }
+            };
+
             Closing += (_, e) => { if (!_desbloqueado && !_cerrandoPorEscape) e.Cancel = true; };
         }
 
-        // ── Eventos de UI ─────────────────────────────────────────────
-
-        // Brushes para validación visual
+        // ── Brushes de validación ─────────────────────────────────────
         private static readonly SolidColorBrush _borderNormal = new(Color.FromRgb(0x8D, 0x99, 0xAE));
         private static readonly SolidColorBrush _borderError  = new(Color.FromRgb(0xFF, 0x4D, 0x4D));
+
+        // ── Foco inteligente (event-driven, sin timers) ───────────────
+
+        private void FocoDNI()
+        {
+            if (_desbloqueado) return;
+            if (EstaFocusEnControlLegitimo()) return;
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_desbloqueado) return;
+                if (EstaFocusEnControlLegitimo()) return;
+                TxtCodigo?.Focus();
+                Keyboard.Focus(TxtCodigo);
+                if (TxtCodigo != null)
+                    TxtCodigo.CaretIndex = TxtCodigo.Text.Length;
+            }), System.Windows.Threading.DispatcherPriority.Input);
+        }
+
+        // Devuelve true si el foco está en un control legítimo distinto del DNI
+        private bool EstaFocusEnControlLegitimo()
+        {
+            if (CmbRazon != null && (CmbRazon.IsFocused || CmbRazon.IsKeyboardFocusWithin)) return true;
+            if (TxtOtroRazon != null && (TxtOtroRazon.IsFocused || TxtOtroRazon.IsKeyboardFocusWithin)) return true;
+            if (BtnIngresar != null && BtnIngresar.IsFocused) return true;
+            return false;
+        }
+
+        // ── Validación numérica en campo DNI ─────────────────────────
+
+        private void TxtCodigo_PreviewTextInput(object sender, TextCompositionEventArgs e)
+        {
+            e.Handled = !System.Text.RegularExpressions.Regex.IsMatch(e.Text, @"^\d+$");
+        }
+
+        private void TxtCodigo_Pasting(object sender, DataObjectPastingEventArgs e)
+        {
+            if (e.DataObject.GetDataPresent(typeof(string)))
+            {
+                string texto = (string)e.DataObject.GetData(typeof(string));
+                if (!System.Text.RegularExpressions.Regex.IsMatch(texto, @"^\d+$"))
+                    e.CancelCommand();
+            }
+            else
+            {
+                e.CancelCommand();
+            }
+        }
+
+        // ── Eventos de UI ─────────────────────────────────────────────
 
         private async void BtnIngresar_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                // Limpiar errores previos
                 LimpiarErroresVisuales();
                 bool hayError = false;
 
-                // Validar DNI
                 string codigo = TxtCodigo.Text.Trim().ToUpper();
                 if (string.IsNullOrEmpty(codigo) || !System.Text.RegularExpressions.Regex.IsMatch(codigo, @"^\d{8}$"))
                 {
@@ -129,7 +177,6 @@ namespace ControlBiblioteca.Client.UI
                     hayError = true;
                 }
 
-                // Validar razón de uso
                 string razon = ObtenerRazon();
                 if (string.IsNullOrEmpty(razon))
                 {
@@ -157,7 +204,7 @@ namespace ControlBiblioteca.Client.UI
 
                 await _wsService.EnviarAsync(JsonSerializer.Serialize(new
                 {
-                    tipo   = "login_request",
+                    tipo = "login_request",
                     codigo,
                     razon
                 }));
@@ -232,22 +279,53 @@ namespace ControlBiblioteca.Client.UI
             if (e.Key == Key.Enter) BtnIngresar_Click(sender, e);
         }
 
+        private void TxtCodigo_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ActualizarEstadoBoton();
+        }
+
+        private void ActualizarEstadoBoton()
+        {
+            if (BtnIngresar == null || TxtCodigo == null || CmbRazon == null) return;
+            string dni = TxtCodigo.Text.Trim();
+            bool dniValido = System.Text.RegularExpressions.Regex.IsMatch(dni, @"^\d{8}$");
+            bool razonValida = !string.IsNullOrEmpty(ObtenerRazon());
+            BtnIngresar.IsEnabled = dniValido && razonValida;
+            CommandManager.InvalidateRequerySuggested();
+        }
+
         // ── Razón de uso ──────────────────────────────────────────────
 
         private void CmbRazon_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (PanelOtros == null) return; // diseñador
+            if (PanelOtros == null) return;
             var item = CmbRazon.SelectedItem as ComboBoxItem;
             string texto = item?.Content?.ToString() ?? "";
             bool esOtros = texto.StartsWith("Otros");
             PanelOtros.Visibility = esOtros ? Visibility.Visible : Visibility.Collapsed;
-            if (!esOtros)
+
+            if (esOtros)
             {
-                TxtOtroRazon.Text = "";
-                TxtErrorOtros.Text = "";
+                Dispatcher.BeginInvoke(new Action(() => {
+                    TxtOtroRazon.Focus();
+                    Keyboard.Focus(TxtOtroRazon);
+                }), System.Windows.Threading.DispatcherPriority.Input);
             }
-            // Limpiar error visual del ComboBox al cambiar selección
+            else
+            {
+                TxtOtroRazon.Text  = "";
+                TxtErrorOtros.Text = "";
+                Dispatcher.BeginInvoke(new Action(() => {
+                    if (CmbRazon == null || !CmbRazon.IsDropDownOpen)
+                    {
+                        TxtCodigo.Focus();
+                        Keyboard.Focus(TxtCodigo);
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Input);
+            }
+
             CmbRazon.BorderBrush = _borderNormal;
+            ActualizarEstadoBoton();
         }
 
         private void TxtOtroRazon_TextChanged(object sender, TextChangedEventArgs e)
@@ -256,9 +334,9 @@ namespace ControlBiblioteca.Client.UI
             PlaceholderOtros.Visibility = string.IsNullOrEmpty(TxtOtroRazon.Text)
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            // Limpiar error visual al escribir
             TxtOtroRazon.BorderBrush = _borderNormal;
             TxtErrorOtros.Text = "";
+            ActualizarEstadoBoton();
         }
 
         private string ObtenerRazon()
@@ -282,10 +360,8 @@ namespace ControlBiblioteca.Client.UI
             TxtEstado.Text           = "";
         }
 
-        // PreviewKeyDown: tunelización → se ejecuta antes que el hijo con foco
         private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
         {
-            // Ctrl+Alt+F10 — master key de emergencia (offline, sin PIN)
             if (e.Key == MASTER_KEY && (Keyboard.Modifiers & MASTER_MOD) == MASTER_MOD)
             {
                 e.Handled = true;
@@ -300,7 +376,7 @@ namespace ControlBiblioteca.Client.UI
                 LogDebug($"Escape {_contadorEscape}/{ESCAPES_PARA_SALIR}");
                 if (_contadorEscape >= ESCAPES_PARA_SALIR)
                     ActivarEscapeEmergencia("escape_5x");
-                e.Handled = true; // evitar que el TextBox u otros hijos lo procesen
+                e.Handled = true;
             }
             else
             {
@@ -322,8 +398,6 @@ namespace ControlBiblioteca.Client.UI
         private void Desbloquear(string nombres, string apellidos, string codigo)
         {
             _desbloqueado = true;
-
-            // Cancelar el timeout de 10s del login — ya no es necesario
             _loginCts?.Cancel();
 
             Dispatcher.Invoke(() =>
@@ -331,7 +405,6 @@ namespace ControlBiblioteca.Client.UI
                 Debug.WriteLine($"[ENTRADA] {nombres} {apellidos} | {codigo}");
                 LogDebug($"Acceso concedido: {nombres} {apellidos}");
 
-                // Levantar TODAS las capas de seguridad — acceso normal al escritorio
                 AppActual.Security.Desbloquear();
 
                 PanelBloqueo.Visibility = Visibility.Collapsed;
@@ -339,7 +412,6 @@ namespace ControlBiblioteca.Client.UI
                 TxtBienvenida.Text      = $"Bienvenido, {nombres}";
                 TxtInfoAlumno.Text      = $"Código: {codigo}";
 
-                // Ocultar el kiosco — el escritorio queda completamente libre
                 Hide();
             });
         }
@@ -351,15 +423,14 @@ namespace ControlBiblioteca.Client.UI
 
             Dispatcher.Invoke(() =>
             {
-                // Reactivar TODAS las capas ANTES de mostrarse
                 AppActual.Security.Bloquear();
 
                 PanelSesion.Visibility  = Visibility.Collapsed;
                 PanelBloqueo.Visibility = Visibility.Visible;
                 TxtCodigo.Text          = "";
                 TxtEstado.Text          = "";
-                BtnIngresar.IsEnabled   = true;
                 CmbRazon.SelectedIndex  = 0;
+                BtnIngresar.IsEnabled   = false;
                 TxtOtroRazon.Text       = "";
                 PanelOtros.Visibility   = Visibility.Collapsed;
                 TxtErrorOtros.Text      = "";
@@ -368,11 +439,9 @@ namespace ControlBiblioteca.Client.UI
                 Show();
                 CubrirPantallaCompleta();
                 Topmost = true;
-
-                // Activate() lleva el foco al proceso — imprescindible para
-                // que PreviewKeyDown reciba los eventos de teclado
                 Activate();
-                TxtCodigo.Focus();
+                PonerVentanaAlFrente();
+                FocoDNI();
             });
         }
 
@@ -400,7 +469,6 @@ namespace ControlBiblioteca.Client.UI
                                 try
                                 {
                                     Desbloquear(nom, ape, cod);
-                                    // Confirmar desbloqueo exitoso al servidor
                                     await _wsService.EnviarAsync("{\"tipo\":\"unlock_confirmed\"}");
                                     LogDebug("unlock_confirmed enviado al servidor");
                                 }
@@ -420,15 +488,15 @@ namespace ControlBiblioteca.Client.UI
                         break;
 
                     case "bloquear":
+                    case "forzar_cierre_sesion":
                         try
                         {
-                            // Mover a hilo secundario para no bloquear el WebSocket principal
                             _ = Task.Run(() => Bloquear());
                         }
                         catch (Exception ex)
                         {
-                            LogDebug($"ERROR bloquear: {ex}");
-                            _ = _wsService.ReportarErrorAsync($"Error bloqueo: {ex.Message}");
+                            LogDebug($"ERROR {tipo}: {ex}");
+                            _ = _wsService.ReportarErrorAsync($"Error {tipo}: {ex.Message}");
                         }
                         break;
 
@@ -452,7 +520,6 @@ namespace ControlBiblioteca.Client.UI
                         break;
 
                     case "heartbeat_ack":
-                        // Sin acción necesaria
                         break;
 
                     case "remote_command":
@@ -461,15 +528,10 @@ namespace ControlBiblioteca.Client.UI
                             string action = root.TryGetProperty("action", out var act) ? act.GetString() ?? "" : "";
                             if (action == "shutdown")
                             {
-                                LogDebug("Comando remoto recibido: enviando session_closed y apagando PC...");
-                                // Enviar mensaje de cierre de sesión antes de apagar
+                                LogDebug("Comando remoto: apagando PC...");
                                 var sessionClosedMsg = JsonSerializer.Serialize(new { tipo = "session_closed", hora_salida = DateTime.UtcNow.ToString("O") });
                                 _ = _wsService.EnviarAsync(sessionClosedMsg);
-                                
-                                // Pequeña pausa para asegurar que el mensaje se envía
                                 System.Threading.Thread.Sleep(500);
-                                
-                                // Apagar PC
                                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
                                     "shutdown", "/s /f /t 0")
                                 {
@@ -530,6 +592,20 @@ namespace ControlBiblioteca.Client.UI
             Top    = 0;
             Width  = SystemParameters.PrimaryScreenWidth;
             Height = SystemParameters.PrimaryScreenHeight;
+        }
+
+        private void PonerVentanaAlFrente()
+        {
+            try
+            {
+                IntPtr handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                if (handle != IntPtr.Zero)
+                    SetForegroundWindow(handle);
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"Error al poner ventana al frente: {ex.Message}");
+            }
         }
 
         private static string ObtenerIpLocal()
