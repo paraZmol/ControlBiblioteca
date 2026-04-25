@@ -1,99 +1,171 @@
-# models.py - Modelos de base de datos para el sistema de control
+# models.py - Esquema relacional normalizado (UNASAM Ingeniería de Sistemas)
 from datetime import datetime, date
-from sqlalchemy import String, Integer, Boolean, DateTime, Date, ForeignKey, Text
+from sqlalchemy import String, Integer, Boolean, DateTime, Date, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
 
 
+class Facultad(Base):
+    __tablename__ = "facultades"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:     Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nombre: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+
+    escuelas: Mapped[list["Escuela"]] = relationship(back_populates="facultad")
+
+    def __repr__(self): return f"<Facultad {self.id}: {self.nombre}>"
+
+
+class Escuela(Base):
+    __tablename__ = "escuelas"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:           Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nombre:       Mapped[str] = mapped_column(String(200), nullable=False)
+    id_facultad:  Mapped[int] = mapped_column(ForeignKey("facultades.id"), nullable=False)
+
+    facultad:  Mapped["Facultad"]          = relationship(back_populates="escuelas")
+    alumnos:   Mapped[list["AlumnoMaestro"]] = relationship(back_populates="escuela_rel")
+
+    def __repr__(self): return f"<Escuela {self.id}: {self.nombre}>"
+
+
 class AlumnoMaestro(Base):
-    """Maestro local de alumnos — fuente primaria de búsqueda por DNI."""
     __tablename__ = "alumnos_maestro"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
 
-    dni: Mapped[str] = mapped_column(String(20), primary_key=True)
-    nombre_completo: Mapped[str] = mapped_column(String(200), nullable=False)
-    codigo_universitario: Mapped[str] = mapped_column(String(30), nullable=True, index=True)
-    facultad: Mapped[str] = mapped_column(String(150), nullable=True)
-    escuela: Mapped[str] = mapped_column(String(100), nullable=True)
-    fecha_actualizacion: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    dni:        Mapped[str] = mapped_column(String(8),   primary_key=True)
+    codigo:     Mapped[str] = mapped_column(String(30),  nullable=True, index=True)
+    nombre:     Mapped[str] = mapped_column(String(200), nullable=False)
+    id_escuela: Mapped[int] = mapped_column(ForeignKey("escuelas.id"), nullable=True)
 
-    def __repr__(self):
-        return f"<AlumnoMaestro {self.dni} - {self.nombre_completo}>"
+    escuela_rel: Mapped["Escuela"] = relationship(back_populates="alumnos")
+    # Cascade: elimina sesiones automáticamente cuando se elimina el alumno
+    sesiones:    Mapped[list["Sesion"]] = relationship(back_populates="alumno", cascade="all, delete-orphan")
 
-
-class Alumno(Base):
-    """Caché local de alumnos (sincronizado desde API externa OGE/Koha)."""
-    __tablename__ = "alumnos"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    codigo: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)  # código de matrícula ej: 161.2502.614
-    dni: Mapped[str] = mapped_column(String(20), nullable=True, index=True)                   # DNI del estudiante ej: 71926257
-    nombres: Mapped[str] = mapped_column(String(100), nullable=False)
-    apellidos: Mapped[str] = mapped_column(String(100), nullable=False)
-    escuela: Mapped[str] = mapped_column(String(100), nullable=True)
-    facultad: Mapped[str] = mapped_column(String(150), nullable=True)
-    habilitado: Mapped[bool] = mapped_column(Boolean, default=True)
-    ultima_sync: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    # Relación con sesiones
-    sesiones: Mapped[list["Sesion"]] = relationship(back_populates="alumno")
-
-    def __repr__(self):
-        return f"<Alumno {self.codigo} - {self.apellidos}, {self.nombres}>"
+    def __repr__(self): return f"<AlumnoMaestro {self.dni}: {self.nombre}>"
 
 
 class Terminal(Base):
-    """Terminales (PCs) registradas en la biblioteca."""
     __tablename__ = "terminales"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    nombre: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    ip: Mapped[str] = mapped_column(String(45), nullable=False)
-    estado: Mapped[str] = mapped_column(String(20), default="bloqueado")  # bloqueado, activo, offline
-    ultima_conexion: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    id:               Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nombre_red:       Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    ip:               Mapped[str] = mapped_column(String(45),  nullable=False)
+    estado:           Mapped[str] = mapped_column(String(20),  default="bloqueado")
+    ultima_conexion:  Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    intentos_fallidos: Mapped[int] = mapped_column(Integer, default=0)
+    bloqueada_hasta:  Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
-    # Relación con sesiones
     sesiones: Mapped[list["Sesion"]] = relationship(back_populates="terminal")
 
-    def __repr__(self):
-        return f"<Terminal {self.nombre} ({self.ip}) - {self.estado}>"
+    def __repr__(self): return f"<Terminal {self.nombre_red} ({self.ip}) - {self.estado}>"
+
+    # Alias para compatibilidad con código existente que usa .nombre
+    @property
+    def nombre(self): return self.nombre_red
+    @nombre.setter
+    def nombre(self, v): self.nombre_red = v
+
+
+class CatalogoMotivo(Base):
+    __tablename__ = "catalogo_motivos"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:          Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    descripcion: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    activo:      Mapped[bool] = mapped_column(Boolean, default=True)
+
+    sesiones: Mapped[list["Sesion"]] = relationship(back_populates="motivo_rel")
+
+    def __repr__(self): return f"<CatalogoMotivo {self.id}: {self.descripcion}>"
 
 
 class Sesion(Base):
-    """Sesiones de uso de las terminales."""
     __tablename__ = "sesiones"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    alumno_id: Mapped[int] = mapped_column(ForeignKey("alumnos.id"), nullable=False)
-    terminal_id: Mapped[int] = mapped_column(ForeignKey("terminales.id"), nullable=False)
-    inicio: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    fin: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # hora_salida
-    hora_inicio: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # hora capturada del administrador
-    hora_salida: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # hora capturada del administrador
-    activa: Mapped[bool] = mapped_column(Boolean, default=True)
-    confirmada: Mapped[bool] = mapped_column(Boolean, default=False)  # True cuando el cliente confirma el desbloqueo
-    motivo_cierre: Mapped[str] = mapped_column(String(50), nullable=True)  # manual, timeout, admin
-    razon_uso: Mapped[str] = mapped_column(String(200), nullable=True)  # razon de uso seleccionada en login
-    # Campos desnormalizados del alumno (snapshots al momento del ingreso)
-    dni: Mapped[str] = mapped_column(String(20), nullable=True)
-    facultad: Mapped[str] = mapped_column(String(150), nullable=True)
-    escuela: Mapped[str] = mapped_column(String(100), nullable=True)
-    fecha_uso: Mapped[date] = mapped_column(Date, nullable=True)
+    id:           Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dni_alumno:   Mapped[str] = mapped_column(ForeignKey("alumnos_maestro.dni"), nullable=False)
+    id_terminal:  Mapped[int] = mapped_column(ForeignKey("terminales.id"),       nullable=False)
+    hora_entrada: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    hora_salida:  Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    motivo_id:    Mapped[int] = mapped_column(ForeignKey("catalogo_motivos.id"), nullable=True)
+    estado:       Mapped[str] = mapped_column(String(20), default="activa")  # activa | cerrada
 
-    # Relaciones
-    alumno: Mapped["Alumno"] = relationship(back_populates="sesiones")
-    terminal: Mapped["Terminal"] = relationship(back_populates="sesiones")
+    # Campos extra compatibilidad y snapshot
+    razon_uso:     Mapped[str]  = mapped_column(String(200), nullable=True)
+    motivo_cierre: Mapped[str]  = mapped_column(String(50),  nullable=True)
+    confirmada:    Mapped[bool] = mapped_column(Boolean, default=False)
+    fecha_uso:     Mapped[date] = mapped_column(Date, nullable=True)
 
-    def __repr__(self):
-        return f"<Sesion {self.id} - Alumno:{self.alumno_id} Terminal:{self.terminal_id}>"
+    alumno:     Mapped["AlumnoMaestro"]  = relationship(back_populates="sesiones")
+    terminal:   Mapped["Terminal"]       = relationship(back_populates="sesiones")
+    motivo_rel: Mapped["CatalogoMotivo"] = relationship(back_populates="sesiones")
+
+    # ── Propiedades de compatibilidad con código legacy ──
+    @property
+    def activa(self): return self.estado == "activa"
+    @activa.setter
+    def activa(self, v): self.estado = "activa" if v else "cerrada"
+
+    @property
+    def inicio(self): return self.hora_entrada
+    @inicio.setter
+    def inicio(self, v): self.hora_entrada = v
+
+    @property
+    def fin(self): return self.hora_salida
+    @fin.setter
+    def fin(self, v): self.hora_salida = v
+
+    @property
+    def terminal_id(self): return self.id_terminal
+    @terminal_id.setter
+    def terminal_id(self, v): self.id_terminal = v
+
+    @property
+    def dni(self): return self.dni_alumno
+    @dni.setter
+    def dni(self, v): self.dni_alumno = v
+
+    # facultad/escuela como propiedades resueltas por JOIN
+    @property
+    def facultad(self):
+        if self.alumno and self.alumno.escuela_rel and self.alumno.escuela_rel.facultad:
+            return self.alumno.escuela_rel.facultad.nombre
+        return ""
+    @facultad.setter
+    def facultad(self, v): pass  # ignorado, viene de FK
+
+    @property
+    def escuela(self):
+        if self.alumno and self.alumno.escuela_rel:
+            return self.alumno.escuela_rel.nombre
+        return ""
+    @escuela.setter
+    def escuela(self, v): pass  # ignorado, viene de FK
+
+    def __repr__(self): return f"<Sesion {self.id} alumno={self.dni_alumno} terminal={self.id_terminal}>"
 
 
 class Usuario(Base):
-    """Usuarios administradores del sistema (encargados de biblioteca)."""
     __tablename__ = "usuarios"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    nombre_completo: Mapped[str] = mapped_column(String(150), nullable=True)
-    rol: Mapped[str] = mapped_column(String(20), default="encargado")  # admin, encargado
-    activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    id:               Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username:         Mapped[str] = mapped_column(String(50),  unique=True, nullable=False)
+    hashed_password:  Mapped[str] = mapped_column(String(255), nullable=False)
+    nombre_completo:  Mapped[str] = mapped_column(String(150), nullable=True)
+    rol:              Mapped[str] = mapped_column(String(20),  default="encargado")
+    activo:           Mapped[bool]= mapped_column(Boolean, default=True)
+    intentos_fallidos: Mapped[int] = mapped_column(Integer, default=0)
+    bloqueado_hasta:  Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+    def __repr__(self): return f"<Usuario {self.username} ({self.rol})>"
+
+
+# ── Alias legacy: Alumno → AlumnoMaestro para no romper main.py ──────
+Alumno = AlumnoMaestro

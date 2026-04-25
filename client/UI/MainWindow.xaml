@@ -293,13 +293,6 @@
                                   IsTabStop="True"
                                   TabIndex="2"
                                   Panel.ZIndex="99">
-                            <ComboBoxItem Content="Investigación" IsSelected="True"/>
-                            <ComboBoxItem Content="Lectura de libros digitales"/>
-                            <ComboBoxItem Content="Uso de base de datos"/>
-                            <ComboBoxItem Content="Trabajos académicos"/>
-                            <ComboBoxItem Content="Uso de AutoCAD y/o Civil 3D"/>
-                            <ComboBoxItem Content="Clases virtuales"/>
-                            <ComboBoxItem Content="Otros (Especificar)"/>
                         </ComboBox>
 
                         <!-- Panel Otros -->

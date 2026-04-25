@@ -101,6 +101,7 @@
                     <button onclick="finalizarTodo()" class="btn-finalizar">🏁 Finalizar Todas</button>
                     <button onclick="limpiarTodo()" class="btn-limpiar">🧹 Limpiar Todo</button>
                     <button onclick="bloquearTodas()" class="btn-bloquear-todas">🔒 Bloquear Todas</button>
+                    <button id="btnMaestro" onclick="toggleMaestro()" class="btn-maestro">🗄️ Base de Datos</button>
                 </div>
             </div>
             <div id="terminalesGrid" class="terminales-grid"></div>
@@ -140,7 +141,7 @@
                     </select>
                     <button onclick="exportarExcel()" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px">📊 Excel</button>
                     <button onclick="exportarPdfFiltrado()" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px">📄 PDF</button>
-                    <button id="btnImportarExcel" onclick="abrirImportarExcel()" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px;display:none">📥 Importar Excel</button>
+                    <button id="btnImportarExcel" onclick="abrirImportarExcel()" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px;display:none">📥 Importar Historial</button>
                     <input id="inputImportarExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="ejecutarImportacion(this)">
                 </div>
             </div>
@@ -165,6 +166,71 @@
             </div>
             <p id="sinSesiones" class="empty-msg">No hay sesiones registradas</p>
         </section>
+
+        <!-- ══ BASE DE DATOS DE ALUMNOS ══ -->
+        <section id="seccionMaestro" class="section" style="display:none">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+                <h2 style="margin:0">🗄️ Base de Datos de Alumnos</h2>
+                <label class="btn-importar-maestro" title="Importar Excel con columnas: dni, nombre_completo, codigo_universitario, facultad, escuela">
+                    📥 Importar Excel
+                    <input id="inputMaestroExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="importarMaestro(this)">
+                </label>
+            </div>
+
+            <!-- Resultado de importación -->
+            <div id="maestroResultado" style="display:none" class="maestro-resultado"></div>
+
+            <!-- Buscador -->
+            <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+                <input id="maestroBuscar" type="text" placeholder="🔍 Buscar por nombre, DNI o código..."
+                    class="input-filtro" style="flex:1;min-width:220px"
+                    oninput="buscarMaestro()">
+                <span id="maestroTotal" style="font-size:13px;color:var(--text-secondary)"></span>
+            </div>
+
+            <!-- Tabla -->
+            <div class="tabla-scroll-wrap">
+                <table class="tabla">
+                    <thead>
+                        <tr>
+                            <th>DNI</th>
+                            <th>Nombre Completo</th>
+                            <th>Código Univ.</th>
+                            <th>Facultad</th>
+                            <th>Escuela</th>
+                            <th>Actualizado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="maestroBody"></tbody>
+                </table>
+            </div>
+            <p id="sinMaestro" class="empty-msg" style="display:none">No hay registros en el maestro</p>
+
+            <!-- Paginación -->
+            <div id="maestroPaginacion" style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap"></div>
+        </section>
+
+        <!-- Modal edición maestro -->
+        <div id="modal-maestro" class="modal-overlay" style="display:none">
+            <div class="modal-content" style="min-width:360px">
+                <h3>✏️ Editar Alumno</h3>
+                <p id="modal-maestro-dni" style="color:var(--text-secondary);font-size:13px;margin-bottom:12px"></p>
+                <label class="modal-field-label">Nombre Completo</label>
+                <input id="maestro-edit-nombre" type="text" class="modal-input" placeholder="Apellidos Nombres">
+                <label class="modal-field-label">Código Universitario</label>
+                <input id="maestro-edit-codigo" type="text" class="modal-input" placeholder="ej: 161.2502.614">
+                <label class="modal-field-label">Facultad</label>
+                <input id="maestro-edit-facultad" type="text" class="modal-input">
+                <label class="modal-field-label">Escuela</label>
+                <input id="maestro-edit-escuela" type="text" class="modal-input">
+                <p id="modal-maestro-error" style="color:#ef4444;font-size:12px;min-height:16px;margin:6px 0 8px"></p>
+                <div class="modal-buttons">
+                    <button id="btn-maestro-cancelar" class="btn-cancelar">Cancelar</button>
+                    <button id="btn-maestro-guardar" class="btn-confirmar">💾 Guardar</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Consolas de Eventos (Footer Monitoreo) -->
         <footer id="footer-monitoreo" class="section" style="margin-top: 40px">

@@ -7,14 +7,15 @@ from datetime import datetime
 from typing import Optional
 import asyncio
 
+import hashlib
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, delete
 from database import init_db, async_session
-from models import Alumno, AlumnoMaestro, Usuario, Terminal, Sesion
-from auth_service import hashear_password
+from models import AlumnoMaestro, Usuario, Terminal, Sesion, Facultad, Escuela
+from auth_service import hashear_password, obtener_usuario_actual
 from api.endpoints import router as api_router
 from core.websocket_manager import manager
 
@@ -50,8 +51,50 @@ _SGA_BASE = os.getenv("SGA_API_URL", "https://sga.unasam.edu.pe/integracion/api/
 _SGA_TIMEOUT = float(os.getenv("SGA_TIMEOUT_SECONDS", "6"))
 
 
+# ── Funciones helper para get_or_create ────────────────────────────────
+
+async def get_or_create_facultad(db, nombre: str) -> Optional[Facultad]:
+    """Busca una Facultad por nombre, si no existe la crea."""
+    if not nombre or not nombre.strip():
+        return None
+    
+    nombre_limpio = nombre.strip()
+    res = await db.execute(select(Facultad).where(Facultad.nombre == nombre_limpio))
+    facultad = res.scalar_one_or_none()
+    
+    if not facultad:
+        facultad = Facultad(nombre=nombre_limpio)
+        db.add(facultad)
+        await db.flush()
+        logger.info(f"[SGA] Nueva Facultad creada: {nombre_limpio}")
+    
+    return facultad
+
+
+async def get_or_create_escuela(db, nombre: str, facultad: Facultad) -> Optional[Escuela]:
+    """Busca una Escuela por nombre y facultad, si no existe la crea."""
+    if not nombre or not nombre.strip() or not facultad:
+        return None
+    
+    nombre_limpio = nombre.strip()
+    res = await db.execute(
+        select(Escuela).where(
+            (Escuela.nombre == nombre_limpio) & (Escuela.id_facultad == facultad.id)
+        )
+    )
+    escuela = res.scalar_one_or_none()
+    
+    if not escuela:
+        escuela = Escuela(nombre=nombre_limpio, id_facultad=facultad.id)
+        db.add(escuela)
+        await db.flush()
+        logger.info(f"[SGA] Nueva Escuela creada: {nombre_limpio} (Facultad: {facultad.nombre})")
+    
+    return escuela
+
+
 async def consultar_sga(dni: str) -> Optional[dict]:
-    """Consulta la API SGA UNASAM. Retorna {codigo, nombres, apellidos, escuela} o None."""
+    """Consulta la API SGA UNASAM. Retorna {codigo, nombres, apellidos, escuela, facultad} o None."""
     url = f"{_SGA_BASE}/{dni}"
     logger.info(f"[SGA] GET {url}")
     try:
@@ -109,20 +152,28 @@ async def consultar_sga(dni: str) -> Optional[dict]:
 
 
 async def _migrar_columnas():
-    """Migraciones seguras: agrega columnas nuevas si no existen."""
-    from database import engine
+    """Migra el esquema para agregar columnas de fuerza bruta si faltan."""
     from sqlalchemy import text
-    migraciones = [
-        ("ALTER TABLE alumnos   ADD COLUMN dni        VARCHAR(20)",  "alumnos.dni"),
-        ("ALTER TABLE sesiones  ADD COLUMN confirmada INTEGER DEFAULT 0", "sesiones.confirmada"),
-    ]
-    async with engine.begin() as conn:
-        for sql, nombre in migraciones:
+    try:
+        async with async_session() as db:
             try:
-                await conn.execute(text(sql))
-                logger.info(f"[DB] Columna '{nombre}' agregada")
-            except Exception:
-                pass  # ya existe
+                await db.execute(text("ALTER TABLE usuarios ADD COLUMN intentos_fallidos INT DEFAULT 0"))
+            except Exception: pass
+            try:
+                await db.execute(text("ALTER TABLE usuarios ADD COLUMN bloqueado_hasta DATETIME NULL"))
+            except Exception: pass
+            try:
+                await db.execute(text("ALTER TABLE terminales ADD COLUMN intentos_fallidos INT DEFAULT 0"))
+            except Exception: pass
+            try:
+                await db.execute(text("ALTER TABLE terminales ADD COLUMN bloqueada_hasta DATETIME NULL"))
+            except Exception: pass
+            try:
+                await db.execute(text("ALTER TABLE catalogo_motivos ADD COLUMN activo BOOLEAN DEFAULT TRUE"))
+            except Exception: pass
+            await db.commit()
+    except Exception as e:
+        logger.error(f"Error en migraciones: {e}")
 
 
 async def _limpiar_sesiones_fantasma():
@@ -132,8 +183,9 @@ async def _limpiar_sesiones_fantasma():
         await asyncio.sleep(10)
         try:
             async with async_session() as db:
+                from sqlalchemy import text as _text
                 res = await db.execute(
-                    text("SELECT id, terminal_id FROM sesiones WHERE activa=1 AND confirmada=0 AND (julianday('now') - julianday(inicio)) * 86400 > 10")
+                    _text("SELECT id, id_terminal FROM sesiones WHERE estado='activa' AND confirmada=0 AND TIMESTAMPDIFF(SECOND, hora_entrada, NOW()) > 10")
                 )
                 fantasmas = res.fetchall()
                 for row in fantasmas:
@@ -143,9 +195,8 @@ async def _limpiar_sesiones_fantasma():
                     if s:
                         s.activa = False
                         s.motivo_cierre = "sin_confirmacion"
-                        s.fin = datetime.now().replace(tzinfo=None)
-                        # Revertir terminal a bloqueado via ORM
-                        res_t = await db.execute(select(Terminal).where(Terminal.id == s.terminal_id))
+                        s.hora_salida = datetime.now().replace(tzinfo=None)
+                        res_t = await db.execute(select(Terminal).where(Terminal.id == s.id_terminal))
                         t = res_t.scalar_one_or_none()
                         if t:
                             t.estado = "bloqueado"
@@ -159,12 +210,30 @@ async def _limpiar_sesiones_fantasma():
             logger.error(f"[FANTASMA] Error en limpieza: {e}")
 
 
+async def _limpiar_sesiones_arranque():
+    """Limpia las sesiones que quedaron abiertas por cortes de luz (Startup Cleaner)."""
+    async with async_session() as db:
+        res = await db.execute(select(Sesion).where(Sesion.estado == 'activa'))
+        sesiones = res.scalars().all()
+        cerradas = 0
+        for s in sesiones:
+            # Si no hay hora de salida ni confirmación o si simplemente quedó colgada
+            s.estado = 'cerrada'
+            s.hora_salida = s.hora_entrada
+            s.motivo_cierre = 'cierre_apagón'
+            cerradas += 1
+        if cerradas > 0:
+            await db.commit()
+            logger.warning(f"[STARTUP] Se cerraron {cerradas} sesiones fantasma que quedaron abiertas por un apagón.")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Eventos de inicio y cierre del servidor."""
     await init_db()
     await _migrar_columnas()
     logger.info("Base de datos inicializada")
+    await _limpiar_sesiones_arranque()
 
     # Crear usuario admin si no existe
     async with async_session() as db:
@@ -226,12 +295,38 @@ async def server_info():
     }
 
 
+# ── Endpoint de configuración de roles ────────────────────────────────
+
+@app.get("/api/config/nivel2-hash")
+async def nivel2_hash(admin: Usuario = Depends(obtener_usuario_actual)):
+    """Devuelve el SHA-256 de la contraseña Nivel 2 (nunca la clave en claro).
+    Requiere autenticación JWT válida.
+    """
+    raw = os.getenv("PASS_NIVEL2", "")
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="PASS_NIVEL2 no configurada en el servidor")
+    h = hashlib.sha256(raw.encode()).hexdigest()
+    return {"hash": h}
+
+
 # ── Endpoint de limpieza y mantenimiento ───────────────────────────
 
 @app.post("/api/limpiar-todo")
-async def limpiar_todo():
-    """Limpia todas las sesiones, resetea terminales y desconecta todo."""
+async def limpiar_todo(
+    admin: Usuario = Depends(obtener_usuario_actual)
+):
+    """Limpia todas las sesiones, resetea terminales y desconecta todo.
+    
+    Solo administradores pueden ejecutar esta operación.
+    Requiere autenticación JWT válida con rol='admin'.
+    """
+    if admin.rol != "admin":
+        logger.warning(f"[SEGURIDAD] Usuario '{admin.username}' ({admin.rol}) intentó ejecutar LIMPIAR-TODO sin autorización")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores pueden ejecutar esta operación")
+    
     try:
+        logger.warning(f"[LIMPIEZA] Iniciado por administrador '{admin.username}' desde {admin.username}")
         # Desconectar todas las conexiones WebSocket en memoria
         await manager.desconectar_todo()
         logger.info("[LIMPIEZA] Todas las conexiones WebSocket desconectadas")
@@ -251,7 +346,8 @@ async def limpiar_todo():
             await db.commit()
             logger.info("[LIMPIEZA] Todas las terminales reseteadas a estado 'offline'")
 
-        return {"estado": "ok", "mensaje": "Sistema limpiado completamente"}
+        logger.warning(f"[LIMPIEZA] Operación completada exitosamente por admin '{admin.username}'")
+        return {"estado": "ok", "mensaje": "Sistema limpiado completamente", "ejecutado_por": admin.username}
     except Exception as e:
         logger.error(f"[LIMPIEZA] Error durante limpieza: {e}")
         return {"estado": "error", "mensaje": str(e)}, 500
@@ -260,8 +356,8 @@ async def limpiar_todo():
 # ── Helpers internos WebSocket ─────────────────────────────────────
 
 async def _buscar_terminal(db, nombre: str, ip: str):
-    """Busca Terminal por nombre primero, luego por IP como fallback."""
-    res = await db.execute(select(Terminal).where(Terminal.nombre == nombre))
+    """Busca Terminal por nombre_red primero, luego por IP como fallback."""
+    res = await db.execute(select(Terminal).where(Terminal.nombre_red == nombre))
     t = res.scalar_one_or_none()
     if not t:
         res2 = await db.execute(select(Terminal).where(Terminal.ip == ip))
@@ -273,7 +369,6 @@ def _cerrar_sesion(sesion: Sesion, motivo: str):
     """Marca una sesión como cerrada con la hora actual del servidor."""
     ahora = datetime.now().replace(tzinfo=None)
     sesion.hora_salida   = ahora
-    sesion.fin           = ahora
     sesion.activa        = False
     sesion.motivo_cierre = motivo
     return ahora
@@ -303,7 +398,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
             logger.info(f"[WS] Terminal conocida actualizada: {terminal_ip}")
         else:
             terminal_db = Terminal(
-                nombre=f"Terminal-{terminal_ip}",
+                nombre_red=f"Terminal-{terminal_ip}",
                 ip=terminal_ip,
                 estado="bloqueado",
                 ultima_conexion=datetime.utcnow()
@@ -362,33 +457,28 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 # Sincronizar DB: nombre (hostname) ↔ IP de forma atómica
                 async with async_session() as db:
                     # Buscar registro canónico por hostname
-                    res = await db.execute(select(Terminal).where(Terminal.nombre == hostname))
+                    res = await db.execute(select(Terminal).where(Terminal.nombre_red == hostname))
                     t = res.scalar_one_or_none()
 
-                    # Buscar registro por IP (puede ser un temporal "Terminal-{ip}" o el mismo)
                     res2 = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
                     t_by_ip = res2.scalar_one_or_none()
 
                     if t:
-                        # Ya existe por nombre — actualizar IP y limpiar duplicado por IP si es distinto
                         t.ip = terminal_ip
                         t.estado = "bloqueado"
                         t.ultima_conexion = datetime.utcnow()
                         if t_by_ip and t_by_ip.id != t.id:
-                            # Eliminar el registro temporal creado por IP antes del hello
                             await db.delete(t_by_ip)
-                            logger.info(f"[WS] Registro temporal '{t_by_ip.nombre}' eliminado (duplicado de '{hostname}')")
+                            logger.info(f"[WS] Registro temporal '{t_by_ip.nombre_red}' eliminado (duplicado de '{hostname}')")
                         logger.info(f"[WS] Terminal '{hostname}' actualizada con IP={terminal_ip}")
                     elif t_by_ip:
-                        # Existe por IP — actualizar nombre al hostname real
-                        t_by_ip.nombre = hostname
+                        t_by_ip.nombre_red = hostname
                         t_by_ip.estado = "bloqueado"
                         t_by_ip.ultima_conexion = datetime.utcnow()
                         logger.info(f"[WS] Terminal IP={terminal_ip} sincronizada con nombre '{hostname}'")
                     else:
-                        # Nueva terminal — registrar con datos completos
                         db.add(Terminal(
-                            nombre=hostname,
+                            nombre_red=hostname,
                             ip=terminal_ip,
                             estado="bloqueado",
                             ultima_conexion=datetime.utcnow()
@@ -402,126 +492,124 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
             elif tipo == "login_request":
                 codigo = str(data.get("codigo", "")).strip().upper()
                 razon = str(data.get("razon", "")).strip()
-                logger.info(f"[WS] {terminal_id} login_request: codigo={codigo!r} razon={razon!r}")
-
-                if not codigo or not codigo.isdigit() or len(codigo) != 8:
-                    logger.warning(f"[WS] {terminal_id} DNI con formato invalido: {codigo!r}")
-                    await websocket.send_json({"tipo": "login_rechazado", "motivo": "El DNI debe tener exactamente 8 digitos"})
-                    continue
+                motivo_id = data.get("motivo_id")
+                if motivo_id is not None:
+                    try:
+                        motivo_id = int(motivo_id)
+                    except ValueError:
+                        motivo_id = None
+                logger.info(f"[WS] {terminal_id} login_request: codigo={codigo!r} razon={razon!r} motivo_id={motivo_id}")
 
                 async with async_session() as db:
+                    from datetime import timedelta
+                    t = await _buscar_terminal(db, terminal_id, terminal_ip)
+                    
+                    if t and t.bloqueada_hasta and t.bloqueada_hasta > datetime.now():
+                        faltan = int((t.bloqueada_hasta - datetime.now()).total_seconds() / 60) + 1
+                        await websocket.send_json({"tipo": "login_rechazado", "motivo": f"Terminal bloqueada por seguridad. Intente de nuevo en {faltan} minutos"})
+                        continue
+
+                    if not codigo or not codigo.isdigit() or len(codigo) != 8:
+                        if t:
+                            t.intentos_fallidos += 1
+                            if t.intentos_fallidos >= 3:
+                                t.bloqueada_hasta = datetime.now() + timedelta(minutes=5)
+                            await db.commit()
+                        logger.warning(f"[WS] {terminal_id} DNI con formato invalido: {codigo!r}")
+                        await websocket.send_json({"tipo": "login_rechazado", "motivo": "El DNI debe tener exactamente 8 digitos"})
+                        continue
+
                     # ── Capa 1: alumnos_maestro (fuente primaria, respuesta instantánea) ──
                     res_m = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == codigo))
                     maestro = res_m.scalar_one_or_none()
 
                     if maestro:
-                        # Construir datos desde el maestro
-                        partes = maestro.nombre_completo.split()
+                        partes = maestro.nombre.split()
                         if len(partes) >= 3:
                             nombres_m   = " ".join(partes[:len(partes)-2])
                             apellidos_m = " ".join(partes[len(partes)-2:])
                         elif len(partes) == 2:
                             nombres_m, apellidos_m = partes[0], partes[1]
                         else:
-                            nombres_m, apellidos_m = maestro.nombre_completo, ""
+                            nombres_m, apellidos_m = maestro.nombre, ""
                         datos_alumno = {
-                            "codigo":    maestro.codigo_universitario or codigo,
+                            "codigo":    maestro.codigo or codigo,
                             "dni":       maestro.dni,
                             "nombres":   nombres_m,
                             "apellidos": apellidos_m,
-                            "escuela":   maestro.escuela or "",
-                            "facultad":  maestro.facultad or "",
                         }
-                        logger.info(f"[MAESTRO] Alumno encontrado: {maestro.nombre_completo} | DNI={codigo}")
+                        logger.info(f"[MAESTRO] Alumno encontrado: {maestro.nombre} | DNI={codigo}")
                     else:
-                        # ── Capa 2: tabla alumnos (caché legacy) ──
-                        res_a = await db.execute(select(Alumno).where(Alumno.dni == codigo))
-                        alumno_cache = res_a.scalar_one_or_none()
-                        if alumno_cache is None:
-                            res_a2 = await db.execute(select(Alumno).where(Alumno.codigo == codigo))
-                            alumno_cache = res_a2.scalar_one_or_none()
+                        # ── Capa 2: SGA externa ──
+                        logger.info(f"[WS] {terminal_id} DNI={codigo} no en maestro → consultando SGA...")
+                        await websocket.send_json({"tipo": "info", "motivo": "Verificando en sistema universitario..."})
+                        sga = await consultar_sga(codigo)
+                        if not sga:
+                            if t:
+                                t.intentos_fallidos += 1
+                                if t.intentos_fallidos >= 3:
+                                    t.bloqueada_hasta = datetime.now() + timedelta(minutes=5)
+                                await db.commit()
+                            logger.warning(f"[WS] {terminal_id} DNI={codigo} no encontrado en ninguna fuente")
+                            await websocket.send_json({"tipo": "login_rechazado", "motivo": "Alumno no registrado en el sistema"})
+                            continue
 
-                        if alumno_cache:
-                            datos_alumno = {
-                                "codigo":    alumno_cache.codigo,
-                                "dni":       alumno_cache.dni or codigo,
-                                "nombres":   alumno_cache.nombres,
-                                "apellidos": alumno_cache.apellidos,
-                                "escuela":   alumno_cache.escuela or "",
-                                "facultad":  alumno_cache.facultad or "",
-                            }
-                            logger.info(f"[CACHE] Alumno en tabla legacy: {alumno_cache.nombres} {alumno_cache.apellidos}")
-                        else:
-                            # ── Capa 3: API SGA externa (plan B) ──
-                            logger.info(f"[WS] {terminal_id} DNI={codigo} no en maestro ni caché → consultando SGA...")
-                            await websocket.send_json({"tipo": "info", "motivo": "Verificando en sistema universitario..."})
-                            sga = await consultar_sga(codigo)
-                            if not sga:
-                                logger.warning(f"[WS] {terminal_id} DNI={codigo} no encontrado en ninguna fuente")
-                                await websocket.send_json({"tipo": "login_rechazado", "motivo": "Alumno no registrado en el sistema"})
-                                continue
+                        datos_alumno = {
+                            "codigo":    sga["codigo"],
+                            "dni":       sga["dni"],
+                            "nombres":   sga["nombres"],
+                            "apellidos": sga["apellidos"],
+                        }
+                        
+                        # Auto-registro en maestro con Facultad y Escuela (get_or_create)
+                        nombre_completo = f"{sga['nombres']} {sga['apellidos']}"
+                        id_escuela = None
+                        
+                        # Crear o recuperar Facultad
+                        if sga.get("facultad"):
+                            facultad = await get_or_create_facultad(db, sga["facultad"])
+                            # Crear o recuperar Escuela asociada a la Facultad
+                            if facultad and sga.get("escuela"):
+                                escuela = await get_or_create_escuela(db, sga["escuela"], facultad)
+                                if escuela:
+                                    id_escuela = escuela.id
+                                    logger.info(f"[SGA] Escuela asignada: {sga['escuela']}")
+                        
+                        # Crear alumno con escuela si está disponible
+                        nuevo_alumno = AlumnoMaestro(
+                            dni=sga["dni"],
+                            nombre=nombre_completo,
+                            codigo=sga["codigo"],
+                            id_escuela=id_escuela,
+                        )
+                        db.add(nuevo_alumno)
+                        await db.flush()
+                        logger.info(f"[SGA] Guardado en maestro: {nombre_completo} (Escuela ID: {id_escuela})")
 
-                            datos_alumno = {
-                                "codigo":    sga["codigo"],
-                                "dni":       sga["dni"],
-                                "nombres":   sga["nombres"],
-                                "apellidos": sga["apellidos"],
-                                "escuela":   sga["escuela"],
-                                "facultad":  sga.get("facultad", ""),
-                            }
-                            # Guardar en maestro para respuesta instantánea la próxima vez
-                            nombre_completo = f"{sga['nombres']} {sga['apellidos']}"
-                            db.add(AlumnoMaestro(
-                                dni=sga["dni"],
-                                nombre_completo=nombre_completo,
-                                codigo_universitario=sga["codigo"],
-                                facultad=sga.get("facultad", ""),
-                                escuela=sga["escuela"],
-                            ))
-                            # También en tabla legacy para relaciones de sesiones
-                            alumno_nuevo = Alumno(
-                                codigo=sga["codigo"], dni=sga["dni"],
-                                nombres=sga["nombres"], apellidos=sga["apellidos"],
-                                escuela=sga["escuela"], facultad=sga.get("facultad", ""),
-                                habilitado=True,
-                            )
-                            db.add(alumno_nuevo)
-                            await db.flush()
-                            logger.info(f"[SGA] Guardado en maestro y caché: {nombre_completo}")
-
-                    # Obtener o crear el registro Alumno para la FK de sesiones
-                    res_fk = await db.execute(select(Alumno).where(Alumno.dni == datos_alumno["dni"]))
+                    # Obtener registro maestro confirmado para FK de sesión
+                    res_fk = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == datos_alumno["dni"]))
                     alumno = res_fk.scalar_one_or_none()
                     if alumno is None:
-                        res_fk2 = await db.execute(select(Alumno).where(Alumno.codigo == datos_alumno["codigo"]))
-                        alumno = res_fk2.scalar_one_or_none()
-                    if alumno is None:
-                        alumno = Alumno(
-                            codigo=datos_alumno["codigo"], dni=datos_alumno["dni"],
-                            nombres=datos_alumno["nombres"], apellidos=datos_alumno["apellidos"],
-                            escuela=datos_alumno["escuela"], facultad=datos_alumno["facultad"],
-                            habilitado=True,
+                        alumno = AlumnoMaestro(
+                            dni=datos_alumno["dni"],
+                            nombre=f"{datos_alumno['nombres']} {datos_alumno['apellidos']}",
+                            codigo=datos_alumno["codigo"],
                         )
                         db.add(alumno)
                         await db.flush()
-
-                    if not alumno.habilitado:
-                        logger.warning(f"[WS] {terminal_id} alumno DNI={codigo} no habilitado")
-                        await websocket.send_json({"tipo": "login_rechazado", "motivo": "Alumno no habilitado para usar la biblioteca"})
-                        continue
 
                     logger.info(f"[WS] {terminal_id} alumno OK: {datos_alumno['nombres']} {datos_alumno['apellidos']} | DNI={codigo}")
 
                     t = await _buscar_terminal(db, terminal_id, terminal_ip)
 
                     if t:
+                        t.intentos_fallidos = 0
+                        t.bloqueada_hasta = None
                         sesion = Sesion(
-                            alumno_id   = alumno.id,
-                            terminal_id = t.id,
+                            dni_alumno  = alumno.dni,
+                            id_terminal = t.id,
                             razon_uso   = razon or None,
-                            dni         = datos_alumno["dni"],
-                            facultad    = datos_alumno["facultad"],
-                            escuela     = datos_alumno["escuela"],
+                            motivo_id   = motivo_id,
                             fecha_uso   = datetime.now().date(),
                         )
                         t.estado = "activo"
@@ -543,12 +631,11 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 await manager.notificar_admins()
 
             elif tipo == "unlock_confirmed":
-                # El cliente C# confirmó que el desbloqueo fue exitoso
                 async with async_session() as db:
                     t = await _buscar_terminal(db, terminal_id, terminal_ip)
                     if t:
                         res_s = await db.execute(
-                            select(Sesion).where(Sesion.terminal_id == t.id, Sesion.activa == True, Sesion.confirmada == False)
+                            select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa", Sesion.confirmada == False)
                         )
                         sesion = res_s.scalar_one_or_none()
                         if sesion:
@@ -564,7 +651,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     t = await _buscar_terminal(db, terminal_id, terminal_ip)
                     if t:
                         res_s = await db.execute(
-                            select(Sesion).where(Sesion.terminal_id == t.id, Sesion.activa == True)
+                            select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
                         )
                         sesion = res_s.scalar_one_or_none()
                         if sesion:
@@ -588,7 +675,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 if t:
                     t.estado = "offline"
                     res_s = await db.execute(
-                        select(Sesion).where(Sesion.terminal_id == t.id, Sesion.activa == True)
+                        select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
                     )
                     sesion = res_s.scalar_one_or_none()
                     if sesion:
@@ -637,7 +724,7 @@ async def websocket_admin(websocket: WebSocket):
                 ok = await manager.bloquear_terminal(tid)
                 # Acción atómica: bloquear terminal + cerrar sesión activa en una transacción
                 async with async_session() as db:
-                    res = await db.execute(select(Terminal).where(Terminal.nombre == tid))
+                    res = await db.execute(select(Terminal).where(Terminal.nombre_red == tid))
                     t = res.scalar_one_or_none()
                     if not t:
                         res2 = await db.execute(select(Terminal).where(Terminal.ip == target))
@@ -645,13 +732,12 @@ async def websocket_admin(websocket: WebSocket):
                     if t:
                         t.estado = "bloqueado"
                         res_s = await db.execute(
-                            select(Sesion).where(Sesion.terminal_id == t.id, Sesion.activa == True)
+                            select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
                         )
                         sesion_activa = res_s.scalar_one_or_none()
                         if sesion_activa:
                             ahora_bloqueo = datetime.now().replace(tzinfo=None)
                             sesion_activa.hora_salida   = ahora_bloqueo
-                            sesion_activa.fin           = ahora_bloqueo
                             sesion_activa.activa        = False
                             sesion_activa.motivo_cierre = "bloqueo_admin"
                             logger.info(f"[WS-Admin] Sesión cerrada por bloqueo admin en {tid}: {ahora_bloqueo.strftime('%I:%M:%S %p')}")
@@ -676,72 +762,64 @@ async def websocket_admin(websocket: WebSocket):
                             break
                 async with async_session() as db:
                     # PASO 1: Buscar alumno por DNI, luego por código de matrícula
-                    res_a = await db.execute(select(Alumno).where(Alumno.dni == dni_param))
+                    res_a = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni_param))
                     alumno = res_a.scalar_one_or_none()
                     if alumno is None:
-                        res_a2 = await db.execute(select(Alumno).where(Alumno.codigo == dni_param))
+                        res_a2 = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.codigo == dni_param))
                         alumno = res_a2.scalar_one_or_none()
 
-                    # PASO 1b: Fallback a la API SGA si no está en BD local
                     if alumno is None:
-                        logger.info(f"[WS-Admin] DNI={dni_param} no en BD local → consultando SGA...")
+                        logger.info(f"[WS-Admin] DNI={dni_param} no en maestro → consultando SGA...")
                         await websocket.send_json({"tipo": "info", "motivo": f"Verificando DNI {dni_param} en la UNASAM..."})
                         sga = await consultar_sga(dni_param)
                         if sga:
-                            alumno = Alumno(
-                                codigo    = sga["codigo"],
-                                dni       = sga["dni"],
-                                nombres   = sga["nombres"],
-                                apellidos = sga["apellidos"],
-                                escuela   = sga["escuela"],
-                                facultad  = sga.get("facultad", ""),
-                                habilitado= True,
+                            alumno = AlumnoMaestro(
+                                dni    = sga["dni"],
+                                nombre = f"{sga['nombres']} {sga['apellidos']}",
+                                codigo = sga["codigo"],
                             )
                             db.add(alumno)
                             await db.flush()
-                            logger.info(f"[WS-Admin] Alumno registrado desde SGA: {alumno.nombres} {alumno.apellidos} | código={alumno.codigo}")
+                            logger.info(f"[WS-Admin] Alumno registrado desde SGA: {alumno.nombre} | código={alumno.codigo}")
                         else:
                             await websocket.send_json({"tipo": "error", "motivo": f"Error: El DNI {dni_param} no existe en el sistema de la UNASAM"})
                             continue
 
-                    # PASO 2: Validar habilitación
                     if alumno is None:
-                        await websocket.send_json({"tipo": "error", "motivo": f"Error: El DNI {dni_param} no existe en el sistema de la UNASAM"})
+                        await websocket.send_json({"tipo": "error", "motivo": f"Error: El DNI {dni_param} no existe"})
                         continue
-                    if not alumno.habilitado:
-                        await websocket.send_json({"tipo": "error", "motivo": f"Alumno '{alumno.nombres} {alumno.apellidos}' no está habilitado"})
-                        continue
-                    # PASO 3: Verificar terminal conectada ANTES de crear sesión
+
+                    partes = alumno.nombre.split()
+                    nombres_a   = " ".join(partes[:max(1, len(partes)-2)])
+                    apellidos_a = " ".join(partes[max(1, len(partes)-2):])
+
                     ok = await manager.desbloquear_terminal(tid, {
-                        "codigo": alumno.codigo,
-                        "nombres": alumno.nombres,
-                        "apellidos": alumno.apellidos
+                        "codigo":    alumno.codigo,
+                        "nombres":   nombres_a,
+                        "apellidos": apellidos_a,
                     })
                     if not ok:
                         await websocket.send_json({"tipo": "error", "motivo": f"Terminal '{tid}' no está conectada"})
                         continue
-                    # PASO 4: Solo crear sesión si el comando WS llegó a la terminal
-                    res_t = await db.execute(select(Terminal).where(Terminal.nombre == tid))
+
+                    res_t = await db.execute(select(Terminal).where(Terminal.nombre_red == tid))
                     terminal_db = res_t.scalar_one_or_none()
                     if not terminal_db:
                         res_t2 = await db.execute(select(Terminal).where(Terminal.ip == target))
                         terminal_db = res_t2.scalar_one_or_none()
                     if terminal_db:
                         sesion = Sesion(
-                            alumno_id   = alumno.id,
-                            terminal_id = terminal_db.id,
-                            dni         = alumno.dni or alumno.codigo,
-                            facultad    = alumno.facultad or "",
-                            escuela     = alumno.escuela or "",
+                            dni_alumno  = alumno.dni,
+                            id_terminal = terminal_db.id,
                             fecha_uso   = datetime.now().date(),
                             razon_uso   = razon_uso,
-                            confirmada  = False,  # pendiente hasta unlock_confirmed
+                            confirmada  = False,
                         )
                         terminal_db.estado = "activo"
                         db.add(sesion)
                         await db.commit()
-                        logger.info(f"[WS-Admin] Sesión creada id={sesion.id} para {alumno.nombres}, esperando confirmación")
-                    await websocket.send_json({"tipo": "ok", "mensaje": f"Terminal {tid} desbloqueada para {alumno.nombres} {alumno.apellidos}"})
+                        logger.info(f"[WS-Admin] Sesión creada id={sesion.id} para {alumno.nombre}")
+                    await websocket.send_json({"tipo": "ok", "mensaje": f"Terminal {tid} desbloqueada para {alumno.nombre}"})
                 await manager.notificar_admins()
 
             elif tipo == "remote_command":
@@ -771,25 +849,22 @@ async def websocket_admin(websocket: WebSocket):
 
                 async with async_session() as db:
                     # Cerrar solo las sesiones de terminales actualmente conectadas
-                    res_todas = await db.execute(select(Sesion).where(Sesion.activa == True))
+                    res_todas = await db.execute(select(Sesion).where(Sesion.estado == "activa"))
                     sesiones_activas = res_todas.scalars().all()
                     cerradas = 0
                     for sesion_activa in sesiones_activas:
-                        # Verificar que la terminal de esta sesión esté conectada
-                        res_t = await db.execute(select(Terminal).where(Terminal.id == sesion_activa.terminal_id))
+                        res_t = await db.execute(select(Terminal).where(Terminal.id == sesion_activa.id_terminal))
                         t_sesion = res_t.scalar_one_or_none()
-                        if t_sesion and (t_sesion.nombre in ids_conectados or t_sesion.ip in ips_conectadas):
+                        if t_sesion and (t_sesion.nombre_red in ids_conectados or t_sesion.ip in ips_conectadas):
                             sesion_activa.hora_salida   = ahora_bloqueo_todas
-                            sesion_activa.fin           = ahora_bloqueo_todas
                             sesion_activa.activa        = False
                             sesion_activa.motivo_cierre = "bloqueo_admin"
                             cerradas += 1
                     logger.info(f"[WS-Admin] bloqueo_todas: {cerradas} sesión(es) cerrada(s) (solo conectadas)")
 
-                    # Marcar como bloqueadas SOLO las terminales con WS activo
                     res_terms = await db.execute(select(Terminal))
                     for t in res_terms.scalars().all():
-                        if t.nombre in ids_conectados or t.ip in ips_conectadas:
+                        if t.nombre_red in ids_conectados or t.ip in ips_conectadas:
                             t.estado = "bloqueado"
                         # Las offline/desconectadas conservan su estado actual
                     await db.commit()

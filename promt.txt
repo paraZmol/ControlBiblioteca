@@ -1,25 +1,25 @@
-tenemos dos ajustes críticos de usabilidad en el cliente C# (WPF). Sigue estas instrucciones lógicas de comportamiento para refinar la interacción:
+necesitamos mejorar la experiencia de usuario (UX) en la vista IdentificarTerminal.xaml. Actualmente, el botón "Guardar y Continuar" se ve muy delgado y no destaca lo suficiente contra el fondo. Realiza los siguientes cambios en el XAML:
 
-1. Restricción Numérica en DNI (TxtCodigo):
+1. Dimensiones y Espaciado:
 
-Requisito: El campo de DNI solo debe permitir el ingreso de números (0-9).
+Incrementa la altura del botón (Height) a 48 píxeles para que tenga más presencia.
 
-Instrucción: Implementa una validación en el evento PreviewTextInput. Usa una expresión regular (Regex) para bloquear cualquier carácter que no sea un dígito. Además, bloquea el pegado de texto (Paste) si el contenido no es puramente numérico.
+Agrega un Padding="20,0" para que el texto no se sienta apretado lateralmente.
 
-2. Corrección del "Salto de Foco" al usar las flechas:
+2. Tipografía:
 
-Problema: Al navegar por las opciones del ComboBox (CmbRazon) con las teclas de dirección, el foco salta automáticamente de regreso al DNI, impidiendo la selección.
+Aumenta el FontSize a 16 o 18.
 
-Diagnóstico: La lógica de "Auto-Foco" es demasiado agresiva y no distingue entre "perder el foco fuera de la app" y "mover el foco a otro control legítimo".
+Cambia el FontWeight a Bold para que la acción principal sea clara.
 
-Instrucción de Lógica: Rediseña la función de mantenimiento de foco. El sistema SOLO debe forzar el foco al DNI si el elemento enfocado actualmente NO es el ComboBox de razones (CmbRazon) y NO es el cuadro de especificación de "Otro".
+3. Estilo Visual (Bordes y Colores):
 
-Condición: Si CmbRazon.IsFocused o CmbRazon.IsKeyboardFocusWithin es True, el timer o evento de auto-foco debe quedar suspendido inmediatamente.
+Aplica un CornerRadius de 10 al botón para que coincida con la estética redondeada del contenedor principal.
 
-3. Navegación fluida con Tabulador:
+Asegúrate de que el color de fondo sea un azul vibrante (ej. #2196F3) que contraste bien con el fondo oscuro.
 
-Requisito: Al presionar la tecla Tab en el campo DNI, el foco debe pasar al ComboBox. Al presionar Tab en el ComboBox, debe pasar al botón "Ingresar".
+4. Efectos de Interacción (Opcional):
 
-Instrucción: Configura correctamente los TabIndex en el XAML (DNI: 1, ComboBox: 2, Botón: 3) y asegúrate de que IsTabStop="True" esté habilitado en todos ellos.
+Si es posible, agrega un pequeño efecto de cambio de color (Hover) para que el botón brille ligeramente cuando el mouse pase por encima.
 
-Aplica estos cambios para que la navegación por teclado sea profesional y no confunda al estudiante.
+El objetivo es que el botón se vea sólido, moderno y sea fácil de presionar para los alumnos de la biblioteca.
