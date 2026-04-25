@@ -1,6 +1,6 @@
 # endpoints.py - Rutas de la API REST
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -605,18 +605,236 @@ async def cerrar_todas_sesiones(
         s.hora_salida = ahora
         s.motivo_cierre = "admin_bulk"
     
-    # Bloquear todas las terminales conectadas a nivel de base de datos
-    await db.execute(update(Terminal).values(estado="bloqueado"))
-    
+    # Finalizar libera las terminales — quedan disponibles para el siguiente alumno
+    await db.execute(update(Terminal).values(estado="disponible"))
+
     await db.commit()
-    
-    # Notificar a las terminales físicamente vía WS
-    from core.websocket_manager import manager
-    await manager.bloquear_todas()
-    await manager.notificar_evento(f"Administrador cerró TODAS las sesiones activas ({len(sesiones)} sesiones)", "warning")
+
+    # Indicar a los clientes WPF que vuelvan a la pantalla de login
+    await manager.forzar_cierre_sesion_todas()
+    await manager.notificar_evento(f"Administrador finalizó TODAS las sesiones activas ({len(sesiones)} sesiones)", "warning")
     await manager.notificar_admins()
-    
+
     return {"mensaje": f"Se han cerrado {len(sesiones)} sesiones correctamente"}
+
+
+@router.delete("/admin/limpiar-sesiones")
+async def limpiar_sesiones(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual)
+):
+    """Cierra sesiones activas y borra todo el historial. Mantiene terminales y alumnos."""
+    from main import logger
+    logger.info(f"[ADMIN] Usuario '{admin.username}' solicitó LIMPIAR HISTORIAL DE SESIONES")
+
+    if admin.rol != "admin":
+        raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
+
+    # Primero notificar a los clientes WPF que vuelvan al login antes de borrar
+    await manager.notificar_evento("🧹 LIMPIAR HISTORIAL: Cerrando sesiones activas...", "warning")
+    await manager.forzar_cierre_sesion_todas()
+
+    # Borrar solo el historial de sesiones; terminales y alumnos se mantienen
+    await db.execute(delete(Sesion))
+    # Dejar terminales en disponible tras el limpiado
+    await db.execute(update(Terminal).values(estado="disponible"))
+    await db.commit()
+
+    await manager.notificar_evento("🧹 Historial borrado. Terminales listas para nuevo periodo.", "warning")
+    return {"mensaje": "Historial de sesiones borrado correctamente. Terminales y alumnos mantenidos."}
+
+
+@router.post("/admin/importar-excel")
+async def importar_excel_upload(
+    archivo: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual)
+):
+    """Importa historial de sesiones desde un Excel con el formato de exportación estándar."""
+    from main import logger
+    import io
+    import openpyxl
+
+    if admin.rol != "admin":
+        raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
+
+    logger.info(f"[ADMIN] '{admin.username}' inició importación de Excel")
+
+    contenido = await archivo.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
+        ws = wb.active
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Archivo Excel inválido: {e}")
+
+    # ── Obtener o crear terminal virtual para sesiones importadas ──
+    try:
+        res_vt = await db.execute(select(Terminal).where(Terminal.nombre == "IMPORTADO"))
+        terminal_virtual = res_vt.scalar_one_or_none()
+        if not terminal_virtual:
+            terminal_virtual = Terminal(nombre="IMPORTADO", ip="0.0.0.0", estado="offline")
+            db.add(terminal_virtual)
+            await db.flush()
+        terminal_virtual_id = terminal_virtual.id
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"No se pudo preparar la terminal virtual: {e}")
+
+    # ── Mapear encabezados (case-insensitive, sin espacios) ──
+    headers = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+
+    def col(variantes):
+        for v in variantes:
+            if v in headers:
+                return headers.index(v)
+        return None
+
+    idx_dni        = col(["dni"])
+    idx_codigo     = col(["código", "codigo", "cod"])
+    idx_estudiante = col(["estudiante", "nombre", "nombres"])
+    idx_escuela    = col(["escuela"])
+    idx_facultad   = col(["facultad"])
+    idx_actividad  = col(["actividad"])
+    idx_inicio     = col(["inicio"])
+    idx_salida     = col(["salida"])
+    idx_fecha      = col(["fecha"])
+
+    if idx_dni is None:
+        raise HTTPException(status_code=400, detail="No se encontró la columna 'DNI' en el Excel. Verifique el formato.")
+
+    def cell(fila, idx):
+        return str(fila[idx]).strip() if idx is not None and idx < len(fila) and fila[idx] is not None else ""
+
+    def parse_dt(s):
+        for fmt in ("%H:%M:%S", "%H:%M", "%I:%M:%S %p", "%I:%M %p"):
+            try:
+                return datetime.strptime(s, fmt)
+            except Exception:
+                pass
+        return None
+
+    def parse_fecha(s):
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except Exception:
+                pass
+        return datetime.now().date()
+
+    insertadas = 0
+    errores    = 0
+    errores_detalle = []
+
+    for num_fila, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        # Saltar filas completamente vacías
+        if all(v is None for v in fila):
+            continue
+        try:
+            dni        = cell(fila, idx_dni)
+            codigo     = cell(fila, idx_codigo)
+            estudiante = cell(fila, idx_estudiante)
+            escuela    = cell(fila, idx_escuela)
+            facultad   = cell(fila, idx_facultad)
+            actividad  = cell(fila, idx_actividad)
+            inicio_s   = cell(fila, idx_inicio)
+            salida_s   = cell(fila, idx_salida)
+            fecha_s    = cell(fila, idx_fecha)
+
+            # Validar DNI
+            dni_limpio = dni.replace(" ", "").replace("-", "")
+            if not dni_limpio.isdigit() or len(dni_limpio) != 8:
+                errores += 1
+                errores_detalle.append(f"Fila {num_fila}: DNI inválido '{dni}'")
+                continue
+
+            # Buscar alumno por DNI, luego por código
+            res_a = await db.execute(select(Alumno).where(Alumno.dni == dni_limpio))
+            alumno = res_a.scalar_one_or_none()
+
+            if not alumno and codigo:
+                res_a2 = await db.execute(select(Alumno).where(Alumno.codigo == codigo))
+                alumno = res_a2.scalar_one_or_none()
+
+            if not alumno:
+                # Separar nombre en partes: últimas 2 palabras = apellidos, resto = nombres
+                partes = estudiante.split() if estudiante else []
+                if len(partes) >= 3:
+                    nombres   = " ".join(partes[:len(partes)-2])
+                    apellidos = " ".join(partes[len(partes)-2:])
+                elif len(partes) == 2:
+                    nombres, apellidos = partes[0], partes[1]
+                else:
+                    nombres, apellidos = estudiante, ""
+
+                # Generar código único si viene vacío o ya existe
+                cod_final = codigo if codigo else dni_limpio
+                res_cod = await db.execute(select(Alumno).where(Alumno.codigo == cod_final))
+                if res_cod.scalar_one_or_none():
+                    cod_final = f"{dni_limpio}_imp"
+
+                alumno = Alumno(
+                    dni=dni_limpio,
+                    codigo=cod_final,
+                    nombres=nombres or "SIN NOMBRE",
+                    apellidos=apellidos,
+                    escuela=escuela or None,
+                    facultad=facultad or None,
+                    habilitado=True,
+                )
+                db.add(alumno)
+                await db.flush()
+
+            # Parsear fechas y horas
+            fecha_obj  = parse_fecha(fecha_s)
+            inicio_obj = parse_dt(inicio_s)
+            salida_obj = parse_dt(salida_s)
+
+            inicio_dt = datetime.combine(fecha_obj, inicio_obj.time()) if inicio_obj else datetime.combine(fecha_obj, datetime.min.time())
+            salida_dt = datetime.combine(fecha_obj, salida_obj.time()) if salida_obj else None
+
+            sesion = Sesion(
+                alumno_id=alumno.id,
+                terminal_id=terminal_virtual_id,
+                inicio=inicio_dt,
+                fin=salida_dt,
+                hora_salida=salida_dt,
+                activa=False,
+                motivo_cierre="importacion_excel",
+                razon_uso=actividad or None,
+            )
+            db.add(sesion)
+            insertadas += 1
+
+        except Exception as ex:
+            await db.rollback()
+            logger.warning(f"[IMPORT] Error en fila {num_fila}: {ex}")
+            errores += 1
+            errores_detalle.append(f"Fila {num_fila}: {ex}")
+            # Re-crear terminal virtual tras rollback
+            try:
+                res_vt2 = await db.execute(select(Terminal).where(Terminal.nombre == "IMPORTADO"))
+                tv2 = res_vt2.scalar_one_or_none()
+                terminal_virtual_id = tv2.id if tv2 else terminal_virtual_id
+            except Exception:
+                pass
+
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al guardar en la base de datos: {e}")
+
+    msg = f"Importación completada: {insertadas} registro(s) insertado(s)"
+    if errores:
+        msg += f", {errores} fila(s) ignorada(s)"
+    logger.info(f"[ADMIN] {msg}")
+    await manager.notificar_evento(f"📥 {msg}", "warning")
+    return {
+        "mensaje": msg,
+        "insertadas": insertadas,
+        "errores": errores,
+        "detalle_errores": errores_detalle[:10]  # máx 10 para no saturar la respuesta
+    }
 
 
 @router.delete("/admin/reset-total")
@@ -627,19 +845,19 @@ async def reset_total(
     """Vaciado total de las tablas de sesiones, alumnos y terminales."""
     from main import logger
     logger.info(f"[ADMIN] Usuario '{admin.username}' solicitó RESET TOTAL")
-    
+
     if admin.rol != "admin":
         logger.warning(f"[ADMIN] Intento de reset rechazado para usuario '{admin.username}' (no es admin)")
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
-    
+
     # El orden importa por las claves foráneas
     await db.execute(delete(Sesion))
     await db.execute(delete(Alumno))
     await db.execute(delete(Terminal))
-    
+
     # Desconectar físicamente todas las terminales para que no se re-registren solo por heartbeat
     await manager.desconectar_todo()
-    
+
     await db.commit()
     await manager.notificar_evento("🧹 RESET TOTAL: El sistema ha sido reseteado por el administrador", "warning")
     return {"mensaje": "Todo el sistema ha sido limpiado correctamente"}

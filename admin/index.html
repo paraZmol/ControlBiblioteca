@@ -67,13 +67,14 @@
                 <span id="serverIpBadge" class="server-badge">IP SERVIDOR: ...</span>
                 <span id="wsStatus" class="ws-badge off">○ WS Desconectado</span>
                 <span id="usuarioActual"></span>
+                <button id="btnRol" class="btn-rol" onclick="toggleRol()" title="Cambiar vista"></button>
                 <button id="btnTema" class="btn-tema" onclick="toggleTema()" title="Cambiar tema">🌙</button>
                 <button onclick="logout()" class="btn-logout">Cerrar Sesión</button>
             </div>
         </header>
 
         <!-- Estadísticas -->
-        <div class="stats-grid">
+        <div id="seccionStats" class="stats-grid">
             <div class="stat-card">
                 <div class="stat-number" id="totalTerminales">0</div>
                 <div class="stat-label">Equipos</div>
@@ -93,7 +94,7 @@
         </div>
 
         <!-- Equipos -->
-        <section class="section">
+        <section id="seccionEquipos" class="section">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px">
                 <h2 style="margin:0">Equipos</h2>
                 <div style="display:flex; gap:10px">
@@ -139,25 +140,29 @@
                     </select>
                     <button onclick="exportarExcel()" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px">📊 Excel</button>
                     <button onclick="exportarPdfFiltrado()" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px">📄 PDF</button>
+                    <button id="btnImportarExcel" onclick="abrirImportarExcel()" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px;display:none">📥 Importar Excel</button>
+                    <input id="inputImportarExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="ejecutarImportacion(this)">
                 </div>
             </div>
-            <table id="tablaSesiones" class="tabla">
-                <thead>
-                    <tr>
-                        <th class="th-sortable" onclick="ordenarPor('estudiante')" data-col="estudiante">Estudiante <span class="sort-arrow"></span></th>
-                        <th class="th-sortable" onclick="ordenarPor('codigo')"     data-col="codigo">Código <span class="sort-arrow"></span></th>
-                        <th class="th-sortable" onclick="ordenarPor('dni')"        data-col="dni">DNI <span class="sort-arrow"></span></th>
-                        <th class="th-sortable" onclick="ordenarPor('facultad')"   data-col="facultad">Facultad <span class="sort-arrow"></span></th>
-                        <th class="th-sortable" onclick="ordenarPor('escuela')" data-col="escuela">Escuela <span class="sort-arrow"></span></th>
-                        <th class="th-sortable" onclick="ordenarPor('actividad')"  data-col="actividad">Actividad <span class="sort-arrow"></span></th>
-                        <th class="th-sortable" onclick="ordenarPor('inicio')"     data-col="inicio">Inicio <span class="sort-arrow"></span></th>
-                        <th>Salida</th>
-                        <th class="th-sortable" onclick="ordenarPor('fecha')"      data-col="fecha">Fecha <span class="sort-arrow"></span></th>
-                        <th>Estado</th>
-                    </tr>
-                </thead>
-                <tbody id="sesionesBody"></tbody>
-            </table>
+            <div class="tabla-scroll-wrap">
+                <table id="tablaSesiones" class="tabla">
+                    <thead>
+                        <tr>
+                            <th class="th-sortable" onclick="ordenarPor('estudiante')" data-col="estudiante">Estudiante <span class="sort-arrow"></span></th>
+                            <th class="th-sortable" onclick="ordenarPor('codigo')"     data-col="codigo">Código <span class="sort-arrow"></span></th>
+                            <th class="th-sortable" onclick="ordenarPor('dni')"        data-col="dni">DNI <span class="sort-arrow"></span></th>
+                            <th class="th-sortable" onclick="ordenarPor('facultad')"   data-col="facultad">Facultad <span class="sort-arrow"></span></th>
+                            <th class="th-sortable" onclick="ordenarPor('escuela')"    data-col="escuela">Escuela <span class="sort-arrow"></span></th>
+                            <th class="th-sortable" onclick="ordenarPor('actividad')"  data-col="actividad">Actividad <span class="sort-arrow"></span></th>
+                            <th class="th-sortable" onclick="ordenarPor('inicio')"     data-col="inicio">Inicio <span class="sort-arrow"></span></th>
+                            <th>Salida</th>
+                            <th class="th-sortable" onclick="ordenarPor('fecha')"      data-col="fecha">Fecha <span class="sort-arrow"></span></th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sesionesBody"></tbody>
+                </table>
+            </div>
             <p id="sinSesiones" class="empty-msg">No hay sesiones registradas</p>
         </section>
 
@@ -227,6 +232,21 @@
             <div class="modal-buttons">
                 <button id="btn-desbloqueo-cancelar" class="btn-cancelar">Cancelar</button>
                 <button id="btn-desbloqueo-confirmar" class="btn-confirmar">Desbloquear</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Nivel 2 (Acceso Admin) -->
+    <div id="modal-nivel2" class="modal-overlay" style="display:none;background:rgba(0,0,0,0.75)">
+        <div class="modal-content" style="min-width:320px">
+            <h3>🔐 Acceso de Administrador</h3>
+            <p style="color:var(--text-secondary);font-size:13px;margin-bottom:16px">Ingresa la contraseña de nivel 2 para habilitar los controles de equipos.</p>
+            <label class="modal-field-label">Contraseña de Nivel 2</label>
+            <input id="modal-nivel2-pass" type="password" placeholder="••••••••" class="modal-input" autocomplete="off">
+            <p id="modal-nivel2-error" style="color:#ef4444;font-size:12px;min-height:16px;margin:6px 0 8px"></p>
+            <div class="modal-buttons">
+                <button id="btn-nivel2-cancelar" class="btn-cancelar">Cancelar</button>
+                <button id="btn-nivel2-confirmar" class="btn-confirmar">Desbloquear</button>
             </div>
         </div>
     </div>

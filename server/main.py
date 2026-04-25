@@ -359,34 +359,41 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 manager.actualizar_id(old_id, terminal_id, ip=terminal_ip)
                 logger.info(f"[WS] Terminal re-identificada: {old_id} → {terminal_id} (hostname={hostname})")
 
-                # Actualizar DB: buscar por nombre o crear
+                # Sincronizar DB: nombre (hostname) ↔ IP de forma atómica
                 async with async_session() as db:
+                    # Buscar registro canónico por hostname
                     res = await db.execute(select(Terminal).where(Terminal.nombre == hostname))
                     t = res.scalar_one_or_none()
+
+                    # Buscar registro por IP (puede ser un temporal "Terminal-{ip}" o el mismo)
+                    res2 = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
+                    t_by_ip = res2.scalar_one_or_none()
+
                     if t:
-                        # Terminal conocida por nombre — actualizar IP si cambió
+                        # Ya existe por nombre — actualizar IP y limpiar duplicado por IP si es distinto
                         t.ip = terminal_ip
                         t.estado = "bloqueado"
                         t.ultima_conexion = datetime.utcnow()
+                        if t_by_ip and t_by_ip.id != t.id:
+                            # Eliminar el registro temporal creado por IP antes del hello
+                            await db.delete(t_by_ip)
+                            logger.info(f"[WS] Registro temporal '{t_by_ip.nombre}' eliminado (duplicado de '{hostname}')")
                         logger.info(f"[WS] Terminal '{hostname}' actualizada con IP={terminal_ip}")
+                    elif t_by_ip:
+                        # Existe por IP — actualizar nombre al hostname real
+                        t_by_ip.nombre = hostname
+                        t_by_ip.estado = "bloqueado"
+                        t_by_ip.ultima_conexion = datetime.utcnow()
+                        logger.info(f"[WS] Terminal IP={terminal_ip} sincronizada con nombre '{hostname}'")
                     else:
-                        # Buscar si existe por IP (registro previo sin hostname)
-                        res2 = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
-                        t2 = res2.scalar_one_or_none()
-                        if t2:
-                            t2.nombre = hostname
-                            t2.estado = "bloqueado"
-                            t2.ultima_conexion = datetime.utcnow()
-                            logger.info(f"[WS] Terminal IP={terminal_ip} renombrada a '{hostname}'")
-                        else:
-                            new_t = Terminal(
-                                nombre=hostname,
-                                ip=terminal_ip,
-                                estado="bloqueado",
-                                ultima_conexion=datetime.utcnow()
-                            )
-                            db.add(new_t)
-                            logger.info(f"[WS] Nueva terminal '{hostname}' registrada con IP={terminal_ip}")
+                        # Nueva terminal — registrar con datos completos
+                        db.add(Terminal(
+                            nombre=hostname,
+                            ip=terminal_ip,
+                            estado="bloqueado",
+                            ultima_conexion=datetime.utcnow()
+                        ))
+                        logger.info(f"[WS] Nueva terminal '{hostname}' registrada con IP={terminal_ip}")
                     await db.commit()
 
                 await websocket.send_json({"tipo": "hello_ack", "hostname": hostname})
@@ -693,18 +700,40 @@ async def websocket_admin(websocket: WebSocket):
                     await websocket.send_json({"tipo": "error", "motivo": f"Terminal {tid} no conectada"})
 
             elif tipo == "bloquear_todas":
+                ahora_bloqueo_todas = datetime.now().replace(tzinfo=None)
+                # IPs y nombres de terminales con conexión WS activa en este momento
+                ids_conectados = set(manager.conexiones_activas.keys())
+                ips_conectadas = set(manager.terminal_ips.values())
+
                 async with async_session() as db:
-                    for tid in list(manager.conexiones_activas):
-                        ip = manager.terminal_ips.get(tid, tid)
-                        res = await db.execute(select(Terminal).where(Terminal.nombre == tid))
-                        t = res.scalar_one_or_none()
-                        if not t:
-                            res2 = await db.execute(select(Terminal).where(Terminal.ip == ip))
-                            t = res2.scalar_one_or_none()
-                        if t:
+                    # Cerrar solo las sesiones de terminales actualmente conectadas
+                    res_todas = await db.execute(select(Sesion).where(Sesion.activa == True))
+                    sesiones_activas = res_todas.scalars().all()
+                    cerradas = 0
+                    for sesion_activa in sesiones_activas:
+                        # Verificar que la terminal de esta sesión esté conectada
+                        res_t = await db.execute(select(Terminal).where(Terminal.id == sesion_activa.terminal_id))
+                        t_sesion = res_t.scalar_one_or_none()
+                        if t_sesion and (t_sesion.nombre in ids_conectados or t_sesion.ip in ips_conectadas):
+                            sesion_activa.hora_salida   = ahora_bloqueo_todas
+                            sesion_activa.fin           = ahora_bloqueo_todas
+                            sesion_activa.activa        = False
+                            sesion_activa.motivo_cierre = "bloqueo_admin"
+                            cerradas += 1
+                    logger.info(f"[WS-Admin] bloqueo_todas: {cerradas} sesión(es) cerrada(s) (solo conectadas)")
+
+                    # Marcar como bloqueadas SOLO las terminales con WS activo
+                    res_terms = await db.execute(select(Terminal))
+                    for t in res_terms.scalars().all():
+                        if t.nombre in ids_conectados or t.ip in ips_conectadas:
                             t.estado = "bloqueado"
+                        # Las offline/desconectadas conservan su estado actual
                     await db.commit()
-                await websocket.send_json({"tipo": "ok", "mensaje": "Todas las terminales bloqueadas"})
+
+                # Enviar comando "bloquear" solo a los kioscos conectados
+                await manager.bloquear_todas()
+                await manager.notificar_evento(f"🔒 BLOQUEO GLOBAL: {cerradas} sesión(es) cerrada(s) ({len(ids_conectados)} terminal(es) conectada(s))", "warning")
+                await websocket.send_json({"tipo": "ok", "mensaje": f"Terminales conectadas bloqueadas ({cerradas} sesión(es) cerrada(s))"})
                 await manager.notificar_admins()
 
             logger.info(f"[WS-Admin] comando: {tipo}")

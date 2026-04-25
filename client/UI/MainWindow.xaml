@@ -6,7 +6,8 @@
         WindowState="Normal"
         Topmost="True"
         ResizeMode="NoResize"
-        AllowsTransparency="False">
+        AllowsTransparency="False"
+        FocusManager.FocusedElement="{Binding ElementName=TxtCodigo}">
 
     <Window.Background>
         <ImageBrush ImageSource="pack://application:,,,/images/fondo_3.png"
@@ -70,12 +71,12 @@
                                     BorderThickness="{TemplateBinding BorderThickness}"
                                     CornerRadius="10"/>
                             <ToggleButton x:Name="ToggleButton" Focusable="False"
+                                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                           IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
                                           ClickMode="Press">
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
-                                        <Grid>
-                                            <Border Background="Transparent"/>
+                                        <Grid Background="Transparent">
                                             <Path x:Name="Arrow" HorizontalAlignment="Right"
                                                   VerticalAlignment="Center" Margin="0,0,14,0"
                                                   Fill="#8D99AE" Data="M 0 0 L 6 6 L 12 0 Z"/>
@@ -90,7 +91,7 @@
                                               VerticalAlignment="Center" HorizontalAlignment="Left"/>
                             <Popup x:Name="Popup" Placement="Bottom"
                                    IsOpen="{TemplateBinding IsDropDownOpen}"
-                                   AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                   AllowsTransparency="True" Focusable="True" PopupAnimation="Slide">
                                 <Border x:Name="DropDownBorder" Background="#1E293B"
                                         BorderBrush="#334155" BorderThickness="1"
                                         CornerRadius="0,0,10,10" MaxHeight="300"
@@ -194,7 +195,7 @@
         </Style>
     </Window.Resources>
 
-    <Grid>
+    <Grid IsHitTestVisible="True">
         <Grid Panel.ZIndex="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
@@ -209,10 +210,10 @@
                         Visibility="Visible" Width="360">
 
                 <!-- Logo / Identidad -->
-                <StackPanel HorizontalAlignment="Center" Margin="0,0,0,24">
+                <StackPanel HorizontalAlignment="Center" Margin="0,0,0,24" IsHitTestVisible="False">
                     <!-- Escudo UNASAM — equivalente al SVG del panel web -->
                     <Border Width="76" Height="76" CornerRadius="18" HorizontalAlignment="Center"
-                            Margin="0,0,0,14">
+                            Margin="0,0,0,14" IsHitTestVisible="False">
                         <Border.Background>
                             <SolidColorBrush Color="#1A00B4DB"/>
                         </Border.Background>
@@ -245,7 +246,14 @@
                 </StackPanel>
 
                 <!-- Tarjeta login — rgba(40,40,45,0.85) -->
-                <Border CornerRadius="20" Padding="32,28">
+                <!-- Sombra exterior sin DropShadowEffect para no bloquear hit-test -->
+                <Border CornerRadius="22" Margin="4,4,4,4" Padding="1" IsHitTestVisible="False">
+                    <Border.Background>
+                        <SolidColorBrush Color="#55000000"/>
+                    </Border.Background>
+                </Border>
+                <Border CornerRadius="20" Padding="32,28"
+                        IsHitTestVisible="True">
                     <Border.Background>
                         <SolidColorBrush Color="#D928282D"/>
                     </Border.Background>
@@ -253,11 +261,8 @@
                         <SolidColorBrush Color="#40FFFFFF"/>
                     </Border.BorderBrush>
                     <Border.BorderThickness>1</Border.BorderThickness>
-                    <Border.Effect>
-                        <DropShadowEffect Color="Black" BlurRadius="32" ShadowDepth="0" Opacity="0.7"/>
-                    </Border.Effect>
 
-                    <StackPanel>
+                    <StackPanel IsHitTestVisible="True">
                         <!-- DNI -->
                         <TextBlock Text="NÚMERO DE DNI" FontSize="10" FontWeight="SemiBold"
                                    Foreground="#94A3B8"                                   Margin="2,0,0,8"/>
@@ -267,7 +272,13 @@
                                  MaxLength="8"
                                  Style="{StaticResource ModernTextBox}"
                                  KeyDown="TxtCodigo_KeyDown"
-                                 Margin="0,0,0,18"/>
+                                 TextChanged="TxtCodigo_TextChanged"
+                                 PreviewTextInput="TxtCodigo_PreviewTextInput"
+                                 DataObject.Pasting="TxtCodigo_Pasting"
+                                 Margin="0,0,0,18"
+                                 Focusable="True"
+                                 IsTabStop="True"
+                                 TabIndex="1"/>
 
                         <!-- Razón -->
                         <TextBlock Text="RAZÓN DE USO" FontSize="10" FontWeight="SemiBold"
@@ -276,7 +287,12 @@
                                   Height="48"
                                   Style="{StaticResource ModernComboBox}"
                                   SelectionChanged="CmbRazon_SelectionChanged"
-                                  Margin="0,0,0,10">
+                                  Margin="0,0,0,10"
+                                  IsHitTestVisible="True"
+                                  Focusable="True"
+                                  IsTabStop="True"
+                                  TabIndex="2"
+                                  Panel.ZIndex="99">
                             <ComboBoxItem Content="Investigación" IsSelected="True"/>
                             <ComboBoxItem Content="Lectura de libros digitales"/>
                             <ComboBoxItem Content="Uso de base de datos"/>
@@ -308,7 +324,12 @@
                         <Button x:Name="BtnIngresar" Content="INGRESAR"
                                 Height="50" Margin="0,6,0,0"
                                 Style="{StaticResource ModernButton}"
-                                Click="BtnIngresar_Click"/>
+                                Click="BtnIngresar_Click"
+                                IsDefault="True"
+                                IsHitTestVisible="True"
+                                Focusable="True"
+                                Panel.ZIndex="99"
+                                TabIndex="3"/>
 
                         <!-- Estado / error -->
                         <TextBlock x:Name="TxtEstado" Text=""
@@ -340,9 +361,6 @@
                         <SolidColorBrush Color="#40FFFFFF"/>
                     </Border.BorderBrush>
                     <Border.BorderThickness>1</Border.BorderThickness>
-                    <Border.Effect>
-                        <DropShadowEffect Color="Black" BlurRadius="32" ShadowDepth="0" Opacity="0.7"/>
-                    </Border.Effect>
                     <StackPanel>
                         <TextBlock Text="✅ Sesión Activa"
                                    FontSize="22" FontWeight="Bold" Foreground="White"

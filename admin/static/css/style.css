@@ -358,6 +358,26 @@ header h1 {
     background: var(--bg-table-head);
 }
 
+/* Botón Rol */
+.btn-rol {
+    padding: 7px 12px;
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+.btn-rol:hover {
+    background: rgba(0, 180, 219, 0.15);
+    color: #00B4DB;
+    border-color: #00B4DB;
+}
+
 /* Stats */
 .stats-grid {
     display: grid;
@@ -368,30 +388,43 @@ header h1 {
 
 .stat-card {
     background: var(--bg-card);
-    padding: 25px;
-    border-radius: 10px;
+    padding: 28px 20px;
+    border-radius: 12px;
     text-align: center;
     border: 1px solid var(--border);
     transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
 }
 
 body.light-mode .stat-card {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.10);
+}
+
+.stat-card:hover {
+    box-shadow: 0 4px 20px rgba(0, 180, 219, 0.15);
+    border-color: rgba(0, 180, 219, 0.35);
 }
 
 .stat-card.active {
     border-color: var(--accent);
+    box-shadow: 0 4px 20px rgba(0, 180, 219, 0.20);
 }
 
 .stat-number {
-    font-size: 36px;
+    font-size: 40px;
     font-weight: bold;
     color: var(--text-primary);
+    line-height: 1;
+    margin-bottom: 4px;
 }
 
 .stat-label {
     color: var(--text-muted);
-    margin-top: 5px;
+    margin-top: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
 }
 
 /* Terminales grid */
@@ -675,12 +708,29 @@ body.light-mode .btn-card-apagar {
     color: var(--accent);
 }
 
+/* Contenedor con scroll — muestra ~30 filas (cada fila ~40px + thead ~44px) */
+.tabla-scroll-wrap {
+    max-height: calc(30 * 40px + 44px);
+    overflow-y: auto;
+    border-radius: 8px;
+    /* Scrollbar fina y oscura */
+    scrollbar-width: thin;
+    scrollbar-color: #374151 transparent;
+}
+.tabla-scroll-wrap::-webkit-scrollbar { width: 6px; }
+.tabla-scroll-wrap::-webkit-scrollbar-track { background: transparent; }
+.tabla-scroll-wrap::-webkit-scrollbar-thumb {
+    background: #374151;
+    border-radius: 3px;
+}
+.tabla-scroll-wrap::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+body.light-mode .tabla-scroll-wrap { scrollbar-color: #d1d5db transparent; }
+body.light-mode .tabla-scroll-wrap::-webkit-scrollbar-thumb { background: #d1d5db; }
+
 .tabla {
     width: 100%;
     border-collapse: collapse;
     background: var(--bg-table);
-    border-radius: 8px;
-    overflow: hidden;
     transition: background 0.3s ease;
 }
 
@@ -691,6 +741,10 @@ body.light-mode .btn-card-apagar {
     color: var(--text-secondary);
     font-size: 13px;
     transition: background 0.3s ease, color 0.3s ease;
+    /* Sticky header */
+    position: sticky;
+    top: 0;
+    z-index: 2;
 }
 
 .th-sortable {
