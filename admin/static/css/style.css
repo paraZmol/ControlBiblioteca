@@ -1154,3 +1154,121 @@ body.light-mode .tabla-scroll-wrap::-webkit-scrollbar-thumb { background: #d1d5d
     animation: pulse-green 2s infinite;
     font-weight: bold;
 }
+
+/* ── Maestro de Alumnos ──────────────────────────────────────────── */
+.maestro-resultado {
+    margin: 10px 0;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    transition: background 0.3s ease, color 0.3s ease;
+}
+
+.maestro-resultado.ok {
+    background: var(--notif-ok-bg);
+    border-color: var(--active-border);
+    color: var(--active-border);
+}
+
+.maestro-resultado.error {
+    background: var(--notif-err-bg);
+    border-color: #e74c3c;
+    color: #e74c3c;
+}
+
+.btn-importar-maestro {
+    padding: 8px 18px;
+    background: #0083B0;
+    color: #fff;
+    border: 1px solid #00B4DB;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.2s ease;
+}
+
+.btn-importar-maestro:hover {
+    background: #00B4DB;
+}
+
+.btn-importar-maestro:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-maestro {
+    padding: 8px 18px;
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.btn-maestro:hover {
+    background: rgba(0, 180, 219, 0.12);
+    color: #00B4DB;
+    border-color: #00B4DB;
+}
+
+.btn-maestro-activo {
+    background: rgba(0, 180, 219, 0.18);
+    color: #00B4DB;
+    border-color: #00B4DB;
+}
+
+/* Paginación maestro */
+.maestro-paginacion {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.btn-pag {
+    padding: 5px 12px;
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.btn-pag:hover {
+    background: var(--bg-table-head);
+}
+
+.btn-pag.activo {
+    background: #1d4ed8;
+    color: #fff;
+    border-color: #1d4ed8;
+    font-weight: 600;
+}
+
+.btn-pag:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Modal maestro (edición) */
+#modal-maestro .modal-content {
+    text-align: left;
+    max-width: 500px;
+    border-color: #00B4DB;
+    box-shadow: 0 0 25px rgba(0, 180, 219, 0.25);
+}
+
+#modal-maestro .modal-content h3 {
+    color: #00B4DB;
+}

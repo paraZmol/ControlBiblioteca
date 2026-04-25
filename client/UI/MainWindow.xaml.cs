@@ -65,6 +65,9 @@ namespace ControlBiblioteca.Client.UI
                 LogDebug("Conectando...");
             };
 
+            string apiUrl = cfg.WsBaseUrl.Replace("ws://", "http://").Replace("wss://", "https://");
+            _ = CargarMotivosAsync($"{apiUrl}/api/catalogos/motivos");
+
             bool primerError = true;
 
             _wsService = new Services.WebSocketService(wsUrl);
@@ -202,11 +205,15 @@ namespace ControlBiblioteca.Client.UI
                 TxtEstado.Text        = "Validando...";
                 BtnIngresar.IsEnabled = false;
 
+                var cbItem = CmbRazon.SelectedItem as ComboBoxItem;
+                int motivo_id = cbItem?.Tag is int id ? id : 0;
+
                 await _wsService.EnviarAsync(JsonSerializer.Serialize(new
                 {
                     tipo = "login_request",
                     codigo,
-                    razon
+                    razon,
+                    motivo_id
                 }));
 
                 _loginCts?.Cancel();
@@ -627,5 +634,42 @@ namespace ControlBiblioteca.Client.UI
             _wsService.Desconectar();
             base.OnClosed(e);
         }
+
+        private async Task CargarMotivosAsync(string url)
+        {
+            try
+            {
+                using var client = new System.Net.Http.HttpClient();
+                var json = await client.GetStringAsync(url);
+                var opciones = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var motivos = JsonSerializer.Deserialize<List<MotivoUso>>(json, opciones);
+                
+                Dispatcher.Invoke(() =>
+                {
+                    CmbRazon.Items.Clear();
+                    if (motivos != null)
+                    {
+                        foreach (var m in motivos)
+                        {
+                            var cbi = new ComboBoxItem { Content = m.descripcion, Tag = m.id };
+                            CmbRazon.Items.Add(cbi);
+                        }
+                    }
+                    var otros = new ComboBoxItem { Content = "Otros (Especificar)", Tag = 0 };
+                    CmbRazon.Items.Add(otros);
+                    CmbRazon.SelectedIndex = 0;
+                });
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"Error cargando motivos: {ex.Message}");
+            }
+        }
+    }
+
+    public class MotivoUso
+    {
+        public int id { get; set; }
+        public string descripcion { get; set; }
     }
 }

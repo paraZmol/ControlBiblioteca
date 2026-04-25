@@ -17,7 +17,7 @@ let _pendingUnlockModal = null; // referencia al modal de desbloqueo abierto
 // 'asistente' = solo historial | 'admin' = vista completa (requiere clave nivel 2)
 // Por seguridad: SIEMPRE inicia en asistente, NO se persiste entre sesiones/recargas
 let _rol = 'asistente';
-const _PASS_NIVEL2 = 'max123';
+let _hashNivel2 = null; // se obtiene del servidor tras autenticarse (SHA-256)
 
 function _aplicarRol() {
     const esAsistente = _rol === 'asistente';
@@ -35,9 +35,18 @@ function _aplicarRol() {
     if (btnFinalizar) btnFinalizar.style.display = esAsistente ? 'none' : '';
     if (btnLimpiar)   btnLimpiar.style.display   = esAsistente ? 'none' : '';
 
-    // Botón importar Excel: solo Admin
+    // Botón importar Historial: solo Admin
     const btnImportar = document.getElementById('btnImportarExcel');
     if (btnImportar) btnImportar.style.display = esAsistente ? 'none' : 'inline-block';
+
+    // Botón y sección Base de Datos (Maestro): solo Admin Nivel 2
+    const btnMaestro = document.getElementById('btnMaestro');
+    if (btnMaestro) btnMaestro.style.display = esAsistente ? 'none' : '';
+    // Si baja a asistente, ocultar la sección si estaba abierta
+    if (esAsistente) {
+        const secMaestro = document.getElementById('seccionMaestro');
+        if (secMaestro) secMaestro.style.display = 'none';
+    }
 
     // Consolas de logs: solo visibles en Vista Admin
     const footerMonitoreo = document.getElementById('footer-monitoreo');
@@ -71,16 +80,22 @@ function _abrirModalNivel2() {
     setTimeout(() => passInput.focus(), 50);
 
     const confirmar = () => {
-        if (passInput.value === _PASS_NIVEL2) {
-            _rol = 'admin';
-            _aplicarRol();
-            modal.style.display = 'none';
-            passInput.removeEventListener('keydown', onKey);
-        } else {
-            errorEl.textContent = '⛔ Acceso Denegado. Contraseña incorrecta.';
-            passInput.value = '';
-            passInput.focus();
+        if (!_hashNivel2) {
+            errorEl.textContent = '⛔ Configuración de seguridad no disponible.';
+            return;
         }
+        _sha256(passInput.value).then(hash => {
+            if (hash === _hashNivel2) {
+                _rol = 'admin';
+                _aplicarRol();
+                modal.style.display = 'none';
+                passInput.removeEventListener('keydown', onKey);
+            } else {
+                errorEl.textContent = '⛔ Acceso Denegado. Contraseña incorrecta.';
+                passInput.value = '';
+                passInput.focus();
+            }
+        });
     };
     const cancelar = () => {
         modal.style.display = 'none';
@@ -102,6 +117,30 @@ function _initRol() {
     // Siempre inicia en asistente por seguridad (no leer localStorage)
     _rol = 'asistente';
     _aplicarRol();
+}
+
+// ── Seguridad: SHA-256 + carga de hash nivel2 ─────────────────────
+async function _sha256(texto) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function _cargarHashNivel2() {
+    try {
+        const res = await fetch(`${API_BASE}/config/nivel2-hash`, {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: 'no-store'
+        });
+        if (res.ok) {
+            const d = await res.json();
+            _hashNivel2 = d.hash;
+            addLog('activity', '🔐 Configuración de seguridad Nivel 2 cargada');
+        } else {
+            addLog('error', '⚠️ No se pudo cargar configuración Nivel 2 del servidor');
+        }
+    } catch (e) {
+        addLog('error', `⚠️ Error cargando hash nivel2: ${e.message}`);
+    }
 }
 
 // ── Estado de filtros/orden/periodo ───────────────────────────────
@@ -189,6 +228,7 @@ async function login() {
         btn.textContent = 'Iniciar Sesión';
 
         _initRol(); // siempre inicia en Vista Asistente
+        await _cargarHashNivel2(); // carga hash seguro desde el servidor
 
         // Obtener y mostrar IP real del servidor
         await obtenerYMostrarIpServidor();
@@ -242,6 +282,7 @@ function logout() {
     document.getElementById('password').value = '';
     document.body.classList.add('login-screen');
     _rol = 'asistente';
+    _hashNivel2 = null;
     setWsStatus(false);
 }
 
@@ -916,6 +957,203 @@ function mostrarNotificacion(msg, tipo) {
     _notifTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 
+
+// ── Maestro de Alumnos ────────────────────────────────────────────
+
+let _maestroOffset  = 0;
+const _maestroLimit = 50;
+let _maestroSearch  = '';
+let _maestroVisible = false;
+
+function toggleMaestro() {
+    _maestroVisible = !_maestroVisible;
+    const sec = document.getElementById('seccionMaestro');
+    const btn = document.getElementById('btnMaestro');
+    sec.style.display = _maestroVisible ? '' : 'none';
+    if (btn) btn.classList.toggle('btn-maestro-activo', _maestroVisible);
+    if (_maestroVisible) { _maestroOffset = 0; cargarMaestro(); }
+}
+
+let _buscarMaestroTimer = null;
+function buscarMaestro() {
+    clearTimeout(_buscarMaestroTimer);
+    _buscarMaestroTimer = setTimeout(() => {
+        _maestroSearch = document.getElementById('maestroBuscar')?.value.trim() || '';
+        _maestroOffset = 0;
+        cargarMaestro();
+    }, 300);
+}
+
+async function cargarMaestro() {
+    const params = new URLSearchParams({ limit: _maestroLimit, offset: _maestroOffset });
+    if (_maestroSearch) params.set('search', _maestroSearch);
+    try {
+        const res = await fetch(`${API_BASE}/admin/maestro?${params}`, { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok) { addLog('error', `Error cargando maestro: HTTP ${res.status}`); return; }
+        const data = await res.json();
+        renderMaestro(data);
+    } catch (e) {
+        addLog('error', `Error de red al cargar maestro: ${e.message}`);
+    }
+}
+
+function renderMaestro(data) {
+    const body   = document.getElementById('maestroBody');
+    const empty  = document.getElementById('sinMaestro');
+    const total  = document.getElementById('maestroTotal');
+    const pag    = document.getElementById('maestroPaginacion');
+    if (!body) return;
+
+    if (total) total.textContent = `${data.total} registro(s)`;
+
+    if (!data.alumnos.length) {
+        body.innerHTML = '';
+        if (empty) empty.style.display = '';
+        if (pag)   pag.innerHTML = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    body.innerHTML = data.alumnos.map(a => `
+        <tr>
+            <td><code>${esc(a.dni)}</code></td>
+            <td>${esc(a.nombre)}</td>
+            <td>${esc(a.codigo || '—')}</td>
+            <td style="font-size:12px">${esc(a.facultad || '—')}</td>
+            <td style="font-size:12px">${esc(a.escuela  || '—')}</td>
+            <td>
+                <button class="btn-card-desbloquear" style="padding:4px 10px;font-size:12px"
+                    onclick="abrirEditarMaestro('${esc(a.dni)}','${esc(a.nombre)}','${esc(a.codigo||'')}','${esc(a.facultad||'')}','${esc(a.escuela||'')}')">✏️</button>
+                <button class="btn-card-apagar" style="padding:4px 10px;font-size:12px"
+                    onclick="eliminarMaestro('${esc(a.dni)}','${esc(a.nombre)}')">🗑️</button>
+            </td>
+        </tr>`).join('');
+
+    // Paginación simple
+    if (pag) {
+        const totalPages = Math.ceil(data.total / _maestroLimit);
+        const curPage    = Math.floor(_maestroOffset / _maestroLimit);
+        let html = '';
+        for (let i = 0; i < totalPages; i++) {
+            html += `<button onclick="irPaginaMaestro(${i})"
+                style="padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:${i===curPage?'var(--accent)':'transparent'};color:${i===curPage?'#fff':'var(--text-primary)'};cursor:pointer">${i+1}</button>`;
+        }
+        pag.innerHTML = html;
+    }
+}
+
+function irPaginaMaestro(pagina) {
+    _maestroOffset = pagina * _maestroLimit;
+    cargarMaestro();
+}
+
+function abrirEditarMaestro(dni, nombre, codigo, facultad, escuela) {
+    const modal = document.getElementById('modal-maestro');
+    document.getElementById('modal-maestro-dni').textContent   = `DNI: ${dni}`;
+    document.getElementById('maestro-edit-nombre').value    = nombre;
+    document.getElementById('maestro-edit-codigo').value    = codigo;
+    document.getElementById('maestro-edit-facultad').value  = facultad;
+    document.getElementById('maestro-edit-escuela').value   = escuela;
+    document.getElementById('modal-maestro-error').textContent = '';
+    modal._dni = dni;
+
+    _rebindBtn('btn-maestro-cancelar', () => { modal.style.display = 'none'; });
+    _rebindBtn('btn-maestro-guardar',  async () => {
+        const errEl = document.getElementById('modal-maestro-error');
+        const nombre  = document.getElementById('maestro-edit-nombre').value.trim();
+        const codigo  = document.getElementById('maestro-edit-codigo').value.trim();
+        const fac     = document.getElementById('maestro-edit-facultad').value.trim();
+        const esc_val = document.getElementById('maestro-edit-escuela').value.trim();
+
+        if (!nombre) { errEl.textContent = 'El nombre es requerido'; return; }
+
+        try {
+            const res = await fetch(`${API_BASE}/admin/maestro/${encodeURIComponent(modal._dni)}`, {
+                method: 'PUT',
+                headers: authHeaders(),
+                body: JSON.stringify({ nombre, codigo: codigo || null })
+            });
+            const body = await res.json();
+            if (res.ok) {
+                modal.style.display = 'none';
+                mostrarNotificacion('✅ ' + body.mensaje, 'ok');
+                addLog('activity', `✏️ Maestro actualizado: DNI ${modal._dni}`);
+                cargarMaestro();
+            } else {
+                errEl.textContent = body.detail || 'Error al guardar';
+            }
+        } catch (e) {
+            errEl.textContent = 'Error de conexión';
+        }
+    });
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('maestro-edit-nombre').focus(), 50);
+}
+
+function eliminarMaestro(dni, nombre) {
+    mostrarConfirmacion(
+        `¿Eliminar a <strong>${escapeHtml(nombre)}</strong> (DNI: ${escapeHtml(dni)}) del maestro?`,
+        async () => {
+            try {
+                const res = await fetch(`${API_BASE}/admin/maestro/${encodeURIComponent(dni)}`, {
+                    method: 'DELETE', headers: authHeaders()
+                });
+                const body = await res.json();
+                if (res.ok) {
+                    mostrarNotificacion('✅ ' + body.mensaje, 'ok');
+                    addLog('activity', `🗑️ Maestro: eliminado DNI ${dni}`);
+                    cargarMaestro();
+                } else {
+                    mostrarNotificacion('❌ ' + (body.detail || 'Error'), 'error');
+                }
+            } catch (e) {
+                mostrarNotificacion('❌ Error de conexión', 'error');
+            }
+        },
+        { titulo: '⚠️ Eliminar del Maestro', textoConfirmar: 'Eliminar', critico: true }
+    );
+}
+
+async function importarMaestro(input) {
+    const archivo = input.files[0];
+    if (!archivo) return;
+    input.value = '';
+
+    const resultado = document.getElementById('maestroResultado');
+    if (resultado) { resultado.style.display = ''; resultado.className = 'maestro-resultado cargando'; resultado.textContent = '⏳ Importando...'; }
+    mostrarNotificacion('⏳ Importando maestro...', 'ok');
+    addLog('activity', `📥 Importando maestro: ${archivo.name}`);
+
+    const form = new FormData();
+    form.append('archivo', archivo);
+
+    try {
+        const res  = await fetch(`${API_BASE}/admin/importar-maestro`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: form
+        });
+        const data = await res.json();
+        if (res.ok) {
+            const msg = `✅ ${data.insertados} nuevo(s)  |  🔄 ${data.actualizados} actualizado(s)${data.errores ? '  |  ⚠️ ' + data.errores + ' ignorado(s)' : ''}`;
+            if (resultado) { resultado.className = 'maestro-resultado ok'; resultado.innerHTML = msg; }
+            mostrarNotificacion('✅ Importación completada', 'ok');
+            addLog('activity', `✅ Maestro: ${data.mensaje}`);
+            if (data.detalle_errores?.length) data.detalle_errores.forEach(e => addLog('error', `⚠️ ${e}`));
+            _maestroOffset = 0;
+            cargarMaestro();
+        } else {
+            const err = data.detail || 'Error en importación';
+            if (resultado) { resultado.className = 'maestro-resultado error'; resultado.textContent = '❌ ' + err; }
+            mostrarNotificacion('❌ ' + err, 'error');
+            addLog('error', `❌ Maestro importación: ${err}`);
+        }
+    } catch (e) {
+        if (resultado) { resultado.className = 'maestro-resultado error'; resultado.textContent = '❌ Error de conexión'; }
+        mostrarNotificacion('❌ Error de conexión', 'error');
+        addLog('error', `❌ Error de red al importar maestro: ${e.message}`);
+    }
+}
 
 // escapeHtml y esc definidos al inicio del archivo
 
