@@ -5,6 +5,21 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
 
 
+class AlumnoMaestro(Base):
+    """Maestro local de alumnos — fuente primaria de búsqueda por DNI."""
+    __tablename__ = "alumnos_maestro"
+
+    dni: Mapped[str] = mapped_column(String(20), primary_key=True)
+    nombre_completo: Mapped[str] = mapped_column(String(200), nullable=False)
+    codigo_universitario: Mapped[str] = mapped_column(String(30), nullable=True, index=True)
+    facultad: Mapped[str] = mapped_column(String(150), nullable=True)
+    escuela: Mapped[str] = mapped_column(String(100), nullable=True)
+    fecha_actualizacion: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<AlumnoMaestro {self.dni} - {self.nombre_completo}>"
+
+
 class Alumno(Base):
     """Caché local de alumnos (sincronizado desde API externa OGE/Koha)."""
     __tablename__ = "alumnos"

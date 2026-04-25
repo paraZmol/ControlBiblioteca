@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, delete
 from database import init_db, async_session
-from models import Alumno, Usuario, Terminal, Sesion
+from models import Alumno, AlumnoMaestro, Usuario, Terminal, Sesion
 from auth_service import hashear_password
 from api.endpoints import router as api_router
 from core.websocket_manager import manager
@@ -410,44 +410,107 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     continue
 
                 async with async_session() as db:
-                    logger.info(f"[WS] {terminal_id} buscando alumno DNI={codigo} en DB...")
-                    # Buscar por DNI primero, luego por código de matrícula como fallback
-                    res_a = await db.execute(select(Alumno).where(Alumno.dni == codigo))
-                    alumno = res_a.scalar_one_or_none()
-                    if alumno is None:
-                        res_a2 = await db.execute(select(Alumno).where(Alumno.codigo == codigo))
-                        alumno = res_a2.scalar_one_or_none()
+                    # ── Capa 1: alumnos_maestro (fuente primaria, respuesta instantánea) ──
+                    res_m = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == codigo))
+                    maestro = res_m.scalar_one_or_none()
 
-                    # ── Fallback SGA: si no está en DB, consultamos la API externa ──
-                    if alumno is None:
-                        logger.info(f"[WS] {terminal_id} alumno DNI={codigo} no en DB → consultando SGA...")
-                        await websocket.send_json({"tipo": "info", "motivo": "Verificando en sistema universitario..."})
-                        sga = await consultar_sga(codigo)
-                        if sga:
-                            logger.info(f"[SGA] Registrando: {sga['nombres']} {sga['apellidos']} | código={sga['codigo']} | DNI={sga['dni']}")
-                            alumno = Alumno(
-                                codigo    = sga["codigo"],
-                                dni       = sga["dni"],
-                                nombres   = sga["nombres"],
-                                apellidos = sga["apellidos"],
-                                escuela   = sga["escuela"],
-                                facultad  = sga.get("facultad", ""),
-                                habilitado= True,
-                            )
-                            db.add(alumno)
-                            await db.flush()
-                            logger.info(f"[SGA] Alumno registrado: código={alumno.codigo} DNI={alumno.dni} id={alumno.id}")
+                    if maestro:
+                        # Construir datos desde el maestro
+                        partes = maestro.nombre_completo.split()
+                        if len(partes) >= 3:
+                            nombres_m   = " ".join(partes[:len(partes)-2])
+                            apellidos_m = " ".join(partes[len(partes)-2:])
+                        elif len(partes) == 2:
+                            nombres_m, apellidos_m = partes[0], partes[1]
                         else:
-                            logger.warning(f"[WS] {terminal_id} alumno DNI={codigo} no encontrado en DB ni en SGA")
-                            await websocket.send_json({"tipo": "login_rechazado", "motivo": "Alumno no registrado en el sistema"})
-                            continue
+                            nombres_m, apellidos_m = maestro.nombre_completo, ""
+                        datos_alumno = {
+                            "codigo":    maestro.codigo_universitario or codigo,
+                            "dni":       maestro.dni,
+                            "nombres":   nombres_m,
+                            "apellidos": apellidos_m,
+                            "escuela":   maestro.escuela or "",
+                            "facultad":  maestro.facultad or "",
+                        }
+                        logger.info(f"[MAESTRO] Alumno encontrado: {maestro.nombre_completo} | DNI={codigo}")
+                    else:
+                        # ── Capa 2: tabla alumnos (caché legacy) ──
+                        res_a = await db.execute(select(Alumno).where(Alumno.dni == codigo))
+                        alumno_cache = res_a.scalar_one_or_none()
+                        if alumno_cache is None:
+                            res_a2 = await db.execute(select(Alumno).where(Alumno.codigo == codigo))
+                            alumno_cache = res_a2.scalar_one_or_none()
+
+                        if alumno_cache:
+                            datos_alumno = {
+                                "codigo":    alumno_cache.codigo,
+                                "dni":       alumno_cache.dni or codigo,
+                                "nombres":   alumno_cache.nombres,
+                                "apellidos": alumno_cache.apellidos,
+                                "escuela":   alumno_cache.escuela or "",
+                                "facultad":  alumno_cache.facultad or "",
+                            }
+                            logger.info(f"[CACHE] Alumno en tabla legacy: {alumno_cache.nombres} {alumno_cache.apellidos}")
+                        else:
+                            # ── Capa 3: API SGA externa (plan B) ──
+                            logger.info(f"[WS] {terminal_id} DNI={codigo} no en maestro ni caché → consultando SGA...")
+                            await websocket.send_json({"tipo": "info", "motivo": "Verificando en sistema universitario..."})
+                            sga = await consultar_sga(codigo)
+                            if not sga:
+                                logger.warning(f"[WS] {terminal_id} DNI={codigo} no encontrado en ninguna fuente")
+                                await websocket.send_json({"tipo": "login_rechazado", "motivo": "Alumno no registrado en el sistema"})
+                                continue
+
+                            datos_alumno = {
+                                "codigo":    sga["codigo"],
+                                "dni":       sga["dni"],
+                                "nombres":   sga["nombres"],
+                                "apellidos": sga["apellidos"],
+                                "escuela":   sga["escuela"],
+                                "facultad":  sga.get("facultad", ""),
+                            }
+                            # Guardar en maestro para respuesta instantánea la próxima vez
+                            nombre_completo = f"{sga['nombres']} {sga['apellidos']}"
+                            db.add(AlumnoMaestro(
+                                dni=sga["dni"],
+                                nombre_completo=nombre_completo,
+                                codigo_universitario=sga["codigo"],
+                                facultad=sga.get("facultad", ""),
+                                escuela=sga["escuela"],
+                            ))
+                            # También en tabla legacy para relaciones de sesiones
+                            alumno_nuevo = Alumno(
+                                codigo=sga["codigo"], dni=sga["dni"],
+                                nombres=sga["nombres"], apellidos=sga["apellidos"],
+                                escuela=sga["escuela"], facultad=sga.get("facultad", ""),
+                                habilitado=True,
+                            )
+                            db.add(alumno_nuevo)
+                            await db.flush()
+                            logger.info(f"[SGA] Guardado en maestro y caché: {nombre_completo}")
+
+                    # Obtener o crear el registro Alumno para la FK de sesiones
+                    res_fk = await db.execute(select(Alumno).where(Alumno.dni == datos_alumno["dni"]))
+                    alumno = res_fk.scalar_one_or_none()
+                    if alumno is None:
+                        res_fk2 = await db.execute(select(Alumno).where(Alumno.codigo == datos_alumno["codigo"]))
+                        alumno = res_fk2.scalar_one_or_none()
+                    if alumno is None:
+                        alumno = Alumno(
+                            codigo=datos_alumno["codigo"], dni=datos_alumno["dni"],
+                            nombres=datos_alumno["nombres"], apellidos=datos_alumno["apellidos"],
+                            escuela=datos_alumno["escuela"], facultad=datos_alumno["facultad"],
+                            habilitado=True,
+                        )
+                        db.add(alumno)
+                        await db.flush()
 
                     if not alumno.habilitado:
                         logger.warning(f"[WS] {terminal_id} alumno DNI={codigo} no habilitado")
                         await websocket.send_json({"tipo": "login_rechazado", "motivo": "Alumno no habilitado para usar la biblioteca"})
                         continue
 
-                    logger.info(f"[WS] {terminal_id} alumno OK: {alumno.nombres} {alumno.apellidos} | código={alumno.codigo} | DNI={alumno.dni}")
+                    logger.info(f"[WS] {terminal_id} alumno OK: {datos_alumno['nombres']} {datos_alumno['apellidos']} | DNI={codigo}")
 
                     t = await _buscar_terminal(db, terminal_id, terminal_ip)
 
@@ -456,9 +519,9 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             alumno_id   = alumno.id,
                             terminal_id = t.id,
                             razon_uso   = razon or None,
-                            dni         = alumno.dni or alumno.codigo,
-                            facultad    = alumno.facultad or "",
-                            escuela     = alumno.escuela or "",
+                            dni         = datos_alumno["dni"],
+                            facultad    = datos_alumno["facultad"],
+                            escuela     = datos_alumno["escuela"],
                             fecha_uso   = datetime.now().date(),
                         )
                         t.estado = "activo"
@@ -466,15 +529,16 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     await db.commit()
                     logger.info(f"[WS] {terminal_id} sesión registrada en DB (razon={razon!r})")
 
+                    nombre_display = f"{datos_alumno['nombres']} {datos_alumno['apellidos']}"
                     logger.info(f"[WS] {terminal_id} enviando 'desbloquear' al kiosco...")
                     await manager.desbloquear_terminal(terminal_id, {
-                        "codigo":    alumno.codigo,
-                        "nombres":   alumno.nombres,
-                        "apellidos": alumno.apellidos,
+                        "codigo":    datos_alumno["codigo"],
+                        "nombres":   datos_alumno["nombres"],
+                        "apellidos": datos_alumno["apellidos"],
                     })
                     logger.info(f"[WS] {terminal_id} respuesta enviada OK")
-                    await manager.notificar_evento(f"🟢 ENTRADA: {alumno.nombres} {alumno.apellidos} en {terminal_id}", "login")
-                    await manager.enviar_log("activity", f"👤 Acceso: {alumno.nombres} {alumno.apellidos} en {terminal_id}")
+                    await manager.notificar_evento(f"🟢 ENTRADA: {nombre_display} en {terminal_id}", "login")
+                    await manager.enviar_log("activity", f"👤 Acceso: {nombre_display} en {terminal_id}")
 
                 await manager.notificar_admins()
 
