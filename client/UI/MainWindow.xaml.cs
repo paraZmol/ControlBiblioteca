@@ -21,8 +21,10 @@ namespace ControlBiblioteca.Client.UI
         private bool _desbloqueado;
         private bool _cerrandoPorEscape;
 
-        private int _contadorEscape;
+        private bool _esperandoEscapes = false;
+        private int  _conteoEscapes    = 0;
         private const int ESCAPES_PARA_SALIR = 5;
+        private System.Windows.Threading.DispatcherTimer? _timerEscape;
 
         private CancellationTokenSource? _loginCts;
 
@@ -369,6 +371,7 @@ namespace ControlBiblioteca.Client.UI
 
         private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            // Salida instantánea legado (Ctrl+Alt+F10)
             if (e.Key == MASTER_KEY && (Keyboard.Modifiers & MASTER_MOD) == MASTER_MOD)
             {
                 e.Handled = true;
@@ -377,17 +380,48 @@ namespace ControlBiblioteca.Client.UI
                 return;
             }
 
-            if (e.Key == Key.Escape)
+            // Paso 1: Ctrl+M activa el modo escape
+            if (e.Key == Key.M && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
             {
-                _contadorEscape++;
-                LogDebug($"Escape {_contadorEscape}/{ESCAPES_PARA_SALIR}");
-                if (_contadorEscape >= ESCAPES_PARA_SALIR)
-                    ActivarEscapeEmergencia("escape_5x");
                 e.Handled = true;
+                _esperandoEscapes = true;
+                _conteoEscapes    = 0;
+                LogDebug("Ctrl+M — esperando 5x ESC en 5 segundos...");
+
+                // Reiniciar timer de 5 segundos
+                if (_timerEscape == null)
+                {
+                    _timerEscape = new System.Windows.Threading.DispatcherTimer
+                    {
+                        Interval = TimeSpan.FromSeconds(5)
+                    };
+                    _timerEscape.Tick += (_, _) =>
+                    {
+                        _timerEscape.Stop();
+                        _esperandoEscapes = false;
+                        _conteoEscapes    = 0;
+                        LogDebug("Timeout — secuencia de escape cancelada");
+                    };
+                }
+                _timerEscape.Stop();
+                _timerEscape.Start();
+                return;
             }
-            else
+
+            // Paso 2: contar ESC solo si el modo está activo
+            if (e.Key == Key.Escape && _esperandoEscapes)
             {
-                _contadorEscape = 0;
+                e.Handled = true;
+                _conteoEscapes++;
+                LogDebug($"ESC {_conteoEscapes}/{ESCAPES_PARA_SALIR}");
+                if (_conteoEscapes >= ESCAPES_PARA_SALIR)
+                {
+                    _timerEscape?.Stop();
+                    _esperandoEscapes = false;
+                    _conteoEscapes    = 0;
+                    ActivarEscapeEmergencia("ctrl_m_escape_5x");
+                }
+                return;
             }
         }
 
@@ -425,8 +459,9 @@ namespace ControlBiblioteca.Client.UI
 
         private void Bloquear()
         {
-            _desbloqueado   = false;
-            _contadorEscape = 0;
+            _desbloqueado     = false;
+            _esperandoEscapes = false;
+            _conteoEscapes    = 0;
 
             Dispatcher.Invoke(() =>
             {

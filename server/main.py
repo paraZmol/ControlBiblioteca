@@ -540,51 +540,15 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         }
                         logger.info(f"[MAESTRO] Alumno encontrado: {maestro.nombre} | DNI={codigo}")
                     else:
-                        # ── Capa 2: SGA externa ──
-                        logger.info(f"[WS] {terminal_id} DNI={codigo} no en maestro → consultando SGA...")
-                        await websocket.send_json({"tipo": "info", "motivo": "Verificando en sistema universitario..."})
-                        sga = await consultar_sga(codigo)
-                        if not sga:
-                            if t:
-                                t.intentos_fallidos += 1
-                                if t.intentos_fallidos >= 3:
-                                    t.bloqueada_hasta = datetime.now() + timedelta(minutes=5)
-                                await db.commit()
-                            logger.warning(f"[WS] {terminal_id} DNI={codigo} no encontrado en ninguna fuente")
-                            await websocket.send_json({"tipo": "login_rechazado", "motivo": "Alumno no registrado en el sistema"})
-                            continue
-
-                        datos_alumno = {
-                            "codigo":    sga["codigo"],
-                            "dni":       sga["dni"],
-                            "nombres":   sga["nombres"],
-                            "apellidos": sga["apellidos"],
-                        }
-                        
-                        # Auto-registro en maestro con Facultad y Escuela (get_or_create)
-                        nombre_completo = f"{sga['nombres']} {sga['apellidos']}"
-                        id_escuela = None
-                        
-                        # Crear o recuperar Facultad
-                        if sga.get("facultad"):
-                            facultad = await get_or_create_facultad(db, sga["facultad"])
-                            # Crear o recuperar Escuela asociada a la Facultad
-                            if facultad and sga.get("escuela"):
-                                escuela = await get_or_create_escuela(db, sga["escuela"], facultad)
-                                if escuela:
-                                    id_escuela = escuela.id
-                                    logger.info(f"[SGA] Escuela asignada: {sga['escuela']}")
-                        
-                        # Crear alumno con escuela si está disponible
-                        nuevo_alumno = AlumnoMaestro(
-                            dni=sga["dni"],
-                            nombre=nombre_completo,
-                            codigo=sga["codigo"],
-                            id_escuela=id_escuela,
-                        )
-                        db.add(nuevo_alumno)
-                        await db.flush()
-                        logger.info(f"[SGA] Guardado en maestro: {nombre_completo} (Escuela ID: {id_escuela})")
+                        # ── Solo BD local — sin SGA ──
+                        if t:
+                            t.intentos_fallidos += 1
+                            if t.intentos_fallidos >= 3:
+                                t.bloqueada_hasta = datetime.now() + timedelta(minutes=5)
+                            await db.commit()
+                        logger.warning(f"[WS] {terminal_id} DNI={codigo} no en maestro — acceso denegado")
+                        await websocket.send_json({"tipo": "login_rechazado", "motivo": "Usuario no registrado. Acerquese al modulo para tramitar su carnet de biblioteca"})
+                        continue
 
                     # Obtener registro maestro confirmado para FK de sesión
                     res_fk = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == datos_alumno["dni"]))
@@ -769,21 +733,9 @@ async def websocket_admin(websocket: WebSocket):
                         alumno = res_a2.scalar_one_or_none()
 
                     if alumno is None:
-                        logger.info(f"[WS-Admin] DNI={dni_param} no en maestro → consultando SGA...")
-                        await websocket.send_json({"tipo": "info", "motivo": f"Verificando DNI {dni_param} en la UNASAM..."})
-                        sga = await consultar_sga(dni_param)
-                        if sga:
-                            alumno = AlumnoMaestro(
-                                dni    = sga["dni"],
-                                nombre = f"{sga['nombres']} {sga['apellidos']}",
-                                codigo = sga["codigo"],
-                            )
-                            db.add(alumno)
-                            await db.flush()
-                            logger.info(f"[WS-Admin] Alumno registrado desde SGA: {alumno.nombre} | código={alumno.codigo}")
-                        else:
-                            await websocket.send_json({"tipo": "error", "motivo": f"Error: El DNI {dni_param} no existe en el sistema de la UNASAM"})
-                            continue
+                        logger.warning(f"[WS-Admin] DNI={dni_param} no en maestro — acceso denegado")
+                        await websocket.send_json({"tipo": "error", "motivo": f"El DNI {dni_param} no esta registrado en la base de datos local"})
+                        continue
 
                     if alumno is None:
                         await websocket.send_json({"tipo": "error", "motivo": f"Error: El DNI {dni_param} no existe"})
