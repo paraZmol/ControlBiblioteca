@@ -294,11 +294,15 @@ async def sesiones_activas(
     """Historial con filtros de búsqueda, actividad, fecha y ordenamiento."""
     from sqlalchemy import or_
 
-    q = (select(Sesion, AlumnoMaestro, Terminal, Escuela, Facultad)
+    from sqlalchemy.orm import aliased
+    FacDir = aliased(Facultad, name="fac_direct")
+
+    q = (select(Sesion, AlumnoMaestro, Terminal, Escuela, Facultad, FacDir)
          .join(AlumnoMaestro, Sesion.dni_alumno == AlumnoMaestro.dni)
          .join(Terminal, Sesion.id_terminal == Terminal.id)
-         .outerjoin(Escuela, AlumnoMaestro.id_escuela == Escuela.id)
-         .outerjoin(Facultad, Escuela.id_facultad == Facultad.id))
+         .outerjoin(Escuela,  AlumnoMaestro.id_escuela  == Escuela.id)
+         .outerjoin(Facultad, Escuela.id_facultad        == Facultad.id)
+         .outerjoin(FacDir,   AlumnoMaestro.id_facultad  == FacDir.id))
 
     q = _aplicar_filtro_fecha(q, periodo, fecha_inicio, fecha_fin)
 
@@ -317,11 +321,11 @@ async def sesiones_activas(
 
     result = await db.execute(q)
     rows = []
-    for s, a, t, esc_obj, fac_obj in result.all():
+    for s, a, t, esc_obj, fac_obj, fac_dir in result.all():
         inicio_naive = s.hora_entrada.replace(tzinfo=None) if s.hora_entrada else None
         salida_naive = s.hora_salida.replace(tzinfo=None)  if s.hora_salida  else None
         duracion_min = int((salida_naive - inicio_naive).total_seconds() / 60) if (inicio_naive and salida_naive) else None
-        fac = fac_obj.nombre if fac_obj else ""
+        fac = (fac_obj.nombre if fac_obj else None) or (fac_dir.nombre if fac_dir else "")
         esc = esc_obj.nombre if esc_obj else ""
         rows.append({
             "id":              s.id,
@@ -904,25 +908,79 @@ async def importar_maestro(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Archivo Excel inválido: {e}")
 
-    headers = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    import unicodedata
+
+    def _norm(s: str) -> str:
+        """Minúsculas + sin tildes + sin puntos para comparación flexible."""
+        s = s.lower().replace(".", "").strip()
+        return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+
+    raw_headers = [str(c.value).strip() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    headers_norm = [_norm(h) for h in raw_headers]
 
     def col(variantes):
         for v in variantes:
-            if v in headers:
-                return headers.index(v)
+            vn = _norm(v)
+            for i, h in enumerate(headers_norm):
+                if vn == h or h.startswith(vn):
+                    return i
         return None
 
-    idx_dni     = col(["dni"])
-    idx_nombre  = col(["nombre_completo", "nombre completo", "apellidos y nombres", "apellidos nombres", "apellidos y nombres del estudiante", "estudiante", "nombre", "nombres", "alumno"])
-    idx_codigo  = col(["codigo_universitario", "código universitario", "código", "codigo", "cod", "código de matrícula", "codigo de matricula", "matricula"])
-    idx_facultad = col(["facultad", "nombre facultad"])
-    idx_escuela  = col(["escuela", "escuela profesional", "carrera"])
+    def col_nombre_real(variantes) -> str:
+        """Devuelve el nombre real de la columna encontrada (para logs)."""
+        for v in variantes:
+            vn = _norm(v)
+            for i, h in enumerate(headers_norm):
+                if vn == h or h.startswith(vn):
+                    return raw_headers[i]
+        return ""
+
+    idx_dni       = col(["dni"])
+    idx_apellidos = col(["apellidos", "a_paterno a_materno", "apellidos completos"])
+    idx_paterno   = col(["a_paterno", "apellido paterno", "paterno", "primer apellido"])
+    idx_materno   = col(["a_materno", "apellido materno", "materno", "segundo apellido"])
+    idx_nombres_p = col(["nombres"])
+    idx_nombre    = col(["nombre_completo", "nombre completo", "apellidos y nombres", "apellidos nombres", "apellidos y nombres del estudiante", "estudiante", "nombre", "alumno"])
+    idx_codigo    = col(["codigo_universitario", "codigo universitario", "codigo", "cod", "codigo de matricula", "matricula"])
+    idx_facultad  = col(["facultad", "nombre facultad", "fac"])
+    idx_escuela   = col(["escuela", "escuela profesional", "carrera"])
+
+    # Log de columnas detectadas
+    logger.info(f"[IMPORT-MAESTRO] DNI col={raw_headers[idx_dni] if idx_dni is not None else 'NO'} | "
+                f"FAC col={col_nombre_real(['facultad','nombre facultad','fac']) or 'NO'} | "
+                f"ESC col={col_nombre_real(['escuela','escuela profesional','carrera']) or 'NO'}")
+
+    # Modo nombre: APELLIDOS+NOMBRES | A_PATERNO+A_MATERNO+NOMBRES | columna única
+    if idx_apellidos is not None and idx_nombres_p is not None:
+        _modo_nombre = "apellidos_nombres"
+    elif idx_paterno is not None and idx_nombres_p is not None:
+        _modo_nombre = "partes"
+    else:
+        _modo_nombre = "unico"
 
     if idx_dni is None:
         raise HTTPException(status_code=400, detail="Columna 'dni' no encontrada en el Excel.")
 
     def cell(fila, idx):
         return str(fila[idx]).strip() if idx is not None and idx < len(fila) and fila[idx] is not None else ""
+
+    def titulo(s: str) -> str:
+        return s.title().strip() if s else ""
+
+    def limpiar_escuela(escuela: str, facultad: str) -> str | None:
+        if not escuela:
+            return None
+        e = escuela.strip()
+        if not e:
+            return None
+        if e.upper() == facultad.strip().upper():
+            return None
+        if len(e) < 7:
+            return None
+        return e
+
+    def limpiar_facultad(s: str) -> str:
+        return s.replace(".", "").strip().upper() if s else ""
 
     # Cache en memoria para evitar consultas repetidas por facultad/escuela
     _cache_fac: dict[str, int] = {}
@@ -973,24 +1031,37 @@ async def importar_maestro(
                 errores_detalle.append(f"Fila {num_fila}: DNI inválido '{dni}'")
                 continue
 
-            nombre        = cell(fila, idx_nombre)
-            codigo        = cell(fila, idx_codigo)
-            nombre_fac    = cell(fila, idx_facultad)
-            nombre_esc    = cell(fila, idx_escuela)
+            if _modo_nombre == "apellidos_nombres":
+                apellidos = titulo(cell(fila, idx_apellidos))
+                nombres_v = titulo(cell(fila, idx_nombres_p))
+                nombre = f"{apellidos} {nombres_v}".strip()
+            elif _modo_nombre == "partes":
+                paterno = titulo(cell(fila, idx_paterno))
+                materno = titulo(cell(fila, idx_materno) if idx_materno is not None else "")
+                nombres_v = titulo(cell(fila, idx_nombres_p))
+                apellidos = " ".join(p for p in [paterno, materno] if p)
+                nombre = f"{apellidos} {nombres_v}".strip()
+            else:
+                nombre = titulo(cell(fila, idx_nombre))
+            codigo        = cell(fila, idx_codigo) or None
+            nombre_fac    = limpiar_facultad(cell(fila, idx_facultad))
+            nombre_esc_raw = cell(fila, idx_escuela).strip()
+            nombre_esc     = limpiar_escuela(nombre_esc_raw, nombre_fac) or ""
 
             # Fase 1: Facultad
             id_fac = await _get_or_create_facultad(nombre_fac)
-            # Fase 2: Escuela
-            id_esc = await _get_or_create_escuela(nombre_esc, id_fac)
+            # Fase 2: Escuela — SOLO si pasó el filtro de limpieza
+            id_esc = await _get_or_create_escuela(nombre_esc, id_fac) if nombre_esc else None
 
             # Fase 3: Upsert AlumnoMaestro
             res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni))
             existente = res.scalar_one_or_none()
 
             if existente:
-                if nombre:   existente.nombre     = nombre
-                if codigo:   existente.codigo     = codigo
-                if id_esc:   existente.id_escuela = id_esc
+                if nombre:              existente.nombre      = nombre
+                if codigo:              existente.codigo      = codigo
+                if id_esc is not None:  existente.id_escuela  = id_esc
+                if id_fac is not None:  existente.id_facultad = id_fac
                 actualizados += 1
             else:
                 db.add(AlumnoMaestro(
@@ -998,15 +1069,20 @@ async def importar_maestro(
                     nombre=nombre or "SIN NOMBRE",
                     codigo=codigo or None,
                     id_escuela=id_esc,
+                    id_facultad=id_fac,
                 ))
                 insertados += 1
+
+            # Flush cada 200 filas para liberar memoria sin hacer commit parcial
+            if (insertados + actualizados) % 200 == 0:
+                await db.flush()
 
         except Exception as ex:
             errores += 1
             errores_detalle.append(f"Fila {num_fila}: {ex}")
 
     await db.commit()
-    msg = f"Maestro importado: {insertados} nuevo(s), {actualizados} actualizado(s)"
+    msg = f"Maestro importado: {insertados} alumno(s) nuevo(s), {actualizados} actualizado(s)"
     if errores:
         msg += f", {errores} fila(s) ignorada(s)"
     logger.info(f"[ADMIN] {msg}")
@@ -1026,10 +1102,13 @@ async def listar_maestro(
     if admin.rol != "admin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden acceder a la base de datos")
     from sqlalchemy import or_, func
+    from sqlalchemy.orm import aliased
+    FacDir2 = aliased(Facultad, name="fac_direct2")
 
-    q = (select(AlumnoMaestro, Escuela, Facultad)
+    q = (select(AlumnoMaestro, Escuela, Facultad, FacDir2)
          .outerjoin(Escuela,   AlumnoMaestro.id_escuela  == Escuela.id)
-         .outerjoin(Facultad,  Escuela.id_facultad       == Facultad.id))
+         .outerjoin(Facultad,  Escuela.id_facultad       == Facultad.id)
+         .outerjoin(FacDir2,   AlumnoMaestro.id_facultad == FacDir2.id))
     if search:
         like = f"%{search}%"
         q = q.where(or_(
@@ -1048,11 +1127,11 @@ async def listar_maestro(
                 "dni":        r.dni,
                 "nombre":     r.nombre,
                 "codigo":     r.codigo,
-                "facultad":   fac.nombre if fac else "",
+                "facultad":   (fac.nombre if fac else None) or (fd.nombre if fd else ""),
                 "escuela":    esc.nombre if esc else "",
                 "id_escuela": r.id_escuela,
             }
-            for r, esc, fac in rows
+            for r, esc, fac, fd in rows
         ]
     }
 
