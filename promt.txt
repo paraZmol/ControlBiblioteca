@@ -1,25 +1,17 @@
-necesitamos mejorar la experiencia de usuario (UX) en la vista IdentificarTerminal.xaml. Actualmente, el botón "Guardar y Continuar" se ve muy delgado y no destaca lo suficiente contra el fondo. Realiza los siguientes cambios en el XAML:
+por requerimiento de seguridad y control administrativo, vamos a eliminar el acceso híbrido. El sistema debe ser "Netamente Local". Realiza los siguientes cambios:
 
-1. Dimensiones y Espaciado:
+1. Lógica de Validación (Backend):
 
-Incrementa la altura del botón (Height) a 48 píxeles para que tenga más presencia.
+Modifica el endpoint de login de la terminal para que únicamente busque el DNI en la tabla alumnos_maestro.
 
-Agrega un Padding="20,0" para que el texto no se sienta apretado lateralmente.
+Elimina por completo la llamada a la función que consulta el API externo del SGA. Ya no queremos auto-registros automáticos.
 
-2. Tipografía:
+2. Manejo de Errores:
 
-Aumenta el FontSize a 16 o 18.
+Si el DNI no existe en la base de datos local, devuelve un error claro a la terminal: "Usuario no registrado. Acérquese al módulo para tramitar su carnet de biblioteca".
 
-Cambia el FontWeight a Bold para que la acción principal sea clara.
+3. Preservación de Datos:
 
-3. Estilo Visual (Bordes y Colores):
+Asegúrate de que este cambio no afecte la tabla de sesiones. Los alumnos que ya están registrados (como los que importamos o los de prueba que ya existen) deben poder seguir entrando sin problemas.
 
-Aplica un CornerRadius de 10 al botón para que coincida con la estética redondeada del contenedor principal.
-
-Asegúrate de que el color de fondo sea un azul vibrante (ej. #2196F3) que contraste bien con el fondo oscuro.
-
-4. Efectos de Interacción (Opcional):
-
-Si es posible, agrega un pequeño efecto de cambio de color (Hover) para que el botón brille ligeramente cuando el mouse pase por encima.
-
-El objetivo es que el botón se vea sólido, moderno y sea fácil de presionar para los alumnos de la biblioteca.
+El objetivo es que el lunes, si un alumno no está en el Excel que cargamos, el sistema le deniegue el acceso de inmediato.

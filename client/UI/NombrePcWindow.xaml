@@ -1,7 +1,7 @@
 <Window x:Class="ControlBiblioteca.Client.UI.NombrePcWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Configuración Inicial" Height="200" Width="400" 
+        Title="Configuración Inicial" Height="230" Width="400" 
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize" 
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
     <Border Background="#1f2937" CornerRadius="15" BorderBrush="#374151" BorderThickness="2">
@@ -9,15 +9,23 @@
             <TextBlock Text="Identificar Terminal" FontSize="20" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,20"/>
             <TextBlock Text="Ingrese el nombre de esta PC (ej: PC02):" Foreground="#9ca3af" Margin="0,0,0,5"/>
             <TextBox x:Name="TxtNombre" FontSize="16" Padding="5" Background="#374151" Foreground="White" BorderBrush="#4b5563" CaretBrush="White"/>
-            <Button Content="Guardar y Continuar" Margin="0,20,0,0" Padding="10" Background="#3b82f6" Foreground="White" FontWeight="Bold" Click="Button_Click">
+            <Button Content="Guardar y Continuar" Margin="0,20,0,0" Padding="20,0" Height="48" FontSize="16" FontWeight="Bold" Foreground="White" Background="#2196F3" Cursor="Hand" Click="Button_Click">
                 <Button.Style>
                     <Style TargetType="Button">
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="Button">
-                                    <Border Background="{TemplateBinding Background}" CornerRadius="5">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="10">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
                                     </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="border" Property="Background" Value="#42A5F5"/>
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="border" Property="Background" Value="#1E88E5"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
                                 </ControlTemplate>
                             </Setter.Value>
                         </Setter>
