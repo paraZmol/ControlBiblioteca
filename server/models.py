@@ -35,14 +35,15 @@ class AlumnoMaestro(Base):
     __tablename__ = "alumnos_maestro"
     __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
 
-    dni:        Mapped[str] = mapped_column(String(8),   primary_key=True)
-    codigo:     Mapped[str] = mapped_column(String(30),  nullable=True, index=True)
-    nombre:     Mapped[str] = mapped_column(String(200), nullable=False)
-    id_escuela: Mapped[int] = mapped_column(ForeignKey("escuelas.id"), nullable=True)
+    dni:          Mapped[str] = mapped_column(String(8),   primary_key=True)
+    codigo:       Mapped[str] = mapped_column(String(30),  nullable=True, index=True)
+    nombre:       Mapped[str] = mapped_column(String(200), nullable=False)
+    id_escuela:   Mapped[int] = mapped_column(ForeignKey("escuelas.id"),  nullable=True)
+    id_facultad:  Mapped[int] = mapped_column(ForeignKey("facultades.id"), nullable=True)
 
-    escuela_rel: Mapped["Escuela"] = relationship(back_populates="alumnos")
-    # Cascade: elimina sesiones automáticamente cuando se elimina el alumno
-    sesiones:    Mapped[list["Sesion"]] = relationship(back_populates="alumno", cascade="all, delete-orphan")
+    escuela_rel:  Mapped["Escuela"]  = relationship(back_populates="alumnos", foreign_keys="[AlumnoMaestro.id_escuela]")
+    facultad_rel: Mapped["Facultad"] = relationship(foreign_keys="[AlumnoMaestro.id_facultad]")
+    sesiones:     Mapped[list["Sesion"]] = relationship(back_populates="alumno", cascade="all, delete-orphan")
 
     def __repr__(self): return f"<AlumnoMaestro {self.dni}: {self.nombre}>"
 

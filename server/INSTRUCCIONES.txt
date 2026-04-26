@@ -1,0 +1,81 @@
+================================================================
+  INSTRUCCIONES DE INSTALACION - Servidor Biblioteca UNASAM
+================================================================
+
+PASO 1 - INSTALAR MYSQL
+----------------------------------------------------------------
+Descargue MySQL Server 8.x:
+  https://dev.mysql.com/downloads/mysql/
+
+Durante la instalacion:
+  - Tipo: Server Only
+  - Puerto: 3306 (default)
+  - Anote la contrasena de root que configure
+
+
+PASO 2 - INSTALAR PYTHON (si no esta instalado)
+----------------------------------------------------------------
+Descargue Python 3.11 o superior:
+  https://www.python.org/downloads/
+
+IMPORTANTE: Marque la casilla "Add Python to PATH"
+
+
+PASO 3 - EJECUTAR EL INSTALADOR
+----------------------------------------------------------------
+  1. Clic derecho sobre instalar_servidor.bat
+  2. Seleccionar "Ejecutar como administrador"
+  3. Ingrese la contrasena de MySQL root cuando se solicite
+  4. Espere a que finalice (2-5 minutos)
+
+
+PASO 4 - REINICIAR LA PC
+----------------------------------------------------------------
+El servidor arrancara automaticamente al iniciar Windows.
+
+
+PASO 5 - ACCEDER AL PANEL
+----------------------------------------------------------------
+Desde esta maquina:
+  http://localhost:8000/admin
+
+Desde cualquier terminal en la red:
+  http://[IP_DEL_SERVIDOR]:8000/admin
+  (ejemplo: http://192.168.1.33:8000/admin)
+
+Credenciales:
+  Usuario:        admin
+  Contrasena:     admin123
+  Nivel 2 (admin completo): max123
+
+
+INICIO MANUAL DEL SERVIDOR
+----------------------------------------------------------------
+Si el servidor no arranca solo, doble clic en:
+  servidor_run.bat      (con ventana de consola visible)
+  lanzador_invisible.vbs  (sin ventana, silencioso)
+
+
+VERIFICACION
+----------------------------------------------------------------
+Abra el navegador y entre a:
+  http://localhost:8000/admin
+
+Si carga el panel, el servidor esta funcionando.
+
+Si no carga:
+  1. Abrir Administrador de Tareas (Ctrl+Shift+Esc)
+  2. Pestaña "Detalles"
+  3. Verificar que exista el proceso python.exe
+
+
+CARGAR ALUMNOS AL SISTEMA
+----------------------------------------------------------------
+1. Ingresar al panel con admin / admin123
+2. Elevar a Nivel 2 ingresando: max123
+3. Ir a seccion "Base de Datos"
+4. Clic en "Importar Excel"
+5. Seleccionar el archivo Excel con columnas:
+   DNI, APELLIDOS, NOMBRES, FACULTAD
+
+================================================================

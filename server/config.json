@@ -1,0 +1,16 @@
+{
+  "database": {
+    "user": "root",
+    "password": "impo2010",
+    "host": "localhost",
+    "port": 3306,
+    "name": "biblioteca_unasam"
+  },
+  "network": {
+    "server_static_ip": "192.168.1.33",
+    "port": 8000
+  },
+  "security": {
+    "pass_nivel2": "max123"
+  }
+}

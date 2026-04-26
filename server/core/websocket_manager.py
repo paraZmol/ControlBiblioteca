@@ -65,6 +65,14 @@ class ConnectionManager:
         for ip in list(self.conexiones_activas):
             await self.bloquear_terminal(ip)
 
+    async def forzar_cierre_sesion(self, terminal_id: str):
+        """Envía forzar_cierre_sesion a una terminal específica: vuelve al login."""
+        await self.enviar_comando(terminal_id, {
+            "tipo": "forzar_cierre_sesion",
+            "motivo": "sesion_desplazada",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
     async def forzar_cierre_sesion_todas(self):
         """Envía forzar_cierre_sesion a todas las terminales: vuelven al login sin bloquear."""
         for ip in list(self.conexiones_activas):

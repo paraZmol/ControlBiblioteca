@@ -184,9 +184,12 @@ async def _limpiar_sesiones_fantasma():
         try:
             async with async_session() as db:
                 from sqlalchemy import text as _text
-                res = await db.execute(
-                    _text("SELECT id, id_terminal FROM sesiones WHERE estado='activa' AND confirmada=0 AND TIMESTAMPDIFF(SECOND, hora_entrada, NOW()) > 10")
-                )
+                db_url = os.getenv("DATABASE_URL", "")
+                if "sqlite" in db_url:
+                    query = _text("SELECT id, id_terminal FROM sesiones WHERE estado='activa' AND confirmada=0 AND (strftime('%s','now') - strftime('%s', hora_entrada)) > 10")
+                else:
+                    query = _text("SELECT id, id_terminal FROM sesiones WHERE estado='activa' AND confirmada=0 AND TIMESTAMPDIFF(SECOND, hora_entrada, NOW()) > 10")
+                res = await db.execute(query)
                 fantasmas = res.fetchall()
                 for row in fantasmas:
                     sesion_id, terminal_id_db = row
@@ -564,6 +567,24 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
 
                     logger.info(f"[WS] {terminal_id} alumno OK: {datos_alumno['nombres']} {datos_alumno['apellidos']} | DNI={codigo}")
 
+                    # ── Sesión única: cerrar sesión activa previa del mismo alumno ──
+                    res_dup = await db.execute(
+                        select(Sesion).where(
+                            Sesion.dni_alumno == alumno.dni,
+                            Sesion.estado     == "activa",
+                        )
+                    )
+                    sesiones_previas = res_dup.scalars().all()
+                    for sp in sesiones_previas:
+                        _cerrar_sesion(sp, "desplazado_por_nuevo_login")
+                        # Notificar la terminal anterior que fue desplazada
+                        res_t_prev = await db.execute(select(Terminal).where(Terminal.id == sp.id_terminal))
+                        t_prev = res_t_prev.scalar_one_or_none()
+                        if t_prev:
+                            t_prev.estado = "bloqueado"
+                            await manager.forzar_cierre_sesion(t_prev.nombre_red)
+                            logger.warning(f"[WS] Sesión duplicada cerrada: alumno {alumno.dni} en {t_prev.nombre_red}")
+
                     t = await _buscar_terminal(db, terminal_id, terminal_ip)
 
                     if t:
@@ -834,5 +855,14 @@ async def websocket_admin(websocket: WebSocket):
 
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    import uvicorn, json as _json
+    _host = "0.0.0.0"
+    _port = 8000
+    try:
+        _cfg_path = os.path.join(os.path.dirname(__file__), "config.json")
+        with open(_cfg_path, encoding="utf-8") as _f:
+            _cfg = _json.load(_f)
+        _port = int(_cfg.get("network", {}).get("port", 8000))
+    except Exception:
+        pass
+    uvicorn.run("main:app", host=_host, port=_port, reload=False)
