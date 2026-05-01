@@ -40,6 +40,9 @@
   <ItemGroup>
     <!-- Imagen de fondo embebida como recurso WPF -->
     <Resource Include="images\fondo_3.png" />
+    <!-- Imágenes del comunicado informativo -->
+    <Resource Include="images\comunicado_1.jpg" />
+    <Resource Include="images\comunicado_2.jpg" />
   </ItemGroup>
 
 </Project>

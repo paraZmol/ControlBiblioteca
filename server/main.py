@@ -499,121 +499,131 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 if motivo_id is not None:
                     try:
                         motivo_id = int(motivo_id)
+                        if motivo_id <= 0:
+                            motivo_id = None
                     except ValueError:
                         motivo_id = None
                 logger.info(f"[WS] {terminal_id} login_request: codigo={codigo!r} razon={razon!r} motivo_id={motivo_id}")
 
-                async with async_session() as db:
-                    from datetime import timedelta
-                    t = await _buscar_terminal(db, terminal_id, terminal_ip)
-                    
-                    if t and t.bloqueada_hasta and t.bloqueada_hasta > datetime.now():
-                        faltan = int((t.bloqueada_hasta - datetime.now()).total_seconds() / 60) + 1
-                        await websocket.send_json({"tipo": "login_rechazado", "motivo": f"Terminal bloqueada por seguridad. Intente de nuevo en {faltan} minutos"})
-                        continue
+                try:
+                    async with async_session() as db:
+                        from datetime import timedelta
+                        t = await _buscar_terminal(db, terminal_id, terminal_ip)
 
-                    if not codigo or not codigo.isdigit() or len(codigo) != 8:
-                        if t:
-                            t.intentos_fallidos += 1
-                            if t.intentos_fallidos >= 3:
-                                t.bloqueada_hasta = datetime.now() + timedelta(minutes=5)
-                            await db.commit()
-                        logger.warning(f"[WS] {terminal_id} DNI con formato invalido: {codigo!r}")
-                        await websocket.send_json({"tipo": "login_rechazado", "motivo": "El DNI debe tener exactamente 8 digitos"})
-                        continue
+                        if t and t.bloqueada_hasta and t.bloqueada_hasta > datetime.now():
+                            faltan = int((t.bloqueada_hasta - datetime.now()).total_seconds() / 60) + 1
+                            await websocket.send_json({"tipo": "login_rechazado", "motivo": f"Terminal bloqueada por seguridad. Intente de nuevo en {faltan} minutos"})
+                            continue
 
-                    # ── Capa 1: alumnos_maestro (fuente primaria, respuesta instantánea) ──
-                    res_m = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == codigo))
-                    maestro = res_m.scalar_one_or_none()
+                        if not codigo or not codigo.isdigit() or len(codigo) != 8:
+                            if t:
+                                t.intentos_fallidos += 1
+                                if t.intentos_fallidos >= 3:
+                                    t.bloqueada_hasta = datetime.now() + timedelta(minutes=5)
+                                await db.commit()
+                            logger.warning(f"[WS] {terminal_id} DNI con formato invalido: {codigo!r}")
+                            await websocket.send_json({"tipo": "login_rechazado", "motivo": "El DNI debe tener exactamente 8 digitos"})
+                            continue
 
-                    if maestro:
-                        partes = maestro.nombre.split()
-                        if len(partes) >= 3:
-                            nombres_m   = " ".join(partes[:len(partes)-2])
-                            apellidos_m = " ".join(partes[len(partes)-2:])
-                        elif len(partes) == 2:
-                            nombres_m, apellidos_m = partes[0], partes[1]
+                        # ── Capa 1: alumnos_maestro (fuente primaria, respuesta instantánea) ──
+                        res_m = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == codigo))
+                        maestro = res_m.scalar_one_or_none()
+
+                        if maestro:
+                            partes = maestro.nombre.split()
+                            if len(partes) >= 3:
+                                nombres_m   = " ".join(partes[:len(partes)-2])
+                                apellidos_m = " ".join(partes[len(partes)-2:])
+                            elif len(partes) == 2:
+                                nombres_m, apellidos_m = partes[0], partes[1]
+                            else:
+                                nombres_m, apellidos_m = maestro.nombre, ""
+                            datos_alumno = {
+                                "codigo":    maestro.codigo or codigo,
+                                "dni":       maestro.dni,
+                                "nombres":   nombres_m,
+                                "apellidos": apellidos_m,
+                            }
+                            logger.info(f"[MAESTRO] Alumno encontrado: {maestro.nombre} | DNI={codigo}")
                         else:
-                            nombres_m, apellidos_m = maestro.nombre, ""
-                        datos_alumno = {
-                            "codigo":    maestro.codigo or codigo,
-                            "dni":       maestro.dni,
-                            "nombres":   nombres_m,
-                            "apellidos": apellidos_m,
-                        }
-                        logger.info(f"[MAESTRO] Alumno encontrado: {maestro.nombre} | DNI={codigo}")
-                    else:
-                        # ── Solo BD local — sin SGA ──
+                            # ── Solo BD local — sin SGA ──
+                            if t:
+                                t.intentos_fallidos += 1
+                                if t.intentos_fallidos >= 3:
+                                    t.bloqueada_hasta = datetime.now() + timedelta(minutes=5)
+                                await db.commit()
+                            logger.warning(f"[WS] {terminal_id} DNI={codigo} no en maestro — acceso denegado")
+                            await websocket.send_json({"tipo": "login_rechazado", "motivo": "Usuario no registrado. Acerquese al modulo para tramitar su carnet de biblioteca"})
+                            continue
+
+                        # Obtener registro maestro confirmado para FK de sesión
+                        res_fk = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == datos_alumno["dni"]))
+                        alumno = res_fk.scalar_one_or_none()
+                        if alumno is None:
+                            alumno = AlumnoMaestro(
+                                dni=datos_alumno["dni"],
+                                nombre=f"{datos_alumno['nombres']} {datos_alumno['apellidos']}",
+                                codigo=datos_alumno["codigo"],
+                            )
+                            db.add(alumno)
+                            await db.flush()
+
+                        logger.info(f"[WS] {terminal_id} alumno OK: {datos_alumno['nombres']} {datos_alumno['apellidos']} | DNI={codigo}")
+
+                        # ── Sesión única: cerrar sesión activa previa del mismo alumno ──
+                        res_dup = await db.execute(
+                            select(Sesion).where(
+                                Sesion.dni_alumno == alumno.dni,
+                                Sesion.estado     == "activa",
+                            )
+                        )
+                        sesiones_previas = res_dup.scalars().all()
+                        for sp in sesiones_previas:
+                            _cerrar_sesion(sp, "desplazado_por_nuevo_login")
+                            # Notificar la terminal anterior que fue desplazada
+                            res_t_prev = await db.execute(select(Terminal).where(Terminal.id == sp.id_terminal))
+                            t_prev = res_t_prev.scalar_one_or_none()
+                            if t_prev:
+                                t_prev.estado = "bloqueado"
+                                await manager.forzar_cierre_sesion(t_prev.nombre_red)
+                                logger.warning(f"[WS] Sesión duplicada cerrada: alumno {alumno.dni} en {t_prev.nombre_red}")
+
+                        t = await _buscar_terminal(db, terminal_id, terminal_ip)
+
                         if t:
-                            t.intentos_fallidos += 1
-                            if t.intentos_fallidos >= 3:
-                                t.bloqueada_hasta = datetime.now() + timedelta(minutes=5)
-                            await db.commit()
-                        logger.warning(f"[WS] {terminal_id} DNI={codigo} no en maestro — acceso denegado")
-                        await websocket.send_json({"tipo": "login_rechazado", "motivo": "Usuario no registrado. Acerquese al modulo para tramitar su carnet de biblioteca"})
-                        continue
+                            t.intentos_fallidos = 0
+                            t.bloqueada_hasta = None
+                            sesion = Sesion(
+                                dni_alumno  = alumno.dni,
+                                id_terminal = t.id,
+                                razon_uso   = razon or None,
+                                motivo_id   = motivo_id,
+                                fecha_uso   = datetime.now().date(),
+                            )
+                            t.estado = "activo"
+                            db.add(sesion)
+                        await db.commit()
+                        logger.info(f"[WS] {terminal_id} sesión registrada en DB (razon={razon!r})")
 
-                    # Obtener registro maestro confirmado para FK de sesión
-                    res_fk = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == datos_alumno["dni"]))
-                    alumno = res_fk.scalar_one_or_none()
-                    if alumno is None:
-                        alumno = AlumnoMaestro(
-                            dni=datos_alumno["dni"],
-                            nombre=f"{datos_alumno['nombres']} {datos_alumno['apellidos']}",
-                            codigo=datos_alumno["codigo"],
-                        )
-                        db.add(alumno)
-                        await db.flush()
+                        nombre_display = f"{datos_alumno['nombres']} {datos_alumno['apellidos']}"
+                        logger.info(f"[WS] {terminal_id} enviando 'desbloquear' al kiosco...")
+                        await manager.desbloquear_terminal(terminal_id, {
+                            "codigo":    datos_alumno["codigo"],
+                            "nombres":   datos_alumno["nombres"],
+                            "apellidos": datos_alumno["apellidos"],
+                        })
+                        logger.info(f"[WS] {terminal_id} respuesta enviada OK")
+                        await manager.notificar_evento(f"🟢 ENTRADA: {nombre_display} en {terminal_id}", "login")
+                        await manager.enviar_log("activity", f"👤 Acceso: {nombre_display} en {terminal_id}")
 
-                    logger.info(f"[WS] {terminal_id} alumno OK: {datos_alumno['nombres']} {datos_alumno['apellidos']} | DNI={codigo}")
+                    await manager.notificar_admins()
 
-                    # ── Sesión única: cerrar sesión activa previa del mismo alumno ──
-                    res_dup = await db.execute(
-                        select(Sesion).where(
-                            Sesion.dni_alumno == alumno.dni,
-                            Sesion.estado     == "activa",
-                        )
-                    )
-                    sesiones_previas = res_dup.scalars().all()
-                    for sp in sesiones_previas:
-                        _cerrar_sesion(sp, "desplazado_por_nuevo_login")
-                        # Notificar la terminal anterior que fue desplazada
-                        res_t_prev = await db.execute(select(Terminal).where(Terminal.id == sp.id_terminal))
-                        t_prev = res_t_prev.scalar_one_or_none()
-                        if t_prev:
-                            t_prev.estado = "bloqueado"
-                            await manager.forzar_cierre_sesion(t_prev.nombre_red)
-                            logger.warning(f"[WS] Sesión duplicada cerrada: alumno {alumno.dni} en {t_prev.nombre_red}")
-
-                    t = await _buscar_terminal(db, terminal_id, terminal_ip)
-
-                    if t:
-                        t.intentos_fallidos = 0
-                        t.bloqueada_hasta = None
-                        sesion = Sesion(
-                            dni_alumno  = alumno.dni,
-                            id_terminal = t.id,
-                            razon_uso   = razon or None,
-                            motivo_id   = motivo_id,
-                            fecha_uso   = datetime.now().date(),
-                        )
-                        t.estado = "activo"
-                        db.add(sesion)
-                    await db.commit()
-                    logger.info(f"[WS] {terminal_id} sesión registrada en DB (razon={razon!r})")
-
-                    nombre_display = f"{datos_alumno['nombres']} {datos_alumno['apellidos']}"
-                    logger.info(f"[WS] {terminal_id} enviando 'desbloquear' al kiosco...")
-                    await manager.desbloquear_terminal(terminal_id, {
-                        "codigo":    datos_alumno["codigo"],
-                        "nombres":   datos_alumno["nombres"],
-                        "apellidos": datos_alumno["apellidos"],
-                    })
-                    logger.info(f"[WS] {terminal_id} respuesta enviada OK")
-                    await manager.notificar_evento(f"🟢 ENTRADA: {nombre_display} en {terminal_id}", "login")
-                    await manager.enviar_log("activity", f"👤 Acceso: {nombre_display} en {terminal_id}")
-
-                await manager.notificar_admins()
+                except Exception as _exc_login:
+                    logger.error(f"[WS] Error en login_request de {terminal_id}: {_exc_login}", exc_info=True)
+                    try:
+                        await websocket.send_json({"tipo": "login_rechazado", "motivo": "Error interno, intente de nuevo"})
+                    except Exception:
+                        pass
 
             elif tipo == "unlock_confirmed":
                 async with async_session() as db:

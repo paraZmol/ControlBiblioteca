@@ -1,179 +1,33 @@
-2026-04-26 23:09:49,858 [control] INFO: [IP] IP Local detectada: 192.168.1.50
-2026-04-26 23:09:50,140 [control] INFO: [IP] IP Local detectada: 192.168.1.50
-INFO:     Started server process [7136]
-INFO:     Waiting for application startup.
-2026-04-26 23:09:50,253 [control] INFO: Base de datos inicializada
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     ('192.168.1.33', 49514) - "WebSocket /ws/terminal/192.168.164.129" [accepted]
-2026-04-26 23:09:59,917 [control.ws] INFO: Terminal conectada: 192.168.164.129 (ip=192.168.164.129)
-2026-04-26 23:09:59,917 [control] INFO: [WS] Terminal conectada: 192.168.164.129
-INFO:     connection open
-2026-04-26 23:09:59,970 [control] INFO: [WS] Terminal conocida actualizada: 192.168.164.129
-2026-04-26 23:10:00,030 [control] INFO: [WS] 192.168.164.129 → tipo='hello'
-2026-04-26 23:10:00,058 [control.ws] INFO: Terminal re-identificada: 192.168.164.129 → PRO
-2026-04-26 23:10:00,059 [control] INFO: [WS] Terminal re-identificada: 192.168.164.129 → PRO (hostname=PRO)
-2026-04-26 23:10:00,077 [control] INFO: [WS] Terminal 'PRO' actualizada con IP=192.168.164.129
-2026-04-26 23:10:02,939 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:05,954 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:08,959 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:11,962 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:54269 - "GET /admin HTTP/1.1" 307 Temporary Redirect
-INFO:     192.168.1.50:54269 - "GET /admin/static/js/app.js HTTP/1.1" 304 Not Modified
-INFO:     192.168.1.50:54269 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-2026-04-26 23:10:14,967 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:17,971 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:54269 - "POST /api/auth/login HTTP/1.1" 200 OK
-INFO:     192.168.1.50:54269 - "GET /api/config/nivel2-hash HTTP/1.1" 200 OK
-INFO:     192.168.1.50:54269 - "GET /api/server-info HTTP/1.1" 200 OK
-INFO:     ('192.168.1.50', 49404) - "WebSocket /ws/admin" [accepted]
-2026-04-26 23:10:19,443 [control.ws] INFO: Panel admin conectado
-INFO:     connection open
-INFO:     192.168.1.50:57439 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:54269 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-INFO:     192.168.1.50:57744 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:52655 - "GET /api/sesiones/activas?sort_by=fecha&order=desc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:51775 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-INFO:     192.168.1.50:58635 - "GET /api/sesiones/activas?sort_by=fecha&order=desc&periodo=dia HTTP/1.1" 200 OK
-2026-04-26 23:10:20,972 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:23,977 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:26,982 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:29,985 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:32,990 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:50761 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-INFO:     192.168.1.50:50440 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:50077 - "GET /api/sesiones/activas?sort_by=fecha&order=desc&periodo=dia HTTP/1.1" 200 OK
-2026-04-26 23:10:35,990 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:50077 - "GET /api/admin/maestro?limit=50&offset=0 HTTP/1.1" 200 OK
-2026-04-26 23:10:38,992 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:41,998 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:45,007 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:48,009 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:50747 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:51242 - "GET /api/sesiones/activas?sort_by=fecha&order=desc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:64163 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:10:51,022 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:54,022 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:10:57,028 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:00,035 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:03,051 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:54196 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:53532 - "GET /api/sesiones/activas?sort_by=fecha&order=desc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:61158 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:11:06,066 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:09,067 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:12,080 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:14,754 [control] WARNING: [WS-Admin] DNI=70234305 no en maestro — acceso denegado
-2026-04-26 23:11:15,089 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:18,089 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:56539 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:56443 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:61689 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:56539 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:11:21,094 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:24,100 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:27,105 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:30,106 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:33,114 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:50437 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:62443 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:52986 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:11:36,114 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:39,115 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:42,130 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:45,130 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:48,147 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:57672 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:58402 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:65189 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:11:51,148 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:54,150 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:11:57,159 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:00,166 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:03,169 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:60756 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:49535 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:58184 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:12:06,177 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:09,190 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:12,193 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:15,195 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:18,198 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:58392 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:58649 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:57539 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:12:21,200 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:24,204 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:27,207 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:30,209 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:33,214 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:57060 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:55079 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:52786 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:12:36,217 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:39,222 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:42,232 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:45,235 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:48,235 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:64055 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:58616 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:52747 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:12:51,245 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:54,248 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:12:57,264 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:00,318 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:61647 - "POST /api/admin/importar-maestro HTTP/1.1" 400 Bad Request
-2026-04-26 23:13:03,274 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:54053 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:53147 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:61647 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:13:06,286 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:09,289 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:12,290 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:15,292 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:18,291 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:51789 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:63478 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:54335 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:13:21,302 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:24,314 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:27,321 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:30,335 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:33,335 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:54759 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:49791 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:55032 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:13:36,344 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:39,345 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:42,353 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:45,364 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:48,369 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:61521 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:62067 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:63341 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:13:51,369 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:54,377 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:13:57,381 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:00,381 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:03,384 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:60628 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:63054 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:60645 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:14:06,385 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:09,400 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:12,402 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:15,412 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:18,415 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:56592 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:60919 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:50564 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:14:21,424 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:24,429 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:27,429 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:30,430 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:33,444 [control] INFO: [WS] PRO → tipo='heartbeat'
-INFO:     192.168.1.50:56801 - "GET /api/terminales HTTP/1.1" 200 OK
-INFO:     192.168.1.50:60454 - "GET /api/sesiones/activas?sort_by=escuela&order=asc&periodo=dia HTTP/1.1" 200 OK
-INFO:     192.168.1.50:57651 - "GET /api/dashboard/stats HTTP/1.1" 200 OK
-2026-04-26 23:14:36,444 [control] INFO: [WS] PRO → tipo='heartbeat'
-2026-04-26 23:14:39,451 [control] INFO: [WS] PRO → tipo='heartbeat'
+necesito implementar un "Comunicado Informativo Condicional" en la pantalla de login del cliente C# (WPF). El objetivo es informar a los alumnos no registrados sobre cómo obtener su carnet.
+
+1. Lógica de Activación (Condicional):
+
+El aviso NO debe mostrarse siempre.
+
+Solo debe aparecer cuando el servidor devuelva un error indicando que el DNI ingresado no existe en la base de datos de la biblioteca.
+
+Si el alumno existe, el ingreso debe ser directo sin mostrar este aviso.
+
+2. Interfaz del Comunicado (UI):
+
+Implementa un Slider (Carrusel) que contenga exactamente 2 imágenes (prepara el código para recibir las rutas de estas imágenes).
+
+Importante: Las imágenes deben mostrarse en modo "Fit" o "Contain" para que se vean completas. No pongas ningún texto, pasos o etiquetas encima de las imágenes; los diseños ya traen la información.
+
+Usa un estilo de Glassmorphism (fondo semi-transparente con desenfoque/blur) para que no se tape totalmente la imagen de fondo de la biblioteca que ya tenemos.
+
+3. Controles y Navegación:
+
+Agrega flechas a los costados (Izquierda/Derecha) para navegar entre las 2 imágenes.
+
+Agrega indicadores (puntos/dots) en la parte inferior del slider.
+
+Botón Único: Solo debe haber un botón debajo del slider que diga "Cerrar Comunicado".
+
+4. Comportamiento del Botón Cerrar:
+
+Al hacer clic en "Cerrar Comunicado", el aviso debe desaparecer.
+
+Debe limpiar el campo del DNI y dejar el formulario listo para un nuevo intento.
+
+5. Restricción: No modifiques la lógica de autenticación exitosa ni el diseño del panel de login central. Solo añade esta capa (Layer/Grid) de aviso que se activa por la respuesta negativa del servidor.

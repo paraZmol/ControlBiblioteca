@@ -1225,6 +1225,24 @@ body.light-mode .tabla-scroll-wrap::-webkit-scrollbar-thumb { background: #d1d5d
     border-color: #00B4DB;
 }
 
+.btn-limpiar-maestro {
+    padding: 8px 16px;
+    background: transparent;
+    color: #ef4444;
+    border: 1px solid #ef4444;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.btn-limpiar-maestro:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    border-color: #fca5a5;
+}
+
 /* Paginación maestro */
 .maestro-paginacion {
     display: flex;
