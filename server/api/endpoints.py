@@ -130,6 +130,52 @@ async def listar_alumnos(
     ]
 
 
+@router.get("/alumnos/exportar")
+async def exportar_alumnos(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual)
+):
+    """Exportar toda la base de datos de alumnos a Excel (Backup)."""
+    import io
+    from fastapi.responses import StreamingResponse
+    import openpyxl
+    from sqlalchemy.orm import joinedload
+
+    if admin.rol != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden exportar el backup")
+
+    result = await db.execute(
+        select(AlumnoMaestro)
+        .options(joinedload(AlumnoMaestro.facultad_rel), joinedload(AlumnoMaestro.escuela_rel))
+        .order_by(AlumnoMaestro.nombre)
+    )
+    alumnos = result.scalars().all()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Alumnos Registrados"
+    ws.append(["DNI", "Código", "Nombre Completo", "Facultad", "Escuela"])
+
+    for a in alumnos:
+        fac = a.facultad_rel.nombre if a.facultad_rel else ""
+        esc = a.escuela_rel.nombre if a.escuela_rel else ""
+        ws.append([a.dni, a.codigo, a.nombre, fac, esc])
+
+    stream = io.BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+
+    headers = {
+        "Content-Disposition": "attachment; filename=backup_alumnos.xlsx",
+        "Access-Control-Expose-Headers": "Content-Disposition"
+    }
+    return StreamingResponse(
+        iter([stream.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers
+    )
+
+
 # ── Terminales ──────────────────────────────────────────────────────
 
 @router.get("/terminales")
