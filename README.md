@@ -72,6 +72,21 @@ erDiagram
 ### 3.3 Flujo del Cliente (Kiosco WPF)
 El cliente está diseñado bajo un modelo *Zero-Trust* hacia el estudiante.
 
+```mermaid
+sequenceDiagram
+    participant OS as Windows OS
+    participant WPF as Kiosco Client
+    participant API as FastAPI Server
+    
+    WPF->>OS: Activa GlobalKeyboardHook & IFEO Taskmgr
+    Note over OS,WPF: PC Bloqueada (Pantalla Completa)
+    Alumno->>WPF: Ingresa DNI
+    WPF->>API: ws.send(login_request)
+    API-->>WPF: ws.send(status: success)
+    WPF->>OS: Revierte Hooks de Seguridad
+    Note over OS,WPF: PC Desbloqueada (Sesión Activa)
+```
+
 1. Al ejecutarse, la aplicación activa un `GlobalKeyboardHook` e inyecta reglas *IFEO* en el registro para inutilizar `taskmgr.exe`, `Alt+Tab` y `Tecla Win`.
 2. La pantalla se maximiza sin bordes (TopMost).
 3. El alumno ingresa su DNI. Si es válido, el sistema revierte los bloqueos temporalmente.
@@ -125,6 +140,19 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 [INSERTAR IMAGEN: Consola del servidor mostrando uvicorn corriendo y WebSockets activos]
 
 ### 3.7 Referencia de la API y WebSockets
+
+**Ciclo de Vida de la Conexión Kiosco-Servidor:**
+```mermaid
+stateDiagram-v2
+    [*] --> Conectando
+    Conectando --> Conectado : WebSocket Open
+    Conectado --> Ocupado : login_request
+    Ocupado --> Conectado : logout_request
+    Conectado --> Reintentando : Caída de Red (Timeout)
+    Ocupado --> Reintentando : Caída de Red (Timeout)
+    Reintentando --> Conectando : Backoff Exponencial (1s -> 30s)
+```
+
 - `GET /api/admin/sesiones`: Retorna el JSON con estadísticas de terminales activas.
 - **WebSocket (Kiosco):** Payload enviado al autenticarse:
   ```json
