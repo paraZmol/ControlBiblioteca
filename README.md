@@ -9,6 +9,9 @@
 ## 1. Contexto
 Este sistema automatiza el acceso a las computadoras de la Biblioteca Central. Utiliza un **Kiosco (WPF)** que bloquea físicamente la PC hasta que el alumno ingresa su DNI, un **Servidor (FastAPI)** que valida los datos contra la base de datos local y la API del SGA, y un **Panel Web (JS)** que permite al personal administrar las sesiones activas en tiempo real.
 
+**Metodología de Desarrollo:** Enfoque Iterativo e Incremental (fases v1-v3), centrado prioritariamente en la seguridad a nivel de sistema operativo y comunicación de alta disponibilidad.
+**Lenguajes Principales:** C# (.NET 8), Python (FastAPI), Vanilla JavaScript y SQL.
+
 ### 1.1 Decisiones Técnicas (The "Why")
 - **¿Por qué C# WPF y no Web?** El Kiosco debe bloquear comandos nativos del SO (`Alt+Tab`, `Ctrl+Shift+Esc`). Un navegador no tiene acceso a la API Win32 ni a los *Hooks* globales de teclado requeridos.
 - **¿Por qué FastAPI con WebSockets?** El dashboard admin necesita ver el estado de +50 terminales en tiempo real sin recargar. `asyncio` permite mantener +50 conexiones persistentes abiertas simultáneamente sin saturar la RAM del servidor.
@@ -17,6 +20,9 @@ Este sistema automatiza el acceso a las computadoras de la Biblioteca Central. U
 ---
 
 ## 2. Prerequisites (Requisitos Previos)
+
+> [!WARNING]
+> **Riesgo en el Sistema Operativo:** Dado que el cliente WPF intercepta el teclado a bajo nivel (Win32 Hooks) y altera el Registro de Windows (IFEO/Taskmgr), **se recomienda encarecidamente probar el cliente en una Máquina Virtual (VM)** antes de compilar para producción.
 
 > [!IMPORTANT]
 > **Arquitectura de Red Estática:** El servidor central DEBE tener una IP local estática asignada por el router, de lo contrario los clientes WPF perderán la conexión al reiniciar.
@@ -106,6 +112,7 @@ Se usa `--self-contained true` para que el ejecutable incluya el .NET Runtime y 
 ```powershell
 dotnet publish client\ControlBiblioteca.Client.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
+[INSERTAR IMAGEN: Consola mostrando la compilación exitosa con dotnet publish]
 
 **Ejecutar Servidor (Python) Manualmente:**
 ```bash
@@ -115,6 +122,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+[INSERTAR IMAGEN: Consola del servidor mostrando uvicorn corriendo y WebSockets activos]
 
 ### 3.7 Referencia de la API y WebSockets
 - `GET /api/admin/sesiones`: Retorna el JSON con estadísticas de terminales activas.
@@ -126,6 +134,11 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
   ```json
   { "action": "force_unlock", "terminal_id": 5, "admin_hash": "a2b4c..." }
   ```
+[INSERTAR IMAGEN: Logs de red mostrando el intercambio de JSON por WebSocket]
+
+### 3.8 Casos de Uso
+El flujo de negocio principal asegura que los recursos de hardware sean utilizados exclusivamente con fines académicos y registrados correctamente.
+[INSERTAR IMAGEN: Diagrama Visual de Casos de Uso del Sistema (Actor: Alumno, Admin, Sistema)]
 
 ---
 
@@ -136,6 +149,8 @@ Cuando el sistema está desplegado y configurado exitosamente:
 - **Sincronización Inmediata:** Si un estudiante se loguea en la "PC-05", el administrador ve la tarjeta de la PC-05 cambiar a rojo en su pantalla en menos de 1 segundo.
 - **Trazabilidad:** Se genera un registro inmutable de qué DNI usó qué PC, la hora exacta de inicio/fin y el motivo académico de uso.
 - **Sanidad de Datos:** Si el servidor pierde energía repentinamente, las tareas en segundo plano (`asyncio tasks`) detectarán las sesiones "fantasma" al reiniciar y las cerrarán automáticamente.
+
+[INSERTAR IMAGEN: Gráficos estadísticos del panel web generados tras el uso continuo]
 
 ---
 
@@ -148,6 +163,8 @@ A continuación, se describen los errores de despliegue más comunes y sus soluc
 **Solución:**
 1. Verifica que la IP en el `config.json` de la carpeta del cliente (ej. `ws://192.168.1.50:8000/ws`) coincida con la IP actual del servidor.
 2. En la PC Servidor, abre el "Firewall de Windows Defender con Seguridad Avanzada" y crea una Regla de Entrada (Inbound Rule) permitiendo conexiones TCP en el puerto `8000`.
+
+[INSERTAR IMAGEN: Captura del error de "Desconectado" en la interfaz del cliente C#]
 
 ### Problema 2: El SGA rechaza las peticiones o demora mucho en cargar datos nuevos
 **Causa probable:** La API de integración del SGA de la UNASAM está caída o hay latencia extrema.
