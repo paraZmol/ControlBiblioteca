@@ -1,0 +1,473 @@
+================================================================================
+  REPORTE DE FALENCIAS, BUGS, VULNERABILIDADES Y MEJORAS
+  Sistema de Control de Acceso - Biblioteca UNASAM v3.0
+  Generado: 01 de Mayo de 2026
+================================================================================
+
+Este archivo documenta hallazgos detectados en el análisis del proyecto completo:
+backend Python/FastAPI, cliente C# WPF, panel admin JavaScript y configuración.
+
+================================================================================
+SECCIÓN 1: VULNERABILIDADES DE SEGURIDAD CRÍTICAS
+================================================================================
+
+[CRÍTICO-01] CREDENCIALES DE BASE DE DATOS EN TEXTO PLANO
+  Archivo: server/config.json
+  Problema: La contraseña de MySQL está escrita directamente en el JSON:
+    "password": "impo2010"
+    "pass_nivel2": "max123"
+  Riesgo: Cualquier persona con acceso al servidor lee la contraseña de la BD.
+  Impacto: Acceso completo a toda la base de datos, modificación/robo de datos.
+  Solución: Mover credenciales a variables de entorno (.env, nunca en git).
+  -----------------------------------------------------------------------
+
+[CRÍTICO-02] SECRET_KEY DE JWT DÉBIL / POR DEFECTO
+  Archivo: server/.env → SECRET_KEY=dev_secret_key_local
+           server/auth_service.py (fallback: "clave-secreta-cambiar-en-produccion")
+  Problema: La clave que firma los JWT es una cadena trivial. Con ella, un
+            atacante puede forjar tokens JWT válidos para cualquier usuario.
+  Impacto: Toma de control de cuentas de administrador sin conocer contraseña.
+  Solución: Generar clave fuerte:
+            python -c "import secrets; print(secrets.token_urlsafe(32))"
+            Guardarla SOLO en variables de entorno, no en código ni en git.
+  -----------------------------------------------------------------------
+
+[CRÍTICO-03] VERIFICACIÓN SSL DESHABILITADA (verify=False)
+  Archivo: server/main.py (línea ~101)
+  Código:  async with httpx.AsyncClient(timeout=_SGA_TIMEOUT, verify=False)
+  Problema: El servidor acepta cualquier certificado SSL, incluso falsos.
+  Riesgo: Ataque Man-in-the-Middle (MITM) en la comunicación con el SGA.
+  Impacto: Un atacante en la red puede interceptar/modificar datos del SGA.
+  Solución: verify=True en producción, proveer CA bundle si SGA usa cert propio.
+  -----------------------------------------------------------------------
+
+[CRÍTICO-04] PIN DE MANTENIMIENTO HARDCODEADO EN EL CLIENTE
+  Archivo: client/Services/MantenimientoBackdoor.cs (línea ~32)
+  Código:  private const string PIN = "UNASAM2025";
+  Problema: El PIN está embebido en el binario compilado. Cualquier persona
+            puede decompilar el .exe con herramientas como ILSpy o dnSpy
+            y extraer el PIN en segundos.
+  Impacto: Acceso no autorizado a la puerta trasera de mantenimiento en
+           cualquier terminal de la biblioteca.
+  Solución: El PIN debe validarse contra el servidor (endpoint protegido),
+            nunca estar en el cliente.
+  -----------------------------------------------------------------------
+
+[CRÍTICO-05] CONTRASEÑA NIVEL-2 CON SHA-256 SIN SALT
+  Archivos: server/main.py (endpoint /api/hash-nivel2)
+            admin/static/js/app.js (~línea 181)
+  Código:   h = hashlib.sha256(raw.encode()).hexdigest()
+  Problema: SHA-256 sin salt es vulnerable a ataques de diccionario y a
+            tablas rainbow. La contraseña "max123" se puede crackear en
+            menos de un segundo con herramientas como hashcat o crackstation.
+  Impacto: Un atacante que intercepte el hash puede recuperar la contraseña.
+  Solución: Usar bcrypt con salt (como ya se hace en auth_service.py para
+            los usuarios admin). Nunca comparar hashes en el cliente.
+  -----------------------------------------------------------------------
+
+[CRÍTICO-06] CREDENCIALES DE ADMINISTRADOR POR DEFECTO
+  Archivo: server/main.py (~línea 243)
+           admin/index.html (documentado: admin / admin123)
+  Problema: El sistema crea automáticamente el usuario "admin" con contraseña
+            "admin123" si no existe. Estas credenciales nunca se cambian.
+  Impacto: Acceso inmediato al panel administrativo para cualquiera que
+           conozca la URL.
+  Solución: Al primer inicio, requerir cambio de contraseña obligatorio.
+            Generar contraseña aleatoria en la instalación.
+  -----------------------------------------------------------------------
+
+[CRÍTICO-07] ARCHIVO .env VERSIONADO EN GIT
+  Archivo: server/.env
+  Problema: El archivo .env con secretos (SECRET_KEY, PASS_NIVEL2,
+            DATABASE_URL) está incluido en el repositorio de git.
+  Impacto: Cualquier persona con acceso al historial del repo obtiene
+           todos los secretos, incluso si se "borran" del código.
+  Solución: Agregar .env al .gitignore inmediatamente. Rotar TODOS
+            los secretos que hayan sido expuestos en git.
+  -----------------------------------------------------------------------
+
+
+================================================================================
+SECCIÓN 2: VULNERABILIDADES DE SEGURIDAD ALTAS
+================================================================================
+
+[ALTA-01] XSS (Cross-Site Scripting) EN PANEL ADMINISTRADOR
+  Archivo: admin/static/js/app.js
+  Problema: Múltiples lugares usan innerHTML con datos no escapados:
+    - Línea ~1137: document.getElementById('modal-bloqueo-mensaje').innerHTML = htmlMensaje
+    - Línea ~1561: grid.innerHTML = lista.map(t => `...${t.nombre}...`)
+    - Línea ~2129: body.innerHTML = data.alumnos.map(a => `...${a.nombre}...`)
+  La función escapeHtml() existe pero NO se usa en todos los lugares.
+  Impacto: Si un atacante controla datos en la BD (nombre de alumno con
+           <script>alert(1)</script>), puede ejecutar código en el navegador
+           del administrador y robar su sesión JWT.
+  Solución: Usar textContent en lugar de innerHTML, o escapeHtml() en TODOS
+            los campos que vienen de la base de datos.
+  -----------------------------------------------------------------------
+
+[ALTA-02] COMUNICACIÓN WEBSOCKET SIN CIFRADO (ws:// en vez de wss://)
+  Archivo: client/UI/MainWindow.xaml.cs (~línea 63)
+           client/kiosco.config.json ("WsBaseUrl": "ws://...")
+  Problema: Los datos de autenticación (DNI del alumno, sesiones) viajan
+            sin cifrar por la red LAN.
+  Impacto: Cualquier equipo en la misma red puede capturar el tráfico con
+           Wireshark y ver los DNI y datos de sesiones en tiempo real.
+  Solución: Implementar WSS (WebSocket Seguro) con certificado TLS.
+  -----------------------------------------------------------------------
+
+[ALTA-03] PANEL ADMIN ACCESIBLE SIN RESTRICCIÓN DE RED
+  Archivo: server/main.py (CORS, binding)
+  Problema: El servidor escucha en 0.0.0.0 sin restricción de IP.
+            Si la máquina servidor tiene acceso a internet o a otras redes,
+            el panel admin es accesible desde cualquier parte.
+  Impacto: Acceso no autorizado al panel desde fuera de la red interna.
+  Solución: Configurar firewall. El panel admin debería escuchar solo
+            en 127.0.0.1 o en la IP de la LAN interna.
+  -----------------------------------------------------------------------
+
+
+================================================================================
+SECCIÓN 3: VULNERABILIDADES DE SEGURIDAD MEDIAS
+================================================================================
+
+[MEDIA-01] RATE LIMITING SOLO POR USUARIO, NO POR IP
+  Archivo: server/api/endpoints.py (~línea 68)
+  Problema: Bloqueo de 3 intentos fallidos aplica solo por cuenta de usuario.
+            Un atacante puede probar contraseñas en cuentas distintas
+            o desde IPs distintas sin ser bloqueado.
+  Solución: Implementar rate limiting a nivel de IP con SlowAPI o un
+            middleware. Ej: máximo 10 intentos por IP por minuto.
+  -----------------------------------------------------------------------
+
+[MEDIA-02] LOGS CON INFORMACIÓN PERSONAL (DNI) EN CLARO
+  Archivo: server/main.py (~línea 136)
+  Código:  logger.info(f"[SGA] Alumno: {nombres} | DNI={dni_real}")
+  Problema: Los DNI de los alumnos quedan registrados en los logs de stdout.
+  Impacto: Si los logs se comparten o exponen, hay fuga de datos personales
+           (violación de privacidad / Ley de Protección de Datos Perú).
+  Solución: Enmascarar: DNI=****{dni[-2:]} o no logear datos personales.
+  -----------------------------------------------------------------------
+
+[MEDIA-03] WEBSOCKET SIN RATE LIMITING (riesgo DoS)
+  Archivo: server/core/websocket_manager.py
+  Problema: No hay límite de mensajes por conexión WebSocket.
+            Un cliente malicioso puede enviar millones de mensajes por segundo.
+  Impacto: El servidor puede quedar sin recursos (DoS).
+  Solución: Implementar token bucket o conteo de mensajes por conexión.
+  -----------------------------------------------------------------------
+
+[MEDIA-04] TIMEOUT DEL SGA PUEDE CONGELAR PETICIONES
+  Archivo: server/main.py
+  Código:  _SGA_TIMEOUT = float(os.getenv("SGA_TIMEOUT_SECONDS", "6"))
+  Problema: 6 segundos de timeout en llamada síncrona puede hacer que
+            múltiples alumnos esperen si el SGA está lento.
+  Solución: Reducir a 2-3 segundos. Mejorar el fallback si SGA no responde.
+  -----------------------------------------------------------------------
+
+[MEDIA-05] MODIFICACIONES AL REGISTRO DE WINDOWS NO SE DESHACEN EN CRASH
+  Archivo: client/Services/RegistryControl.cs
+  Problema: El cliente modifica HKCU y HKLM para deshabilitar el Task Manager
+            y otras funciones de Windows. Si la aplicación termina de forma
+            inesperada (crash), el registro queda en estado restringido.
+  Impacto: El usuario queda con la PC bloqueada sin poder acceder al Task
+           Manager incluso después de que la app terminó.
+  Solución: Implementar un servicio watchdog que restaure el registro si
+            la aplicación principal muere inesperadamente.
+  -----------------------------------------------------------------------
+
+[MEDIA-06] ESTADO DE TERMINALES SOLO EN MEMORIA (no persistente)
+  Archivo: server/core/websocket_manager.py
+  Problema: El diccionario de terminales conectadas vive en RAM.
+            Si el servidor se reinicia, se pierde el estado de todas
+            las terminales activas y las sesiones abiertas quedan huérfanas.
+  Impacto: Inconsistencia en la BD: sesiones que quedan "abiertas"
+           aunque la terminal ya no está conectada.
+  Solución: Persistir el estado en BD. Implementar lógica de reconciliación
+            al reconectar una terminal.
+  -----------------------------------------------------------------------
+
+
+================================================================================
+SECCIÓN 4: BUGS Y ERRORES DE FUNCIONAMIENTO
+================================================================================
+
+[BUG-01] SESIONES HUÉRFANAS EN LA BASE DE DATOS
+  Archivos: server/api/endpoints.py, server/core/websocket_manager.py
+  Problema: Si un cliente WPF se cierra inesperadamente (corte de luz,
+            crash), la sesión del alumno queda abierta en la BD para siempre.
+  Síntoma: La terminal aparece "ocupada" aunque está libre.
+  Solución actual: /api/limpiar-todo (manual, borra todo).
+  Solución correcta: Timeout automático por inactividad de WebSocket.
+                     Si un terminal no envía heartbeat en X segundos,
+                     cerrar automáticamente su sesión activa.
+  -----------------------------------------------------------------------
+
+[BUG-02] ENDPOINT /api/limpiar-todo ES DEMASIADO DESTRUCTIVO
+  Archivo: server/main.py (~línea 318)
+  Problema: El endpoint "limpiar todo" cierra TODAS las sesiones activas
+            y desconecta TODOS los terminales, no solo el que falló.
+  Impacto: Un administrador que use limpiar-todo para arreglar un terminal
+           afecta a todos los alumnos usando la biblioteca en ese momento.
+  Solución: Agregar endpoint /api/terminales/{id}/limpiar para limpiar
+            solo la terminal específica con problemas.
+  -----------------------------------------------------------------------
+
+[BUG-03] INFORMACIÓN DE ERROR DE RED EXPUESTA AL USUARIO
+  Archivo: client/UI/MainWindow.xaml.cs
+  Problema: Los errores de WebSocket se muestran con la URL completa
+            del servidor en el MessageBox del usuario final.
+  Impacto: El alumno puede ver la IP/puerto del servidor interno.
+  Solución: Mostrar solo "Error de conexión. Contacte al administrador."
+  -----------------------------------------------------------------------
+
+[BUG-04] DETALLES DE EXCEPCIÓN ENVIADOS AL CLIENTE
+  Archivo: server/api/endpoints.py (~línea 780)
+  Código:  raise HTTPException(status_code=400, detail=f"Archivo Excel inválido: {e}")
+  Problema: El mensaje de excepción interna (stack info, rutas de archivo)
+            se devuelve al cliente en la respuesta HTTP.
+  Solución: Registrar el error completo con logger.error(e),
+            devolver al cliente solo "Archivo Excel inválido."
+  -----------------------------------------------------------------------
+
+[BUG-05] DATOS DE PRUEBA HARDCODEADOS EN PRODUCCIÓN
+  Archivo: client/UI/MainWindow.xaml.cs
+  Problema: Existe un diccionario _codigosPrueba con DNIs de prueba
+            embebidos en el código del cliente de producción.
+  Impacto: Potencial acceso usando credenciales de prueba en terminales reales.
+  Solución: Remover completamente los datos de prueba antes del build
+            de producción. Usar compilación condicional (#if DEBUG).
+  -----------------------------------------------------------------------
+
+[BUG-06] BASE DE DATOS POR DEFECTO ES SQLITE (NO MYSQL)
+  Archivo: server/database.py
+  Código:  DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./biblioteca.db")
+  Problema: Si la variable de entorno DATABASE_URL no está configurada,
+            el sistema arranca con SQLite silenciosamente.
+  Impacto: En producción podría arrancarse con la BD equivocada sin saberlo.
+  Solución: No tener valor por defecto; lanzar error si DATABASE_URL
+            no está definida en producción.
+  -----------------------------------------------------------------------
+
+[BUG-07] GLOBALKEY HOOK NO SE DESREGISTRA EN TODOS LOS ESCENARIOS
+  Archivo: client/Services/KeyboardHook.cs
+  Problema: El hook global de teclado (que bloquea Alt+Tab, Win, etc.)
+            puede no desregistrarse correctamente si la app termina
+            por una excepción no manejada.
+  Impacto: El teclado queda con restricciones activas para el usuario.
+  Solución: Suscribir al evento Application.Current.DispatcherUnhandledException
+            para garantizar la limpieza del hook.
+  -----------------------------------------------------------------------
+
+
+================================================================================
+SECCIÓN 5: MEJORAS ARQUITECTÓNICAS Y DE DISEÑO
+================================================================================
+
+[MEJORA-01] IMPLEMENTAR REFRESH TOKENS PARA JWT
+  Archivo: server/auth_service.py
+  Actual: Token JWT con expiración de 8 horas. Si se compromete, es válido
+          por 8 horas completas sin posibilidad de revocarlo.
+  Mejora: Implementar access token (15 min) + refresh token (8 horas)
+          con lista de revocación para logout seguro.
+  -----------------------------------------------------------------------
+
+[MEJORA-02] AGREGAR TABLA DE AUDITORÍA EN BASE DE DATOS
+  Archivos: server/models.py, server/api/endpoints.py
+  Actual: Las acciones de administrador solo se registran en stdout (logs).
+          Al reiniciar el servidor, el historial de auditoría se pierde.
+  Mejora: Crear tabla audit_log(id, fecha, usuario, accion, detalle)
+          y registrar todas las acciones admin en BD. Esto permite
+          investigar incidentes después del hecho.
+  -----------------------------------------------------------------------
+
+[MEJORA-03] SEPARAR CONFIGURACIÓN DE ENTORNO POR AMBIENTE
+  Archivos: server/config.json, server/.env
+  Actual: Un solo config.json mezcla configuración de desarrollo y producción.
+  Mejora: Usar config.dev.json, config.prod.json o variables de entorno
+          diferenciadas por ambiente. Nunca commitear secretos a git.
+  -----------------------------------------------------------------------
+
+[MEJORA-04] IMPLEMENTAR HEALTH CHECK ENDPOINT
+  Archivo: server/main.py
+  Mejora: Agregar GET /health que devuelva estado de la BD, conexión
+          al SGA, y número de terminales activas. Útil para monitoreo
+          y para el instalador al verificar que el servidor está listo.
+  -----------------------------------------------------------------------
+
+[MEJORA-05] PAGINACIÓN EN ENDPOINTS QUE DEVUELVEN LISTAS GRANDES
+  Archivo: server/api/endpoints.py
+  Actual: GET /api/alumnos devuelve TODOS los alumnos sin paginación.
+          Con una base de datos grande (miles de alumnos), esto puede
+          saturar la memoria del servidor y del cliente.
+  Mejora: Agregar parámetros ?page=1&limit=50 a todos los endpoints
+          que devuelven colecciones.
+  -----------------------------------------------------------------------
+
+[MEJORA-06] VALIDAR CONTENT-TYPE EN UPLOADS
+  Archivo: server/api/endpoints.py (endpoint de importación Excel)
+  Actual: No se verifica que el archivo subido sea realmente un Excel.
+          Un atacante puede subir cualquier archivo renombrado como .xlsx.
+  Mejora: Verificar el magic number del archivo (bytes de cabecera)
+          además de la extensión.
+  -----------------------------------------------------------------------
+
+[MEJORA-07] IMPLEMENTAR 2FA PARA EL PANEL DE ADMINISTRADOR
+  Archivo: server/api/endpoints.py (endpoint /api/auth/login)
+  Mejora: Agregar segundo factor de autenticación (TOTP/Google Authenticator)
+          para el panel administrativo. Es especialmente importante dado
+          que admin123 es la contraseña por defecto.
+  -----------------------------------------------------------------------
+
+[MEJORA-08] PERSISTIR LOGS EN ARCHIVO O BASE DE DATOS
+  Archivo: server/main.py (configuración de logging)
+  Actual: logging.basicConfig escribe solo a stdout. Al reiniciar, todo
+          el historial de eventos se pierde.
+  Mejora: Agregar FileHandler con rotación:
+          logging.handlers.RotatingFileHandler("control.log", maxBytes=5MB)
+  -----------------------------------------------------------------------
+
+[MEJORA-09] LIMPIAR SESIÓN TERMINAL INDIVIDUALMENTE DESDE ADMIN
+  Archivo: admin/static/js/app.js, server/api/endpoints.py
+  Actual: Solo existe "limpiar todo" que afecta a todos los terminales.
+  Mejora: Botón por terminal en el panel para cerrar solo esa sesión.
+          Ya parcialmente implementado, verificar que esté expuesto en UI.
+  -----------------------------------------------------------------------
+
+[MEJORA-10] EXPORTAR LOGS DE AUDITORÍA EN EL PANEL ADMIN
+  Archivo: admin/static/js/app.js
+  Mejora: Una vez implementada la tabla de auditoría (MEJORA-02),
+          agregar exportación a Excel/CSV de las acciones de administrador
+          para auditorías institucionales.
+  -----------------------------------------------------------------------
+
+
+================================================================================
+SECCIÓN 6: CALIDAD DE CÓDIGO Y MANTENIBILIDAD
+================================================================================
+
+[CALIDAD-01] MAIN.PY DEMASIADO GRANDE (878 líneas) - FALTA SEPARACIÓN
+  Archivo: server/main.py
+  Problema: main.py mezcla configuración de la app, lógica de negocio
+            del SGA, WebSocket handlers y utilidades.
+  Mejora: Separar en módulos:
+          - server/core/sga_client.py (integración SGA)
+          - server/core/ws_handlers.py (handlers WebSocket)
+          - server/main.py (solo bootstrap de la app)
+  -----------------------------------------------------------------------
+
+[CALIDAD-02] ENDPOINTS.PY DEMASIADO GRANDE (1352 líneas)
+  Archivo: server/api/endpoints.py
+  Problema: Todas las rutas en un solo archivo dificultan mantenimiento.
+  Mejora: Separar en routers por dominio:
+          - api/routers/auth.py
+          - api/routers/alumnos.py
+          - api/routers/terminales.py
+          - api/routers/reportes.py
+  -----------------------------------------------------------------------
+
+[CALIDAD-03] APP.JS DEMASIADO GRANDE (2667 líneas)
+  Archivo: admin/static/js/app.js
+  Problema: Un solo archivo JavaScript con toda la lógica del admin es
+            difícil de mantener, probar y debuggear.
+  Mejora: Modularizar con ES modules o usar un mini-framework/bundler.
+  -----------------------------------------------------------------------
+
+[CALIDAD-04] FALTA DE TESTS AUTOMATIZADOS
+  Problema: No se detectaron archivos de test en el proyecto
+            (no hay /tests/, pytest, unittest, xunit, etc.).
+  Impacto: Cada cambio puede romper funcionalidad existente sin saberlo.
+  Mejora: Agregar al menos tests de integración para:
+          - Autenticación JWT
+          - Login de alumnos por WebSocket
+          - Importación de Excel
+          - Generación de reportes
+  -----------------------------------------------------------------------
+
+[CALIDAD-05] FALTA MANEJO DE TRANSACCIONES EN OPERACIONES CRÍTICAS
+  Archivo: server/api/endpoints.py
+  Problema: Algunas operaciones que modifican múltiples tablas no están
+            envueltas en una transacción de BD explícita.
+  Impacto: Si falla a mitad de una operación (ej: crear sesión y actualizar
+           terminal), la BD puede quedar en estado inconsistente.
+  Mejora: Usar async with db.begin(): en operaciones multi-tabla.
+  -----------------------------------------------------------------------
+
+[CALIDAD-06] DEPENDENCIA aiomysql DESACTUALIZADA
+  Archivo: server/requirements.txt
+  Actual:  aiomysql==0.3.2
+  Última:  0.3.5+
+  Mejora: Actualizar para obtener correcciones de bugs y compatibilidad.
+  -----------------------------------------------------------------------
+
+[CALIDAD-07] SIN DOCUMENTACIÓN DE API (SWAGGER DESHABILITADO?)
+  Archivo: server/main.py
+  Problema: No es claro si Swagger/OpenAPI está habilitado en producción.
+            La documentación automática de FastAPI es muy útil para
+            que el equipo entienda los endpoints disponibles.
+  Mejora: En desarrollo habilitar /docs. En producción deshabilitar o
+          proteger con autenticación básica.
+  -----------------------------------------------------------------------
+
+
+================================================================================
+SECCIÓN 7: INSTALADOR Y DESPLIEGUE
+================================================================================
+
+[DEPLOY-01] EL INSTALADOR NO VALIDA LA CONEXIÓN AL SERVIDOR ANTES DE CONTINUAR
+  Archivo: C:\Users\nunes\Downloads\instalador\
+  Problema: El instalador del cliente kiosco no verifica que el servidor
+            esté accesible antes de completar la instalación.
+  Impacto: El cliente queda instalado pero no funcional, y el técnico
+           no sabe por qué.
+  Solución: Hacer ping al endpoint /health del servidor como paso de
+            verificación en el instalador.
+  -----------------------------------------------------------------------
+
+[DEPLOY-02] ACTUALIZACIÓN DEL CLIENTE SIN MECANISMO AUTOMÁTICO
+  Problema: No hay mecanismo de auto-actualización del cliente WPF.
+            Para actualizar todos los terminales hay que ir máquina por máquina.
+  Mejora: Implementar check de versión al arrancar. Si hay versión nueva
+          en el servidor, descargar e instalar automáticamente.
+  -----------------------------------------------------------------------
+
+[DEPLOY-03] IP DEL SERVIDOR HARDCODEADA EN EL CLIENTE
+  Archivo: client/kiosco.config.json
+            "ServerIp": "192.168.1.33"
+  Problema: Si la IP del servidor cambia, hay que reconfigurar cada terminal.
+  Mejora: Usar un hostname DNS interno (ej: biblioteca-server.local)
+          en lugar de IP directa. Más resiliente a cambios de red.
+  -----------------------------------------------------------------------
+
+
+================================================================================
+RESUMEN EJECUTIVO DE HALLAZGOS
+================================================================================
+
+  Categoría                    | Cantidad | Prioridad
+  -----------------------------|----------|----------
+  Vulnerabilidades CRÍTICAS    |    7     | Resolver ANTES de producción
+  Vulnerabilidades ALTAS       |    3     | Resolver en sprint actual
+  Vulnerabilidades MEDIAS      |    6     | Resolver en próximo sprint
+  Bugs / Errores de lógica     |    7     | Según impacto en usuarios
+  Mejoras arquitectónicas      |   10     | Planificar en roadmap
+  Calidad / Mantenibilidad     |    7     | Deuda técnica a gestionar
+  Despliegue / Instalador      |    3     | Antes del rollout
+  -----------------------------|----------|----------
+  TOTAL DE HALLAZGOS           |   43     |
+
+================================================================================
+ACCIONES INMEDIATAS (antes de pasar a producción)
+================================================================================
+
+  1. Agregar server/.env a .gitignore y rotar TODOS los secretos actuales.
+  2. Generar SECRET_KEY fuerte para JWT.
+  3. Mover contraseña de MySQL de config.json a variable de entorno.
+  4. Cambiar credenciales por defecto admin/admin123.
+  5. Habilitar verify=True en httpx para conexiones al SGA.
+  6. Reemplazar SHA-256 sin salt por bcrypt para PASS_NIVEL2.
+  7. Mover la validación del PIN de MantenimientoBackdoor al servidor.
+  8. Escapar innerHTML con escapeHtml() en todos los lugares del panel admin.
+
+================================================================================
+FIN DEL REPORTE
+================================================================================
