@@ -824,7 +824,7 @@ async def importar_excel_upload(
             if not alumno:
                 alumno = AlumnoMaestro(
                     dni=dni_limpio,
-                    codigo=codigo or dni_limpio,
+                    codigo=codigo or None,
                     nombre=estudiante or "SIN NOMBRE",
                 )
                 db.add(alumno)
@@ -967,15 +967,11 @@ async def importar_maestro(
     def titulo(s: str) -> str:
         return s.title().strip() if s else ""
 
-    def limpiar_escuela(escuela: str, facultad: str) -> str | None:
+    def limpiar_escuela(escuela: str) -> str | None:
         if not escuela:
             return None
-        e = escuela.strip()
+        e = escuela.replace(".", "").strip().upper()
         if not e:
-            return None
-        if e.upper() == facultad.strip().upper():
-            return None
-        if len(e) < 7:
             return None
         return e
 
@@ -1046,7 +1042,7 @@ async def importar_maestro(
             codigo        = cell(fila, idx_codigo) or None
             nombre_fac    = limpiar_facultad(cell(fila, idx_facultad))
             nombre_esc_raw = cell(fila, idx_escuela).strip()
-            nombre_esc     = limpiar_escuela(nombre_esc_raw, nombre_fac) or ""
+            nombre_esc     = limpiar_escuela(nombre_esc_raw) or ""
 
             # Fase 1: Facultad
             id_fac = await _get_or_create_facultad(nombre_fac)
@@ -1184,6 +1180,39 @@ async def eliminar_maestro(
     await db.delete(alumno)
     await db.commit()
     return {"mensaje": f"Alumno {dni} eliminado del maestro con todas sus sesiones"}
+
+
+@router.delete("/admin/reset-maestro")
+async def reset_maestro(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual)
+):
+    """Elimina todos los alumnos del maestro y sus sesiones. Mantiene terminales y usuarios."""
+    from main import logger
+    logger.info(f"[ADMIN] Usuario '{admin.username}' solicitó LIMPIAR MAESTRO DE ALUMNOS")
+
+    if admin.rol != "admin":
+        raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
+
+    res = await db.execute(select(Sesion))
+    total_sesiones = len(res.scalars().all())
+    res2 = await db.execute(select(AlumnoMaestro))
+    total_alumnos = len(res2.scalars().all())
+
+    # Eliminar sesiones primero (FK), luego alumnos
+    await db.execute(delete(Sesion))
+    await db.execute(delete(AlumnoMaestro))
+    await db.execute(update(Terminal).values(estado="bloqueado"))
+    await db.commit()
+
+    await manager.forzar_cierre_sesion_todas()
+    await manager.notificar_evento(
+        f"🗑️ BASE DE DATOS LIMPIADA: {total_alumnos} alumno(s) y {total_sesiones} sesión(es) eliminados por '{admin.username}'",
+        "warning"
+    )
+    await manager.notificar_admins()
+
+    return {"mensaje": f"Base de datos limpiada: {total_alumnos} alumno(s) y {total_sesiones} sesión(es) eliminados. Terminales y usuarios administradores conservados."}
 
 
 @router.delete("/admin/reset-total")

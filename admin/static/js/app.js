@@ -42,6 +42,10 @@ function _aplicarRol() {
     // Botón y sección Base de Datos (Maestro): solo Admin Nivel 2
     const btnMaestro = document.getElementById('btnMaestro');
     if (btnMaestro) btnMaestro.style.display = esAsistente ? 'none' : '';
+
+    // Botón Limpiar BD Alumnos: solo Admin Nivel 2
+    const btnLimpiarMaestro = document.getElementById('btnLimpiarMaestro');
+    if (btnLimpiarMaestro) btnLimpiarMaestro.style.display = esAsistente ? 'none' : '';
     // Si baja a asistente, ocultar la sección si estaba abierta
     if (esAsistente) {
         const secMaestro = document.getElementById('seccionMaestro');
@@ -1193,6 +1197,66 @@ async function importarMaestro(input) {
 }
 
 // escapeHtml y esc definidos al inicio del archivo
+
+// ── Limpiar Base de Datos de Alumnos (solo Nivel 2) ──────────────────
+
+function abrirLimpiarMaestro() {
+    const modal    = document.getElementById('modal-limpiar-maestro');
+    const passEl   = document.getElementById('limpiar-maestro-pass');
+    const errorEl  = document.getElementById('limpiar-maestro-error');
+
+    passEl.value        = '';
+    errorEl.textContent = '';
+    modal.style.display = 'flex';
+    setTimeout(() => passEl.focus(), 50);
+
+    const cerrar = () => {
+        modal.style.display = 'none';
+        passEl.removeEventListener('keydown', onKey);
+    };
+
+    const confirmar = () => {
+        if (!_hashNivel2) {
+            errorEl.textContent = '⛔ Configuración de seguridad no disponible.';
+            return;
+        }
+        _sha256(passEl.value).then(async hash => {
+            if (hash !== _hashNivel2) {
+                errorEl.textContent = '⛔ Contraseña incorrecta. Operación cancelada.';
+                passEl.value = '';
+                passEl.focus();
+                return;
+            }
+            cerrar();
+            addLog('activity', '🗑️ Contraseña Nivel 2 correcta — ejecutando limpiar maestro...');
+            try {
+                const res = await fetch(`${API_BASE}/admin/reset-maestro`, {
+                    method: 'DELETE',
+                    headers: authHeaders(),
+                });
+                const body = await res.json();
+                if (res.ok) {
+                    mostrarNotificacion('✅ ' + body.mensaje, 'ok');
+                    addLog('activity', `✅ ${body.mensaje}`);
+                    cargarDashboard();
+                    if (_maestroVisible) cargarMaestro();
+                } else {
+                    mostrarNotificacion('❌ ' + (body.detail || 'Error al limpiar'), 'error');
+                    addLog('error', `❌ Limpiar maestro: ${body.detail || 'Error'}`);
+                }
+            } catch (e) {
+                mostrarNotificacion('❌ Error de conexión', 'error');
+                addLog('error', `❌ Error de red al limpiar maestro: ${e.message}`);
+            }
+        });
+    };
+
+    const onKey = (e) => { if (e.key === 'Enter') confirmar(); if (e.key === 'Escape') cerrar(); };
+
+    _rebindBtn('btn-limpiar-maestro-cancelar',  cerrar);
+    _rebindBtn('btn-limpiar-maestro-confirmar', confirmar);
+    passEl.addEventListener('keydown', onKey);
+}
 
 // Enter para login
 document.addEventListener('keydown', (e) => {

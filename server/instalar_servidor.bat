@@ -77,10 +77,13 @@ if %errorlevel% neq 0 (
 )
 
 set "STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
-if exist "lanzador_invisible.vbs" (
-    copy /y "lanzador_invisible.vbs" "%STARTUP%\biblioteca_unasam.vbs" >nul
-    echo  Inicio automatico configurado.
-)
+set "SERVER_DIR=%~dp0"
+(
+    echo Dim WshShell
+    echo Set WshShell = CreateObject^("WScript.Shell"^)
+    echo WshShell.Run "cmd /c ""%SERVER_DIR%servidor_run.bat""", 0, False
+) > "%STARTUP%\biblioteca_unasam.vbs"
+echo  Inicio automatico configurado.
 
 echo.
 echo  ===================================================

@@ -196,6 +196,106 @@
     </Window.Resources>
 
     <Grid IsHitTestVisible="True">
+
+        <!-- ══ COMUNICADO: carrusel para alumno no registrado ══ -->
+        <Grid x:Name="PanelComunicado" Panel.ZIndex="10"
+              Visibility="Collapsed"
+              Background="#99000000">
+
+            <Border HorizontalAlignment="Center" VerticalAlignment="Center"
+                    CornerRadius="20" Width="960" MaxHeight="780"
+                    BorderThickness="1">
+                <Border.Background>
+                    <SolidColorBrush Color="#CC0F1A2E"/>
+                </Border.Background>
+                <Border.BorderBrush>
+                    <SolidColorBrush Color="#5500B4DB"/>
+                </Border.BorderBrush>
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="32" ShadowDepth="0" Color="#AA000000"/>
+                </Border.Effect>
+
+                <Grid Margin="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Imagen activa (Contain/Fit) -->
+                    <Grid Grid.Row="0" ClipToBounds="True" MinHeight="520">
+                        <Image x:Name="ImgComunicado0"
+                               Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Margin="16"/>
+                        <Image x:Name="ImgComunicado1"
+                               Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Margin="16" Visibility="Collapsed"/>
+
+                        <!-- Flecha izquierda -->
+                        <Button x:Name="BtnCarruselIzq" Content="❮"
+                                HorizontalAlignment="Left" VerticalAlignment="Center"
+                                Margin="10,0,0,0" Width="42" Height="42"
+                                FontSize="18" FontWeight="Bold"
+                                Foreground="White" Background="#55000000"
+                                BorderThickness="0" Cursor="Hand"
+                                Click="BtnCarruselIzq_Click">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                            CornerRadius="21">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bd" Property="Background" Value="#AA00B4DB"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+
+                        <!-- Flecha derecha -->
+                        <Button x:Name="BtnCarruselDer" Content="❯"
+                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Margin="0,0,10,0" Width="42" Height="42"
+                                FontSize="18" FontWeight="Bold"
+                                Foreground="White" Background="#55000000"
+                                BorderThickness="0" Cursor="Hand"
+                                Click="BtnCarruselDer_Click">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                            CornerRadius="21">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bd" Property="Background" Value="#AA00B4DB"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </Grid>
+
+                    <!-- Dots indicadores -->
+                    <StackPanel Grid.Row="1" Orientation="Horizontal"
+                                HorizontalAlignment="Center" Margin="0,10,0,6">
+                        <Ellipse x:Name="Dot0" Width="10" Height="10" Margin="5,0"
+                                 Fill="#00B4DB"/>
+                        <Ellipse x:Name="Dot1" Width="10" Height="10" Margin="5,0"
+                                 Fill="#44FFFFFF"/>
+                    </StackPanel>
+
+                    <!-- Botón cerrar -->
+                    <Button Grid.Row="2" Content="Cerrar Comunicado"
+                            Height="46" Margin="40,4,40,20"
+                            Style="{StaticResource ModernButton}"
+                            Click="BtnCerrarComunicado_Click"/>
+                </Grid>
+            </Border>
+        </Grid>
+
         <Grid Panel.ZIndex="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
@@ -373,8 +473,8 @@
                 </Border>
             </StackPanel>
 
-            <!-- Consola de depuración -->
-            <Border Grid.Row="3" Background="#0a0a1a" BorderBrush="#1E293B" BorderThickness="0,1,0,0">
+            <!-- Consola de depuración (oculta, Ctrl+B+U para mostrar) -->
+            <Border x:Name="PanelDebug" Grid.Row="3" Background="#0a0a1a" BorderBrush="#1E293B" BorderThickness="0,1,0,0" Visibility="Collapsed">
                 <ScrollViewer x:Name="DebugScroll"
                               MaxHeight="110" VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Auto" Padding="8,4">

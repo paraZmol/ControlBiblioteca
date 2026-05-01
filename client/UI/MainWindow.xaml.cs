@@ -9,6 +9,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace ControlBiblioteca.Client.UI
 {
@@ -27,6 +28,11 @@ namespace ControlBiblioteca.Client.UI
         private System.Windows.Threading.DispatcherTimer? _timerEscape;
 
         private CancellationTokenSource? _loginCts;
+
+        // ── Carrusel comunicado ───────────────────────────────────────
+        private int _carruselIndex = 0;
+        private const string IMG_COMUNICADO_0 = "pack://application:,,,/images/comunicado_1.jpg";
+        private const string IMG_COMUNICADO_1 = "pack://application:,,,/images/comunicado_2.jpg";
 
         private const Key MASTER_KEY         = Key.F10;
         private const ModifierKeys MASTER_MOD = ModifierKeys.Control | ModifierKeys.Alt;
@@ -68,14 +74,20 @@ namespace ControlBiblioteca.Client.UI
             };
 
             string apiUrl = cfg.WsBaseUrl.Replace("ws://", "http://").Replace("wss://", "https://");
-            _ = CargarMotivosAsync($"{apiUrl}/api/catalogos/motivos");
 
             bool primerError = true;
 
             _wsService = new Services.WebSocketService(wsUrl);
             _wsService.InitialGreeting     = JsonSerializer.Serialize(new { tipo = "hello", hostname });
             _wsService.OnMensajeRecibido  += ProcesarMensajeServidor;
-            _wsService.OnConexionCambiada += ActualizarEstadoConexion;
+            _wsService.OnConexionCambiada += conectado =>
+            {
+                ActualizarEstadoConexion(conectado);
+                if (conectado)
+                    _ = CargarMotivosAsync($"{apiUrl}/api/catalogos/motivos");
+            };
+
+            Loaded += (_, _) => _ = CargarMotivosAsync($"{apiUrl}/api/catalogos/motivos");
             _wsService.OnError += msg =>
             {
                 LogDebug($"ERROR WS: {msg}");
@@ -371,6 +383,18 @@ namespace ControlBiblioteca.Client.UI
 
         private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
         {
+            // Ctrl+B+U — mostrar/ocultar consola de depuración
+            if (e.Key == Key.U && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control
+                                && Keyboard.IsKeyDown(Key.B))
+            {
+                e.Handled = true;
+                if (PanelDebug != null)
+                    PanelDebug.Visibility = PanelDebug.Visibility == Visibility.Visible
+                        ? Visibility.Collapsed
+                        : Visibility.Visible;
+                return;
+            }
+
             // Salida instantánea legado (Ctrl+Alt+F10)
             if (e.Key == MASTER_KEY && (Keyboard.Modifiers & MASTER_MOD) == MASTER_MOD)
             {
@@ -467,6 +491,9 @@ namespace ControlBiblioteca.Client.UI
             {
                 AppActual.Security.Bloquear();
 
+                if (PanelDebug != null)
+                    PanelDebug.Visibility = Visibility.Collapsed;
+
                 PanelSesion.Visibility  = Visibility.Collapsed;
                 PanelBloqueo.Visibility = Visibility.Visible;
                 TxtCodigo.Text          = "";
@@ -551,8 +578,16 @@ namespace ControlBiblioteca.Client.UI
                             LogDebug($"Login rechazado: {motivo}");
                             Dispatcher.Invoke(() =>
                             {
-                                TxtEstado.Text        = motivo;
                                 BtnIngresar.IsEnabled = true;
+                                if (motivo.Contains("no registrado", StringComparison.OrdinalIgnoreCase) ||
+                                    motivo.Contains("no encontrado", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    MostrarComunicado();
+                                }
+                                else
+                                {
+                                    TxtEstado.Text = motivo;
+                                }
                             });
                         }
                         catch (Exception ex)
@@ -662,6 +697,106 @@ namespace ControlBiblioteca.Client.UI
             return "127.0.0.1";
         }
 
+        // ── Comunicado carrusel ───────────────────────────────────────
+
+        private void MostrarComunicado()
+        {
+            _carruselIndex = 0;
+            ActualizarCarrusel();
+            PanelComunicado.Visibility = Visibility.Visible;
+        }
+
+        private static BitmapImage? _imgCache0 = null;
+        private static BitmapImage? _imgCache1 = null;
+
+        private BitmapImage? CargarImagen(string packUri, string nombreArchivo)
+        {
+            // Intento 1: recurso embebido en el ensamblado (pack URI)
+            try
+            {
+                var sri = Application.GetResourceStream(new Uri(packUri, UriKind.Absolute));
+                if (sri != null)
+                {
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.StreamSource = sri.Stream;
+                    bmp.CacheOption  = BitmapCacheOption.OnLoad;
+                    bmp.EndInit();
+                    bmp.Freeze();
+                    LogDebug($"Imagen cargada desde recurso: {nombreArchivo}");
+                    return bmp;
+                }
+            }
+            catch (Exception ex) { LogDebug($"Pack URI falló para {nombreArchivo}: {ex.Message}"); }
+
+            // Intento 2: junto al .exe (para desarrollo o si no se embebió)
+            try
+            {
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string ruta    = System.IO.Path.Combine(baseDir, "images", nombreArchivo);
+                if (System.IO.File.Exists(ruta))
+                {
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.UriSource    = new Uri(ruta, UriKind.Absolute);
+                    bmp.CacheOption  = BitmapCacheOption.OnLoad;
+                    bmp.EndInit();
+                    bmp.Freeze();
+                    LogDebug($"Imagen cargada desde disco: {ruta}");
+                    return bmp;
+                }
+                else
+                {
+                    LogDebug($"No encontrada en disco: {ruta}");
+                }
+            }
+            catch (Exception ex) { LogDebug($"Disco falló para {nombreArchivo}: {ex.Message}"); }
+
+            LogDebug($"ERROR: no se pudo cargar {nombreArchivo} por ningún método");
+            return null;
+        }
+
+        private void ActualizarCarrusel()
+        {
+            if (_imgCache0 == null)
+                _imgCache0 = CargarImagen(IMG_COMUNICADO_0, "comunicado_1.jpg");
+            if (_imgCache1 == null)
+                _imgCache1 = CargarImagen(IMG_COMUNICADO_1, "comunicado_2.jpg");
+
+            ImgComunicado0.Source = _imgCache0;
+            ImgComunicado1.Source = _imgCache1;
+
+            ImgComunicado0.Visibility = _carruselIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ImgComunicado1.Visibility = _carruselIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+            Dot0.Fill = _carruselIndex == 0
+                ? new SolidColorBrush(Color.FromRgb(0x00, 0xB4, 0xDB))
+                : new SolidColorBrush(Color.FromArgb(0x44, 0xFF, 0xFF, 0xFF));
+            Dot1.Fill = _carruselIndex == 1
+                ? new SolidColorBrush(Color.FromRgb(0x00, 0xB4, 0xDB))
+                : new SolidColorBrush(Color.FromArgb(0x44, 0xFF, 0xFF, 0xFF));
+        }
+
+        private void BtnCarruselIzq_Click(object sender, RoutedEventArgs e)
+        {
+            _carruselIndex = (_carruselIndex - 1 + 2) % 2;
+            ActualizarCarrusel();
+        }
+
+        private void BtnCarruselDer_Click(object sender, RoutedEventArgs e)
+        {
+            _carruselIndex = (_carruselIndex + 1) % 2;
+            ActualizarCarrusel();
+        }
+
+        private void BtnCerrarComunicado_Click(object sender, RoutedEventArgs e)
+        {
+            PanelComunicado.Visibility = Visibility.Collapsed;
+            TxtCodigo.Text  = "";
+            TxtEstado.Text  = "";
+            LimpiarErroresVisuales();
+            FocoDNI();
+        }
+
         protected override void OnClosed(EventArgs e)
         {
             _loginCts?.Cancel();
@@ -672,33 +807,52 @@ namespace ControlBiblioteca.Client.UI
 
         private async Task CargarMotivosAsync(string url)
         {
-            try
+            for (int intento = 1; intento <= 5; intento++)
             {
-                using var client = new System.Net.Http.HttpClient();
-                var json = await client.GetStringAsync(url);
-                var opciones = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                var motivos = JsonSerializer.Deserialize<List<MotivoUso>>(json, opciones);
-                
-                Dispatcher.Invoke(() =>
+                try
                 {
-                    CmbRazon.Items.Clear();
-                    if (motivos != null)
+                    using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                    var json = await client.GetStringAsync(url);
+                    var opciones = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    var motivos = JsonSerializer.Deserialize<List<MotivoUso>>(json, opciones);
+
+                    if (motivos == null || motivos.Count == 0)
                     {
+                        await Task.Delay(2000);
+                        continue;
+                    }
+
+                    Dispatcher.Invoke(() =>
+                    {
+                        CmbRazon.Items.Clear();
                         foreach (var m in motivos)
                         {
                             var cbi = new ComboBoxItem { Content = m.descripcion, Tag = m.id };
                             CmbRazon.Items.Add(cbi);
                         }
-                    }
-                    var otros = new ComboBoxItem { Content = "Otros (Especificar)", Tag = 0 };
-                    CmbRazon.Items.Add(otros);
-                    CmbRazon.SelectedIndex = 0;
-                });
+                        var otros = new ComboBoxItem { Content = "Otros (Especificar)", Tag = 0 };
+                        CmbRazon.Items.Add(otros);
+                        CmbRazon.SelectedIndex = 0;
+                    });
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    LogDebug($"Error cargando motivos (intento {intento}/5): {ex.Message}");
+                    await Task.Delay(2000);
+                }
             }
-            catch (Exception ex)
+
+            // Fallback: si el servidor no respondió, al menos agregar "Otros" para no bloquear el formulario
+            Dispatcher.Invoke(() =>
             {
-                LogDebug($"Error cargando motivos: {ex.Message}");
-            }
+                if (CmbRazon.Items.Count == 0)
+                {
+                    CmbRazon.Items.Add(new ComboBoxItem { Content = "Otros (Especificar)", Tag = 0 });
+                    CmbRazon.SelectedIndex = 0;
+                    LogDebug("Motivos: fallback aplicado (servidor no respondió)");
+                }
+            });
         }
     }
 
