@@ -773,7 +773,12 @@ function renderTerminales(terminales, sesiones = []) {
         return;
     }
 
-    grid.innerHTML = terminales.map(t => {
+    // Ocultar terminal virtual "IMPORTADO" para nivel 1 (asistente)
+    const lista = _rol === 'asistente'
+        ? terminales.filter(t => t.nombre !== 'IMPORTADO')
+        : terminales;
+
+    grid.innerHTML = lista.map(t => {
         const inputId = `unlock-${t.ip.replace(/\./g, '-')}`;
         const online  = t.estado !== 'offline';
         const bloqueado = t.estado === 'bloqueado';
@@ -786,7 +791,9 @@ function renderTerminales(terminales, sesiones = []) {
         const pcNombre = esc(t.nombre || t.ip);
         const alumnoNombre = sesion ? esc(sesion.alumno_nombre) : '';
 
-        if (!online) {
+        if (t.nombre === 'IMPORTADO') {
+            botonesPrimarios = `<p style="font-size:11px;color:var(--text-muted);text-align:center;margin:4px 0;line-height:1.5">Terminal virtual — necesaria para el historial importado desde Excel</p>`;
+        } else if (!online) {
             botonesPrimarios = `
                 <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')">⏻ Apagar PC</button>
             `;
@@ -1197,6 +1204,63 @@ async function importarMaestro(input) {
 }
 
 // escapeHtml y esc definidos al inicio del archivo
+
+// ── Nuevo Usuario Manual ──────────────────────────────────────────────
+
+function abrirNuevoUsuario() {
+    const modal   = document.getElementById('modal-nuevo-usuario');
+    const errorEl = document.getElementById('nuevo-usuario-error');
+
+    document.getElementById('nuevo-dni').value      = '';
+    document.getElementById('nuevo-nombre').value   = '';
+    document.getElementById('nuevo-codigo').value   = '';
+    document.getElementById('nuevo-facultad').value = '';
+    document.getElementById('nuevo-escuela').value  = '';
+    errorEl.textContent = '';
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('nuevo-dni').focus(), 50);
+
+    _rebindBtn('btn-nuevo-cancelar', () => { modal.style.display = 'none'; });
+    _rebindBtn('btn-nuevo-guardar', async () => {
+        const dni      = document.getElementById('nuevo-dni').value.trim();
+        const nombre   = document.getElementById('nuevo-nombre').value.trim();
+        const codigo   = document.getElementById('nuevo-codigo').value.trim();
+        const facultad = document.getElementById('nuevo-facultad').value.trim();
+        const escuela  = document.getElementById('nuevo-escuela').value.trim();
+
+        if (!/^\d{8}$/.test(dni)) {
+            errorEl.textContent = 'El DNI debe tener exactamente 8 dígitos numéricos.';
+            document.getElementById('nuevo-dni').focus();
+            return;
+        }
+        if (!nombre) {
+            errorEl.textContent = 'El nombre completo es obligatorio.';
+            document.getElementById('nuevo-nombre').focus();
+            return;
+        }
+
+        errorEl.textContent = '';
+        try {
+            const res = await fetch(`${API_BASE}/admin/maestro/nuevo`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ dni, nombre, codigo: codigo || null, facultad: facultad || null, escuela: escuela || null })
+            });
+            const body = await res.json();
+            if (res.ok) {
+                modal.style.display = 'none';
+                mostrarNotificacion('✅ ' + body.mensaje, 'ok');
+                addLog('activity', `➕ Nuevo usuario registrado: ${nombre} (DNI ${dni})`);
+                _maestroOffset = 0;
+                cargarMaestro();
+            } else {
+                errorEl.textContent = body.detail || 'Error al registrar.';
+            }
+        } catch (e) {
+            errorEl.textContent = 'Error de conexión.';
+        }
+    });
+}
 
 // ── Limpiar Base de Datos de Alumnos (solo Nivel 2) ──────────────────
 

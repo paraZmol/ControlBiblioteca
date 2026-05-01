@@ -1138,6 +1138,71 @@ class AlumnoMaestroUpdate(BaseModel):
     id_escuela: int | None = None
 
 
+class AlumnoMaestroNuevo(BaseModel):
+    dni:      str
+    nombre:   str
+    codigo:   str | None = None
+    facultad: str | None = None
+    escuela:  str | None = None
+
+
+@router.post("/admin/maestro/nuevo")
+async def crear_usuario_manual(
+    datos: AlumnoMaestroNuevo,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Registra manualmente un nuevo usuario en el maestro."""
+    if admin.rol != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden agregar usuarios")
+
+    if not datos.dni.isdigit() or len(datos.dni) != 8:
+        raise HTTPException(status_code=422, detail="El DNI debe tener exactamente 8 dígitos numéricos")
+    if not datos.nombre.strip():
+        raise HTTPException(status_code=422, detail="El nombre completo es obligatorio")
+
+    res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == datos.dni))
+    if res.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Ya existe un usuario con DNI {datos.dni}")
+
+    # Resolver o crear facultad/escuela
+    id_fac = None
+    id_esc = None
+    if datos.facultad:
+        nombre_fac = datos.facultad.replace(".", "").strip().upper()
+        r = await db.execute(select(Facultad).where(Facultad.nombre == nombre_fac))
+        fac = r.scalar_one_or_none()
+        if not fac:
+            fac = Facultad(nombre=nombre_fac)
+            db.add(fac)
+            await db.flush()
+        id_fac = fac.id
+
+    if datos.escuela:
+        nombre_esc = datos.escuela.replace(".", "").strip().upper()
+        q_esc = select(Escuela).where(Escuela.nombre == nombre_esc)
+        if id_fac:
+            q_esc = q_esc.where(Escuela.id_facultad == id_fac)
+        r2 = await db.execute(q_esc)
+        esc = r2.scalar_one_or_none()
+        if not esc:
+            esc = Escuela(nombre=nombre_esc, id_facultad=id_fac)
+            db.add(esc)
+            await db.flush()
+        id_esc = esc.id
+
+    alumno = AlumnoMaestro(
+        dni=datos.dni,
+        nombre=datos.nombre.strip(),
+        codigo=datos.codigo.strip() if datos.codigo else None,
+        id_facultad=id_fac,
+        id_escuela=id_esc,
+    )
+    db.add(alumno)
+    await db.commit()
+    return {"mensaje": f"Usuario '{datos.nombre.strip()}' registrado correctamente"}
+
+
 @router.put("/admin/maestro/{dni}")
 async def actualizar_maestro(
     dni: str,

@@ -1,33 +1,73 @@
-necesito implementar un "Comunicado Informativo Condicional" en la pantalla de login del cliente C# (WPF). El objetivo es informar a los alumnos no registrados sobre cómo obtener su carnet.
+Asume el rol de Technical Lead y Technical Writer. Tu tarea es analizar todo el repositorio de este proyecto (código fuente del cliente, servidor, base de datos y scripts de despliegue) y redactar un README.md exhaustivo, profesional y muy detallado.
 
-1. Lógica de Activación (Condicional):
+Instrucciones Generales:
 
-El aviso NO debe mostrarse siempre.
+Lee todo el árbol de archivos para entender la arquitectura completa.
 
-Solo debe aparecer cuando el servidor devuelva un error indicando que el DNI ingresado no existe en la base de datos de la biblioteca.
+Usa un formato Markdown muy limpio, con índices, tablas, bloques de código, emojis descriptivos y separadores.
 
-Si el alumno existe, el ingreso debe ser directo sin mostrar este aviso.
+Donde sea necesario apoyar con una imagen, utiliza marcadores exactos entre corchetes, por ejemplo: [INSERTAR IMAGEN: Diagrama de Casos de Uso] o [INSERTAR IMAGEN: Captura del Panel de Administración].
 
-2. Interfaz del Comunicado (UI):
+Estructura Obligatoria que debe tener el README:
 
-Implementa un Slider (Carrusel) que contenga exactamente 2 imágenes (prepara el código para recibir las rutas de estas imágenes).
+1. Encabezado y Contexto:
 
-Importante: Las imágenes deben mostrarse en modo "Fit" o "Contain" para que se vean completas. No pongas ningún texto, pasos o etiquetas encima de las imágenes; los diseños ya traen la información.
+Nombre del Proyecto (Sistema de Control de Acceso - Biblioteca Central UNASAM).
 
-Usa un estilo de Glassmorphism (fondo semi-transparente con desenfoque/blur) para que no se tape totalmente la imagen de fondo de la biblioteca que ya tenemos.
+Descripción del problema original (procesos manuales, cuellos de botella) y cómo este sistema lo soluciona (automatización, tiempo real, control estricto).
 
-3. Controles y Navegación:
+Metodologías aplicadas (levantamiento de requerimientos con stakeholders, iteraciones).
 
-Agrega flechas a los costados (Izquierda/Derecha) para navegar entre las 2 imágenes.
+2. Arquitectura del Sistema y Tecnologías (Justificación Técnica):
 
-Agrega indicadores (puntos/dots) en la parte inferior del slider.
+Explica por qué se eligieron las tecnologías. Ejemplos:
 
-Botón Único: Solo debe haber un botón debajo del slider que diga "Cerrar Comunicado".
+Backend: FastAPI (Python) por su alta velocidad, manejo nativo de asincronía y WebSockets.
 
-4. Comportamiento del Botón Cerrar:
+Frontend Cliente (Terminales): C# con WPF por su robustez en el ecosistema Windows de la biblioteca y control de hardware.
 
-Al hacer clic en "Cerrar Comunicado", el aviso debe desaparecer.
+Frontend Admin: [Mencionar la tecnología web usada] para una gestión centralizada y responsiva.
 
-Debe limpiar el campo del DNI y dejar el formulario listo para un nuevo intento.
+Base de Datos: MySQL por su integridad relacional y soporte de gran volumen de datos.
 
-5. Restricción: No modifiques la lógica de autenticación exitosa ni el diseño del panel de login central. Solo añade esta capa (Layer/Grid) de aviso que se activa por la respuesta negativa del servidor.
+Comunicación: WebSockets para validación y control de sesiones únicas en tiempo real.
+
+[INSERTAR IMAGEN: Diagrama de Arquitectura de Red y Tecnologías]
+
+3. Estructura de la Base de Datos:
+
+Explicación detallada del esquema.
+
+Tablas principales (Alumnos, Historial, Usuarios Admin).
+
+Explicar la lógica de "Upsert" (evitar duplicidad por DNI) y las relaciones.
+
+[INSERTAR IMAGEN: Diagrama Entidad-Relación (DER)]
+
+4. Módulos del Sistema (A detalle):
+
+Módulo Cliente (EXE): Explicación del flujo del alumno (Ingreso de DNI, selección de motivo, validación WebSocket, manejo condicional del aviso "Usuario no encontrado").
+
+Módulo Servidor (API): Gestión de conexiones concurrentes, endpoints de validación, JWT/Seguridad.
+
+Módulo Administrador (Web): Importación masiva de Excel, reportes PDF/Excel, monitoreo de sesiones activas, control de niveles de acceso (nivel 1 y nivel 2).
+
+[INSERTAR IMAGEN: Interfaz de Terminal de Ingreso]
+
+[INSERTAR IMAGEN: Panel de Control del Administrador]
+
+5. Despliegue y Configuración (Producción):
+
+Requisitos de Hardware y Software.
+
+Explicación de la "Arquitectura de Configuración Centralizada" (uso del config.json como única fuente de la verdad para IP estática, puertos y credenciales).
+
+Explicación del flujo de los scripts .bat (instalar_servidor.bat y servidor_run.bat) y cómo el sistema genera automáticamente el .env y la base de datos sin intervención manual.
+
+6. Versiones y Mantenimiento:
+
+Historial de versiones actual.
+
+Pasos para futuros desarrolladores (cómo levantar el entorno de desarrollo vs producción).
+
+No asumas nada; extrae la información directamente leyendo el código fuente. Escribe el README completo en español técnico, listo para ser copiado y pegado en el repositorio final.
