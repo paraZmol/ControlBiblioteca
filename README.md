@@ -9,6 +9,11 @@
 ## 1. Contexto
 Este sistema automatiza el acceso a las computadoras de la Biblioteca Central. Utiliza un **Kiosco (WPF)** que bloquea físicamente la PC hasta que el alumno ingresa su DNI, un **Servidor (FastAPI)** que valida los datos contra la base de datos local y la API del SGA, y un **Panel Web (JS)** que permite al personal administrar las sesiones activas en tiempo real.
 
+### 1.1 Decisiones Técnicas (The "Why")
+- **¿Por qué C# WPF y no Web?** El Kiosco debe bloquear comandos nativos del SO (`Alt+Tab`, `Ctrl+Shift+Esc`). Un navegador no tiene acceso a la API Win32 ni a los *Hooks* globales de teclado requeridos.
+- **¿Por qué FastAPI con WebSockets?** El dashboard admin necesita ver el estado de +50 terminales en tiempo real sin recargar. `asyncio` permite mantener +50 conexiones persistentes abiertas simultáneamente sin saturar la RAM del servidor.
+- **¿Por qué Vanilla JS sin React/Angular?** Para evitar dependencias pesadas y configuración adicional. El HTML se sirve de forma estática directamente desde el backend, simplificando el despliegue local a un solo clic.
+
 ---
 
 ## 2. Prerequisites (Requisitos Previos)
@@ -79,6 +84,48 @@ El panel administra dos roles principales: **Asistente (N1)** y **Administrador 
 
 [INSERTAR IMAGEN: Captura del Panel de Control Web - Vista en vivo de las terminales]
 [INSERTAR IMAGEN: Captura del Panel Web - Módulo de importación de Excel]
+
+### 3.5 Estructura del Proyecto
+```text
+ControlBiblioteca/
+├── admin/               # Frontend Vanilla JS (Panel Web)
+│   ├── index.html
+│   └── static/css, js/
+├── client/              # Cliente Kiosco en C# WPF (.NET 8)
+│   ├── ControlBiblioteca.Client.csproj
+│   └── UI, Services/
+└── server/              # Backend en FastAPI
+    ├── main.py          # Punto de entrada y gestión WebSocket
+    ├── models.py        # Modelos SQLAlchemy (MySQL)
+    └── api, core/
+```
+
+### 3.6 Guía Técnica de Despliegue (Comandos)
+**Compilar Cliente (C#) para Producción:**
+Se usa `--self-contained true` para que el ejecutable incluya el .NET Runtime y corra en cualquier PC sin necesidad de instalaciones previas:
+```powershell
+dotnet publish client\ControlBiblioteca.Client.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+```
+
+**Ejecutar Servidor (Python) Manualmente:**
+```bash
+cd server
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+### 3.7 Referencia de la API y WebSockets
+- `GET /api/admin/sesiones`: Retorna el JSON con estadísticas de terminales activas.
+- **WebSocket (Kiosco):** Payload enviado al autenticarse:
+  ```json
+  { "action": "login_request", "dni": "71926257", "motivo_id": 2 }
+  ```
+- **WebSocket (Admin):** Comando para forzar desbloqueo remoto:
+  ```json
+  { "action": "force_unlock", "terminal_id": 5, "admin_hash": "a2b4c..." }
+  ```
 
 ---
 
