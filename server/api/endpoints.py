@@ -420,7 +420,7 @@ async def exportar_excel(
     ws = wb.active
     ws.title = "Historial de Sesiones"
 
-    headers = ["Estudiante", "Código", "DNI", "Escuela", "Facultad", "Actividad", "Equipo/PC", "Inicio", "Salida", "Fecha", "Duración (min)"]
+    headers = ["Estudiante", "Código", "DNI", "Facultad", "Escuela", "Actividad", "Equipo/PC", "Inicio", "Salida", "Fecha", "Duración (min)"]
     header_fill = PatternFill("solid", fgColor="1E40AF")
     header_font = Font(color="FFFFFF", bold=True)
     for col, h in enumerate(headers, 1):
@@ -437,8 +437,8 @@ async def exportar_excel(
             a.nombre,
             a.codigo or "",
             a.dni,
-            esc.nombre  if esc else "",
             fac.nombre  if fac else "",
+            esc.nombre  if esc else "",
             s.razon_uso or "",
             t.nombre_red,
             inicio_naive.strftime("%I:%M:%S %p") if inicio_naive else "",
@@ -1181,7 +1181,8 @@ async def listar_maestro(
 class AlumnoMaestroUpdate(BaseModel):
     nombre:     str | None = None
     codigo:     str | None = None
-    id_escuela: int | None = None
+    facultad:   str | None = None
+    escuela:    str | None = None
 
 
 class AlumnoMaestroNuevo(BaseModel):
@@ -1263,9 +1264,32 @@ async def actualizar_maestro(
     alumno = res.scalar_one_or_none()
     if not alumno:
         raise HTTPException(status_code=404, detail="Alumno no encontrado en el maestro")
-    if datos.nombre     is not None: alumno.nombre     = datos.nombre
-    if datos.codigo     is not None: alumno.codigo     = datos.codigo
-    if datos.id_escuela is not None: alumno.id_escuela = datos.id_escuela
+    if datos.nombre is not None:
+        alumno.nombre = datos.nombre.strip()
+    if datos.codigo is not None:
+        alumno.codigo = datos.codigo.strip() or None
+    if datos.facultad is not None or datos.escuela is not None:
+        fac_nombre = datos.facultad.replace(".", "").strip().upper() if datos.facultad else None
+        esc_nombre = datos.escuela.replace(".", "").strip().upper() if datos.escuela else None
+        id_fac = None
+        if fac_nombre:
+            r = await db.execute(select(Facultad).where(Facultad.nombre == fac_nombre))
+            fac_obj = r.scalar_one_or_none()
+            if not fac_obj:
+                fac_obj = Facultad(nombre=fac_nombre)
+                db.add(fac_obj)
+                await db.flush()
+            id_fac = fac_obj.id
+        id_esc = None
+        if esc_nombre and id_fac:
+            r = await db.execute(select(Escuela).where(Escuela.nombre == esc_nombre, Escuela.id_facultad == id_fac))
+            esc_obj = r.scalar_one_or_none()
+            if not esc_obj:
+                esc_obj = Escuela(nombre=esc_nombre, id_facultad=id_fac)
+                db.add(esc_obj)
+                await db.flush()
+            id_esc = esc_obj.id
+        alumno.id_escuela = id_esc
     await db.commit()
     return {"mensaje": f"Alumno {dni} actualizado correctamente"}
 

@@ -1726,9 +1726,9 @@ function renderSesiones(sesiones) {
 
         <tr style="${s.activa ? '' : 'opacity:0.75'}">
 
-            <td>${esc(s.alumno_nombre)}</td>
+            <td><strong>${esc(s.terminal_nombre || '—')}</strong></td>
 
-            <td>${esc(s.alumno_codigo)}</td>
+            <td>${esc(s.alumno_nombre)}</td>
 
             <td>${esc(s.alumno_dni || s.dni || '—')}</td>
 
@@ -2240,7 +2240,7 @@ function abrirEditarMaestro(dni, nombre, codigo, facultad, escuela) {
 
                 headers: authHeaders(),
 
-                body: JSON.stringify({ nombre, codigo: codigo || null })
+                body: JSON.stringify({ nombre, codigo: codigo || null, facultad: fac || null, escuela: esc_val || null })
 
             });
 
