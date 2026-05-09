@@ -363,6 +363,7 @@ namespace ControlBiblioteca.Client.UI
         private string ObtenerRazon()
         {
             var item = CmbRazon.SelectedItem as ComboBoxItem;
+            if (item == null || item.Tag is int t && t == -1) return "";
             string texto = item?.Content?.ToString() ?? "";
             if (texto.StartsWith("Otros"))
             {
@@ -825,6 +826,7 @@ namespace ControlBiblioteca.Client.UI
                     Dispatcher.Invoke(() =>
                     {
                         CmbRazon.Items.Clear();
+                        CmbRazon.Items.Add(new ComboBoxItem { Content = "— Seleccionar razón —", Tag = -1, IsEnabled = false });
                         foreach (var m in motivos)
                         {
                             var cbi = new ComboBoxItem { Content = m.descripcion, Tag = m.id };
@@ -848,6 +850,7 @@ namespace ControlBiblioteca.Client.UI
             {
                 if (CmbRazon.Items.Count == 0)
                 {
+                    CmbRazon.Items.Add(new ComboBoxItem { Content = "— Seleccionar razón —", Tag = -1, IsEnabled = false });
                     CmbRazon.Items.Add(new ComboBoxItem { Content = "Otros (Especificar)", Tag = 0 });
                     CmbRazon.SelectedIndex = 0;
                     LogDebug("Motivos: fallback aplicado (servidor no respondió)");
