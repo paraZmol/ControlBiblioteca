@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Security.Principal;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using ControlBiblioteca.Client.Services;
@@ -126,11 +127,47 @@ namespace ControlBiblioteca.Client
             IniciarUIWatchdog();
             _backdoor = new MantenimientoBackdoor(this);
 
-            // VentanaCarga cubre la pantalla mientras explorer carga.
-            // Security.Bloquear() ya está activo — hook + TaskMgr deshabilitado.
-            var splash = new VentanaCarga();
-            MainWindow = splash;
-            splash.Show();
+            // ── AUTO-ACTUALIZACIÓN ────────────────────────────────────────────────
+            // Verifica si hay una versión nueva antes de mostrar el kiosco.
+            // Si hay update: descarga, reemplaza y reinicia. Si falla: arranca normal.
+            var splashUpdate = new VentanaCarga(modoManual: true);
+            MainWindow = splashUpdate;
+            splashUpdate.Show();
+
+            _ = Task.Run(async () =>
+            {
+                bool hayUpdate = false;
+                try
+                {
+                    AutoUpdater.OnEstado += msg =>
+                        Dispatcher.BeginInvoke(() => splashUpdate.ActualizarMensaje(msg));
+
+                    hayUpdate = await AutoUpdater.VerificarYActualizarAsync(
+                        config.ServerIp, config.ServerPort);
+                }
+                catch { /* si falla, arrancar normal */ }
+
+                if (hayUpdate)
+                {
+                    // El bat ya fue lanzado — cerrar este proceso
+                    Dispatcher.Invoke(() =>
+                    {
+                        LiberarMutex();
+                        Environment.Exit(0);
+                    });
+                    return;
+                }
+
+                // Sin update o falló — continuar con el kiosco normal
+                Dispatcher.Invoke(() =>
+                {
+                    splashUpdate.Close();
+                    var mainWindow = new MainWindow();
+                    MainWindow = mainWindow;
+                    mainWindow.Show();
+                });
+            });
+            return; // el flujo continúa en el Task.Run
         }
 
         // ── Network Ensurer ──────────────────────────────────────────────────────
