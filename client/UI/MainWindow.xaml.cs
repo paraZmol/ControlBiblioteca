@@ -19,8 +19,11 @@ namespace ControlBiblioteca.Client.UI
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
         private readonly Services.WebSocketService _wsService;
+        private readonly Services.ActivityMonitor  _activityMonitor;
+        private VentanaDesconexion? _ventanaDesconexion;
         private bool _desbloqueado;
         private bool _cerrandoPorEscape;
+        private const int SEGUNDOS_GRACIA = 180; // 3 minutos de gracia para guardar
 
         private bool _esperandoEscapes = false;
         private int  _conteoEscapes    = 0;
@@ -78,6 +81,7 @@ namespace ControlBiblioteca.Client.UI
             bool primerError = true;
 
             _wsService = new Services.WebSocketService(wsUrl);
+            _activityMonitor = new Services.ActivityMonitor(_wsService);
             _wsService.InitialGreeting     = JsonSerializer.Serialize(new { tipo = "hello", hostname });
             _wsService.OnMensajeRecibido  += ProcesarMensajeServidor;
             _wsService.OnConexionCambiada += conectado =>
@@ -466,6 +470,8 @@ namespace ControlBiblioteca.Client.UI
             _desbloqueado = true;
             _loginCts?.Cancel();
 
+            _activityMonitor.Iniciar();
+
             Dispatcher.Invoke(() =>
             {
                 Debug.WriteLine($"[ENTRADA] {nombres} {apellidos} | {codigo}");
@@ -484,6 +490,15 @@ namespace ControlBiblioteca.Client.UI
 
         private void Bloquear()
         {
+            _activityMonitor.Detener();
+
+            // Cancelar ventana de desconexión si estaba activa
+            if (_ventanaDesconexion != null)
+            {
+                _ventanaDesconexion.Cancelar();
+                _ventanaDesconexion = null;
+            }
+
             _desbloqueado     = false;
             _esperandoEscapes = false;
             _conteoEscapes    = 0;
@@ -638,12 +653,45 @@ namespace ControlBiblioteca.Client.UI
         private void ActualizarEstadoConexion(bool conectado)
         {
             LogDebug(conectado ? "WS conectado OK" : "WS desconectado — reintentando...");
+
             Dispatcher.Invoke(() =>
             {
                 IndicadorConexion.Fill = conectado
                     ? System.Windows.Media.Brushes.LimeGreen
                     : System.Windows.Media.Brushes.Red;
                 TxtConexion.Text = conectado ? "Conectado al servidor" : "Desconectado";
+
+                if (conectado)
+                {
+                    // Si la ventana de desconexión está activa, bloquear siempre al reconectar
+                    // El alumno debe reidentificarse para que el servidor lo registre de nuevo
+                    if (_ventanaDesconexion != null)
+                    {
+                        LogDebug("Reconexión detectada con aviso activo — forzando bloqueo para reidentificación");
+                        _ventanaDesconexion.Cancelar();
+                        _ventanaDesconexion = null;
+                        Bloquear();
+                    }
+                }
+                else
+                {
+                    // Perdió conexión con sesión activa — mostrar aviso inmediatamente
+                    if (_desbloqueado && _ventanaDesconexion == null)
+                    {
+                        LogDebug("Desconexión detectada — iniciando aviso de 3 minutos");
+                        _ventanaDesconexion = new VentanaDesconexion(SEGUNDOS_GRACIA);
+                        _ventanaDesconexion.TiempoAgotado += () =>
+                        {
+                            Dispatcher.Invoke(() =>
+                            {
+                                LogDebug("Tiempo de gracia agotado — bloqueando PC");
+                                _ventanaDesconexion = null;
+                                Bloquear();
+                            });
+                        };
+                        _ventanaDesconexion.Iniciar();
+                    }
+                }
             });
         }
 

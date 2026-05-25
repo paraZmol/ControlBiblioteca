@@ -342,7 +342,10 @@
                                HorizontalAlignment="Center" Margin="0,0,0,4"/>
                     <TextBlock x:Name="TxtNombreEquipo" Text="Equipo: —"
                                FontSize="11" FontWeight="SemiBold" Foreground="#00B4DB"
-                               HorizontalAlignment="Center"                               TextOptions.TextFormattingMode="Display"/>
+                               HorizontalAlignment="Center" TextOptions.TextFormattingMode="Display"/>
+                    <TextBlock Text="✓ v4.0 — actualización exitosa"
+                               FontSize="10" Foreground="#44FF88"
+                               HorizontalAlignment="Center" Margin="0,2,0,0"/>
                 </StackPanel>
 
                 <!-- Tarjeta login — rgba(40,40,45,0.85) -->
