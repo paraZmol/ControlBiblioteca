@@ -80,6 +80,9 @@ namespace ControlBiblioteca.Client.Services
                 progreso.Report(Paso.Inicio("Preparando directorio de instalación…"));
                 Directory.CreateDirectory(diag.RutaInstalacion);
                 Directory.CreateDirectory(Path.Combine(diag.RutaInstalacion, "Backups"));
+                // Dar permisos de escritura al grupo Users para que el auto-updater
+                // (que corre sin admin) pueda reemplazar el exe durante actualizaciones.
+                OtorgarPermisosEscritura(diag.RutaInstalacion, progreso);
                 progreso.Report(Paso.Ok("Directorios listos."));
 
                 // ── FASE 3: Copia de archivos ─────────────────────────────────────
@@ -429,6 +432,33 @@ namespace ControlBiblioteca.Client.Services
             catch { }
 
             return count;
+        }
+
+        private static void OtorgarPermisosEscritura(string ruta, IProgress<Paso> progreso)
+        {
+            // icacls otorga al grupo Users permisos de modificación (M) heredables.
+            // Necesario para que el auto-updater (proceso sin admin) pueda reemplazar el exe.
+            try
+            {
+                var psi = new ProcessStartInfo(
+                    "icacls.exe",
+                    $"\"{ruta}\" /grant *S-1-5-32-545:(OI)(CI)M /T /Q")
+                {
+                    UseShellExecute        = false,
+                    CreateNoWindow         = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true
+                };
+                using var p = Process.Start(psi);
+                p?.WaitForExit(10_000);
+                progreso.Report(p?.ExitCode == 0
+                    ? Paso.Ok("Permisos de escritura otorgados al usuario kiosco.")
+                    : Paso.Aviso("icacls: no se pudieron ajustar permisos (continuando)."));
+            }
+            catch
+            {
+                progreso.Report(Paso.Aviso("icacls no disponible — permisos sin ajustar."));
+            }
         }
 
         private static void RunCmd(string cmd, string args)
