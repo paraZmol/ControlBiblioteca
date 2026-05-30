@@ -14,3 +14,7 @@ publish/
 
 # Base de Datos (si aplica)
 data/*.db
+
+# Variables de entorno — nunca subir al repo
+server/.env
+.env
