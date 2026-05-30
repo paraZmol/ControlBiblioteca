@@ -17,6 +17,18 @@ namespace ControlBiblioteca.Client
         private static Mutex? _mutex;
         private static bool _esDuenoMutex;
 
+        // ── Log de arranque / crash ──────────────────────────────────────────────
+        private static readonly string _crashLog = Path.Combine(
+            Path.GetPathRoot(Environment.SystemDirectory) ?? "C:\\",
+            "SistemaBiblioteca", "crash.log");
+
+        internal static void AppLog(string msg)
+        {
+            string linea = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [App] {msg}";
+            Debug.WriteLine(linea);
+            try { File.AppendAllText(_crashLog, linea + Environment.NewLine); } catch { }
+        }
+
         // ── Bloqueo pre-ventana ───────────────────────────────────────────────────
         // El constructor estático es invocado por el CLR antes de que se cree
         // cualquier instancia y antes de Application_Startup.
@@ -49,28 +61,41 @@ namespace ControlBiblioteca.Client
 
         private void Application_Startup(object sender, StartupEventArgs e)
         {
+            // Evitar cierres automáticos e indeseados por WPF al cerrar ventanas temporales (ej: splash, diálogos).
+            // La aplicación solo terminará cuando invoquemos explícitamente Environment.Exit o Current.Shutdown.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+            AppLog($"=== INICIO proceso PID={Environment.ProcessId} ===");
+
             // ── PRIMERO: bloquear antes de cualquier ventana ──────────────────────
             // Cubre la brecha entre el login de Windows y que el kiosco cargue.
             Security.Bloquear();
+            AppLog("Security.Bloquear() OK");
 
             // ── Instancia única ───────────────────────────────────────────────────
             _mutex = new Mutex(true, "Global\\UNASAM_Biblioteca_Kiosco", out bool createdNew);
             _esDuenoMutex = createdNew;
+            AppLog($"Mutex createdNew={createdNew}");
             if (!createdNew)
             {
-                // Segunda instancia ya corriendo — salir silenciosamente sin liberar
+                AppLog("Segunda instancia detectada — saliendo.");
                 Security.Desbloquear();
                 Current.Shutdown();
                 return;
             }
 
             // ── ¿Necesita instalación? ────────────────────────────────────────────
-            if (InstaladorKiosco.EsNecesario())
+            bool necesitaInstal = InstaladorKiosco.EsNecesario();
+            AppLog($"InstaladorKiosco.EsNecesario()={necesitaInstal}");
+            if (necesitaInstal)
             {
-                Security.Desbloquear(); // instalador no debe bloquear el escritorio
+                bool esAdmin = EsAdministrador();
+                AppLog($"Instalación requerida. EsAdministrador={esAdmin}");
+                Security.Desbloquear();
 
-                if (!EsAdministrador())
+                if (!esAdmin)
                 {
+                    AppLog("No es admin — relanzando con runas y saliendo.");
                     try
                     {
                         Process.Start(new ProcessStartInfo(
@@ -80,7 +105,7 @@ namespace ControlBiblioteca.Client
                             UseShellExecute = true
                         });
                     }
-                    catch { }
+                    catch (Exception ex) { AppLog($"runas falló: {ex.Message}"); }
 
                     LiberarMutex();
                     Environment.Exit(0);
@@ -94,11 +119,14 @@ namespace ControlBiblioteca.Client
             }
 
             // ── Modo kiosco normal ────────────────────────────────────────────────
+            AppLog("Modo kiosco normal. Aplicando optimizaciones...");
             StartupConfigurator.AplicarOptimizacionesUsuario();
             RegistrarManejadoresDeError();
+            AppLog("Manejadores de error registrados.");
 
             // ── IDENTIFICACIÓN DE TERMINAL ───────────────────────────────────────
             var config = KioscoConfig.Leer();
+            AppLog($"Config leída: ServerIp={config.ServerIp} ServerPort={config.ServerPort} TerminalName='{config.TerminalName}'");
             if (string.IsNullOrWhiteSpace(config.TerminalName))
             {
                 Security.Desbloquear(); // Permitir interacción con el diálogo
@@ -123,9 +151,11 @@ namespace ControlBiblioteca.Client
                 }
             }
 
+            AppLog("Iniciando NetworkEnsurer, UIWatchdog y Backdoor...");
             IniciarNetworkEnsurer();
             IniciarUIWatchdog();
             _backdoor = new MantenimientoBackdoor(this);
+            AppLog("Servicios internos iniciados.");
 
             // ── AUTO-ACTUALIZACIÓN ────────────────────────────────────────────────
             // Verifica si hay una versión nueva antes de mostrar el kiosco.
@@ -142,10 +172,19 @@ namespace ControlBiblioteca.Client
                     AutoUpdater.OnEstado += msg =>
                         Dispatcher.BeginInvoke(() => splashUpdate.ActualizarMensaje(msg));
 
-                    hayUpdate = await AutoUpdater.VerificarYActualizarAsync(
+                    // Timeout de 30s: si el update no completa, arrancar kiosco normal
+                    var updateTask = AutoUpdater.VerificarYActualizarAsync(
                         config.ServerIp, config.ServerPort);
+                    hayUpdate = await updateTask.WaitAsync(TimeSpan.FromSeconds(30));
                 }
-                catch { /* si falla, arrancar normal */ }
+                catch (TimeoutException)
+                {
+                    AppLog("Auto-update timeout (30s) — arrancando kiosco normal.");
+                }
+                catch (Exception ex)
+                {
+                    AppLog($"Auto-update falló: {ex.Message} — arrancando kiosco normal.");
+                }
 
                 if (hayUpdate)
                 {
@@ -161,10 +200,27 @@ namespace ControlBiblioteca.Client
                 // Sin update o falló — continuar con el kiosco normal
                 Dispatcher.Invoke(() =>
                 {
-                    splashUpdate.Close();
-                    var mainWindow = new MainWindow();
-                    MainWindow = mainWindow;
-                    mainWindow.Show();
+                    AppLog("Creando MainWindow...");
+                    try
+                    {
+                        AppLog("new MainWindow() — inicio");
+                        var mainWindow = new MainWindow();
+                        AppLog("new MainWindow() — OK, llamando Show()");
+                        MainWindow = mainWindow;
+                        mainWindow.Show();
+                        AppLog("MainWindow.Show() — OK");
+
+                        // Cerrar splashUpdate DESPUÉS de mostrar la ventana principal
+                        // para evitar que el recuento de ventanas de WPF caiga a cero
+                        // y dispare ShutdownMode.OnLastWindowClose de manera silenciosa.
+                        AppLog("Cerrando splash...");
+                        splashUpdate.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLog($"CRASH en new MainWindow() o Show(): {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                        throw; // re-lanzar para que DispatcherUnhandledException lo capture también
+                    }
                 });
             });
             return; // el flujo continúa en el Task.Run
@@ -273,7 +329,7 @@ namespace ControlBiblioteca.Client
         public void EscaparAExplorer(string razon)
         {
             CerrandoApp = true;
-            Debug.WriteLine($"[App] EscaparAExplorer — {razon}");
+            AppLog($"!!! EscaparAExplorer — razón: {razon}");
             Security.Desbloquear();
             Environment.Exit(0);
         }
@@ -289,9 +345,9 @@ namespace ControlBiblioteca.Client
             AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             {
                 string msg = args.ExceptionObject?.ToString() ?? "Error desconocido";
-                Debug.WriteLine($"[Crash] {msg}");
-                MessageBox.Show(msg, "Error Fatal — ControlBiblioteca",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                AppLog($"!!! UnhandledException (isTerminating={args.IsTerminating}):\n{msg}");
+                try { MessageBox.Show(msg, "Error Fatal — ControlBiblioteca",
+                    MessageBoxButton.OK, MessageBoxImage.Error); } catch { }
                 EscaparAExplorer("unhandled_exception");
             };
 
@@ -299,10 +355,16 @@ namespace ControlBiblioteca.Client
             {
                 args.Handled = true;
                 string msg = args.Exception.ToString();
-                Debug.WriteLine($"[Dispatcher] {msg}");
-                MessageBox.Show(msg, "Error — ControlBiblioteca",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                AppLog($"!!! DispatcherUnhandledException:\n{msg}");
+                try { MessageBox.Show(msg, "Error — ControlBiblioteca",
+                    MessageBoxButton.OK, MessageBoxImage.Error); } catch { }
                 EscaparAExplorer("dispatcher_exception");
+            };
+
+            TaskScheduler.UnobservedTaskException += (_, args) =>
+            {
+                args.SetObserved();
+                AppLog($"!!! UnobservedTaskException:\n{args.Exception}");
             };
         }
 
