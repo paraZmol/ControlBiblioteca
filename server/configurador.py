@@ -143,7 +143,7 @@ async def crear_tablas_y_catalogo(cfg):
                 username="admin",
                 hashed_password=hashear_password("admin123"),
                 nombre_completo="Administrador",
-                rol="admin",
+                rol="superadmin",
             ))
         await db.commit()
 

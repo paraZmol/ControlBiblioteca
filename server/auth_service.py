@@ -11,7 +11,16 @@ from database import get_db
 from models import Usuario
 
 # Configuración JWT
-SECRET_KEY = os.getenv("SECRET_KEY", "clave-secreta-cambiar-en-produccion")
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+if not SECRET_KEY:
+    import secrets as _secrets
+    SECRET_KEY = _secrets.token_hex(32)
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "SECRET_KEY no configurada en .env — se generó una temporal. "
+        "Los tokens JWT se invalidarán al reiniciar el servidor. "
+        "Configure SECRET_KEY en server/.env para persistencia."
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8 horas
 

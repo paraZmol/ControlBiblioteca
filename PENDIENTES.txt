@@ -1,0 +1,67 @@
+PENDIENTES — Control Biblioteca UNASAM
+Fecha última actualización: 2026-05-15
+=========================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DEPLOY EN BIBLIOTECA (hacer antes de poner en producción)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[ ] Ejecutar migración de roles en la BD de producción:
+      UPDATE usuarios SET rol='superadmin' WHERE rol='admin';
+      UPDATE usuarios SET rol='admin'      WHERE rol='encargado';
+    (El servidor local ya fue migrado el 14/05/2026)
+
+[ ] Verificar que server/.env apunta a la BD correcta en producción
+    (actualmente: mysql+asyncmy://root:impo2010@localhost:3306/biblioteca_unasam)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SEGURIDAD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[ ] WebSocket /ws/admin sin autenticación [CRÍTICO]
+    — Confirmar en red real si ws.send() puede bloquear terminales
+      sin estar logueado (prueba pendiente cuando haya PCs conectadas)
+    — Una vez confirmado: agregar validación de JWT token al conectar
+    — Archivo: server/main.py — endpoint /ws/admin
+    — Ver detalle completo en VULNERABILIDADES.txt
+
+[ ] Endpoints públicos del kiosco — considerar rate limiting [BAJO]
+    — POST /api/alumnos/validar
+    — POST /api/sesiones/iniciar
+    — POST /api/sesiones/{id}/cerrar
+    — GET  /api/admin/bans/check/{dni}
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MEJORAS PENDIENTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[ ] Considerar migrar hash de contraseña Nivel 2 de SHA-256 a bcrypt
+    — SHA-256 sin sal es más vulnerable a ataques de diccionario
+    — Requiere cambiar lógica de verificación en main.py y en las
+      terminales cliente si verifican localmente
+
+[ ] Probar panel de Configuración con usuario rol=admin (no superadmin)
+    — Verificar que la pestaña queda oculta en el frontend
+    — Verificar que los endpoints devuelven 403 si se llama directamente
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPLETADO RECIENTEMENTE (referencia)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[x] Migración completa de SQLite a MySQL
+[x] Renombrar roles: admin→superadmin, encargado→admin
+[x] Sistema de incidencias (backend + frontend)
+[x] Panel de Configuración para cambiar contraseñas
+[x] Corregir exportar-excel/pdf: ahora exigen rol superadmin
+[x] Corregir nivel2-hash: ahora exige rol superadmin
+[x] Corregir password-admin: ahora exige rol superadmin
+[x] Historial: quitar pills/globo de columnas facultad y actividad
+[x] Consola de actividades: texto más oscuro en modo claro
+[x] Consola de actividades: altura aumentada (480px)
+[x] Documentar vulnerabilidades en VULNERABILIDADES.txt
+[x] Historial: filtro por mes y año específico (+ rango de fechas puntual)
+[x] Gráficos: filtro por mes, año y rango de fechas puntual

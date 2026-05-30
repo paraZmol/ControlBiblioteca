@@ -1,0 +1,72 @@
+2026-05-30 23:20:19.685 [App] === INICIO proceso PID=8456 ===
+2026-05-30 23:20:19.696 [App] Security.Bloquear() OK
+2026-05-30 23:20:19.696 [App] Mutex createdNew=True
+2026-05-30 23:20:19.803 [App] InstaladorKiosco.EsNecesario()=False
+2026-05-30 23:20:19.803 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-05-30 23:20:19.804 [App] Manejadores de error registrados.
+2026-05-30 23:20:19.839 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName=''
+2026-05-30 23:21:19.219 [App] === INICIO proceso PID=5132 ===
+2026-05-30 23:21:20.124 [App] Security.Bloquear() OK
+2026-05-30 23:21:20.130 [App] Mutex createdNew=True
+2026-05-30 23:21:22.154 [App] InstaladorKiosco.EsNecesario()=False
+2026-05-30 23:21:22.154 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-05-30 23:21:22.156 [App] Manejadores de error registrados.
+2026-05-30 23:21:22.387 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='REZE'
+2026-05-30 23:21:22.388 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-05-30 23:21:25.899 [App] Servicios internos iniciados.
+2026-05-30 23:21:26.588 [App] Cerrando splash, creando MainWindow...
+2026-05-30 23:21:26.632 [App] new MainWindow() — inicio
+2026-05-30 23:21:26.821 [App] new MainWindow() — OK, llamando Show()
+2026-05-30 23:21:26.835 [App] MainWindow.Show() — OK
+2026-05-30 23:22:10.929 [App] === INICIO proceso PID=10568 ===
+2026-05-30 23:22:10.942 [App] Security.Bloquear() OK
+2026-05-30 23:22:10.943 [App] Mutex createdNew=True
+2026-05-30 23:22:11.002 [App] InstaladorKiosco.EsNecesario()=False
+2026-05-30 23:22:11.003 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-05-30 23:22:11.004 [App] Manejadores de error registrados.
+2026-05-30 23:22:11.040 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='REZE'
+2026-05-30 23:22:11.040 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-05-30 23:22:11.172 [App] Servicios internos iniciados.
+2026-05-30 23:22:11.523 [App] Cerrando splash, creando MainWindow...
+2026-05-30 23:22:11.553 [App] new MainWindow() — inicio
+2026-05-30 23:22:11.656 [App] new MainWindow() — OK, llamando Show()
+2026-05-30 23:22:11.656 [App] MainWindow.Show() — OK
+2026-05-30 23:23:10.865 [App] === INICIO proceso PID=2588 ===
+2026-05-30 23:23:10.875 [App] Security.Bloquear() OK
+2026-05-30 23:23:10.876 [App] Mutex createdNew=True
+2026-05-30 23:23:10.919 [App] InstaladorKiosco.EsNecesario()=False
+2026-05-30 23:23:10.920 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-05-30 23:23:10.921 [App] Manejadores de error registrados.
+2026-05-30 23:23:10.952 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='REZE'
+2026-05-30 23:23:10.953 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-05-30 23:23:11.037 [App] Servicios internos iniciados.
+2026-05-30 23:23:11.355 [App] Cerrando splash, creando MainWindow...
+2026-05-30 23:23:11.383 [App] new MainWindow() — inicio
+2026-05-30 23:23:11.479 [App] new MainWindow() — OK, llamando Show()
+2026-05-30 23:23:11.479 [App] MainWindow.Show() — OK
+2026-05-30 23:24:10.887 [App] === INICIO proceso PID=1936 ===
+2026-05-30 23:24:10.904 [App] Security.Bloquear() OK
+2026-05-30 23:24:10.905 [App] Mutex createdNew=True
+2026-05-30 23:24:10.973 [App] InstaladorKiosco.EsNecesario()=False
+2026-05-30 23:24:10.974 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-05-30 23:24:10.975 [App] Manejadores de error registrados.
+2026-05-30 23:24:11.022 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='REZE'
+2026-05-30 23:24:11.023 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-05-30 23:24:11.124 [App] Servicios internos iniciados.
+2026-05-30 23:24:11.455 [App] Cerrando splash, creando MainWindow...
+2026-05-30 23:24:11.488 [App] new MainWindow() — inicio
+2026-05-30 23:24:11.637 [App] new MainWindow() — OK, llamando Show()
+2026-05-30 23:24:11.639 [App] MainWindow.Show() — OK
+2026-05-30 23:25:10.963 [App] === INICIO proceso PID=6356 ===
+2026-05-30 23:25:10.975 [App] Security.Bloquear() OK
+2026-05-30 23:25:10.977 [App] Mutex createdNew=True
+2026-05-30 23:25:11.025 [App] InstaladorKiosco.EsNecesario()=False
+2026-05-30 23:25:11.025 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-05-30 23:25:11.026 [App] Manejadores de error registrados.
+2026-05-30 23:25:11.060 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='REZE'
+2026-05-30 23:25:11.060 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-05-30 23:25:11.148 [App] Servicios internos iniciados.
+2026-05-30 23:25:11.462 [App] Cerrando splash, creando MainWindow...
+2026-05-30 23:25:11.495 [App] new MainWindow() — inicio
+2026-05-30 23:25:11.594 [App] new MainWindow() — OK, llamando Show()
+2026-05-30 23:25:11.595 [App] MainWindow.Show() — OK

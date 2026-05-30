@@ -1,385 +1,1404 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control Biblioteca UNASAM - Panel de Administración</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: { extend: { colors: {
+                slate: { 850: '#151e2e', 900: '#0f172a', 950: '#020617' },
+                cyan:  { 400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2' }
+            }}}
+        }
+    </script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <link rel="stylesheet" href="static/css/style.css">
+    <style>
+        ::-webkit-scrollbar { width:8px; height:8px; }
+        .dark ::-webkit-scrollbar-track { background:#0f172a; }
+        ::-webkit-scrollbar-track { background:#f1f5f9; }
+        .dark ::-webkit-scrollbar-thumb { background:#334155; border-radius:4px; }
+        ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:4px; }
+        #dashboard { background: inherit; }
+        #tablaSesiones tbody tr:hover { background: rgba(51,65,85,0.15); }
+        .dark #tablaSesiones tbody tr:hover { background: rgba(51,65,85,0.25); }
+        .btn-periodo-activo { background:#0891b2 !important; color:#fff !important; border-color:#0891b2 !important; }
+        .th-sortable { cursor:pointer; }
+        .th-sortable:hover { color:#22d3ee; }
+        /* Sidebar nav activo */
+        .nav-item-active {
+            background: rgba(6,182,212,0.1);
+            color: #22d3ee;
+            border-color: rgba(6,182,212,0.2);
+        }
+        html:not(.dark) .nav-item-active {
+            background: #ecfeff;
+            color: #0891b2;
+            border-color: #a5f3fc;
+        }
+    </style>
 </head>
-<body>
-    <!-- Login -->
-    <div id="loginPanel" class="login-fullscreen">
-        <div class="login-bg"></div>
-        <main class="login-main">
-            <!-- Logo / Identidad -->
-            <div class="login-header">
-                <div class="login-icon-wrap">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M12 2L3 7V12C3 17.5 7 21 12 22C17 21 21 17.5 21 12V7L12 2Z" stroke="#00B4DB" stroke-width="2" fill="rgba(0,180,219,0.15)"/>
-                        <path d="M12 6V12L16 14" stroke="#00B4DB" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
+<body class="text-slate-700 dark:text-slate-300 font-sans antialiased transition-colors duration-300" style="margin:0;padding:0;overflow:hidden;height:100vh">
+
+<!-- LOGIN (sin cambios) -->
+<div id="loginPanel" class="login-fullscreen">
+    <div class="login-bg"></div>
+    <main class="login-main">
+        <div class="login-header">
+            <div class="login-icon-wrap">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 2L3 7V12C3 17.5 7 21 12 22C17 21 21 17.5 21 12V7L12 2Z" stroke="#00B4DB" stroke-width="2" fill="rgba(0,180,219,0.15)"/>
+                    <path d="M12 6V12L16 14" stroke="#00B4DB" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <h1 class="login-title">Control Biblioteca</h1>
+            <p class="login-subtitle">UNASAM &mdash; PANEL DE ADMINISTRACIÓN</p>
+        </div>
+        <div class="login-card">
+            <div class="login-field">
+                <label class="login-label">Nombre de Usuario</label>
+                <div class="login-input-wrap">
+                    <span class="login-input-icon">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                        </svg>
+                    </span>
+                    <input type="text" id="username" placeholder="Usuario de red" class="login-input" autocomplete="username">
                 </div>
-                <h1 class="login-title">Control Biblioteca</h1>
-                <p class="login-subtitle">UNASAM &mdash; PANEL DE ADMINISTRACIÓN</p>
+            </div>
+            <div class="login-field">
+                <label class="login-label">Contraseña</label>
+                <div class="login-input-wrap">
+                    <span class="login-input-icon">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                        </svg>
+                    </span>
+                    <input type="password" id="password" placeholder="••••••••" class="login-input" autocomplete="current-password">
+                </div>
+            </div>
+            <button id="btnLogin" class="login-btn" onclick="login()">Iniciar Sesión</button>
+            <p id="loginError" class="error login-error"></p>
+            <div class="login-footer"><p>© 2026 UNASAM &mdash; Dirección de Biblioteca Central</p></div>
+        </div>
+    </main>
+</div>
+
+<!-- DASHBOARD con Sidebar -->
+<div id="dashboard" class="dashboard flex flex-row h-screen" style="display:none">
+
+    <!-- Overlay para cerrar sidebar en móvil -->
+    <div id="sidebarOverlay" class="sidebar-overlay" onclick="cerrarSidebar()"></div>
+
+    <!-- ══ SIDEBAR ══ -->
+    <aside id="sidebar" class="sidebar w-60 flex-shrink-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between transition-colors duration-300 z-20">
+        <!-- Logo -->
+        <div>
+            <div class="h-16 flex items-center px-5 border-b border-slate-200 dark:border-slate-800">
+                <div class="flex items-center gap-3">
+                    <i class="ph ph-books text-cyan-600 dark:text-cyan-400 text-2xl"></i>
+                    <div>
+                        <h1 class="text-base font-black text-slate-900 dark:text-white leading-tight">UNASAM</h1>
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 font-medium tracking-widest uppercase">Biblioteca</p>
+                    </div>
+                </div>
             </div>
 
-            <!-- Tarjeta glass -->
-            <div class="login-card">
-                <div class="login-field">
-                    <label class="login-label">Nombre de Usuario</label>
-                    <div class="login-input-wrap">
-                        <span class="login-input-icon">
-                            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
-                            </svg>
-                        </span>
-                        <input type="text" id="username" placeholder="Usuario de red" class="login-input" autocomplete="username">
+            <!-- Nav -->
+            <nav class="p-3 space-y-1">
+                <p class="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2 mt-1">Menú Principal</p>
+
+                <button onclick="switchTab('monitoreo')" id="nav-monitoreo"
+                    class="nav-item nav-item-active w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold transition-all border border-transparent text-sm">
+                    <i class="ph ph-computer-tower text-lg"></i> Monitoreo en Vivo
+                </button>
+
+                <button onclick="switchTab('historial')" id="nav-historial"
+                    class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-transparent text-sm">
+                    <i class="ph ph-list-dashes text-lg"></i> Historial de Sesiones
+                </button>
+
+<button onclick="switchTab('basedatos')" id="nav-basedatos"
+                    class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-transparent text-sm">
+                    <i class="ph ph-database text-lg"></i> Base de Datos
+                </button>
+
+                <button onclick="switchTab('incidencias')" id="nav-incidencias"
+                    class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-transparent text-sm">
+                    <i class="ph ph-warning-circle text-lg"></i> Incidencias
+                    <span id="incidencias-badge" class="ml-auto text-[10px] font-bold bg-amber-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none" style="display:none"></span>
+                </button>
+
+                <button onclick="switchTab('actividad')" id="nav-actividad"
+                    class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-transparent text-sm">
+                    <i class="ph ph-activity text-lg"></i> Actividad
+                    <span id="actividad-badge" class="ml-auto text-[10px] font-bold bg-red-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none" style="display:none"></span>
+                </button>
+
+                <button onclick="switchTab('configuracion')" id="nav-configuracion"
+                    class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-transparent text-sm">
+                    <i class="ph ph-gear text-lg"></i> Configuración
+                </button>
+            </nav>
+        </div>
+
+        <!-- Sidebar Bottom -->
+        <div class="p-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+            <!-- Server status -->
+            <div class="bg-slate-100 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                <div class="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    <i class="ph ph-hard-drives text-xs"></i> Servidor Local
+                </div>
+                <div class="mb-2">
+                    <p class="text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">IP Servidor:</p>
+                    <p id="serverIpBadge" class="server-badge text-sm font-mono font-bold text-slate-900 dark:text-white">...</p>
+                </div>
+                <span id="wsStatus" class="ws-badge off inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border font-bold w-max transition-colors">
+                    <span class="relative flex h-1.5 w-1.5">
+                        <span class="ws-ping animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"></span>
+                        <span class="ws-dot relative inline-flex rounded-full h-1.5 w-1.5"></span>
+                    </span>
+                    <span class="ws-label">WS OFF</span>
+                </span>
+            </div>
+
+            <!-- Zoom control -->
+            <div class="zoom-bar-sidebar">
+                <div class="zoom-bar-lbl">
+                    <i class="ph ph-magnifying-glass"></i> Zoom
+                    <span style="font-size:9px;color:var(--t3);font-weight:400;letter-spacing:.06em">Ctrl + ±</span>
+                </div>
+                <div class="zoom-bar-ctrl">
+                    <button class="zoom-bar-btn" id="zoom-out" onclick="ajustarZoom(-1)" title="Disminuir (Ctrl + -)">−</button>
+                    <button class="zoom-bar-val" id="zoomLabel" onclick="resetearZoom()" title="Click para restablecer al 100%">100%</button>
+                    <button class="zoom-bar-btn" id="zoom-in"  onclick="ajustarZoom(+1)" title="Aumentar (Ctrl + +)">+</button>
+                </div>
+            </div>
+
+            <!-- User + actions -->
+            <div class="flex items-center justify-between px-1">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-full bg-cyan-100 dark:bg-cyan-900/50 flex items-center justify-center text-cyan-700 dark:text-cyan-300 font-black text-sm">
+                        <i class="ph ph-user text-sm"></i>
+                    </div>
+                    <div>
+                        <p id="usuarioActual" class="text-xs font-bold text-slate-900 dark:text-white"></p>
+                        <button id="btnRol" onclick="toggleRol()"
+                            class="btn-rol text-[10px] text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors font-medium"></button>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1">
+                    <button id="btnTema" onclick="toggleTema()" title="Cambiar tema"
+                        class="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition-colors">
+                        <i id="iconTema" class="ph ph-sun text-base"></i>
+                    </button>
+                    <button onclick="logout()" title="Cerrar Sesión"
+                        class="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
+                        <i class="ph ph-sign-out text-base"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ══ ÁREA PRINCIPAL ══ -->
+    <div class="flex-1 flex flex-col" style="min-height:0;overflow:hidden">
+
+        <!-- Top Header — solo visible en móvil para hamburger -->
+        <header class="top-header-mobile">
+            <button class="btn-hamburger" onclick="abrirSidebar()" title="Menú">
+                <i class="ph ph-list"></i>
+            </button>
+            <span id="pageTitle" class="top-header-title"></span>
+        </header>
+
+        <!-- Contenido scrollable -->
+        <main class="flex-1 overflow-y-auto" style="padding:22px 28px 40px;min-height:0">
+            <div class="max-w-screen-2xl mx-auto">
+
+                <!-- ══ TAB: MONITOREO ══ -->
+                <div id="tab-monitoreo" class="mon-view">
+
+                    <!-- Page header -->
+                    <div class="mon-ph">
+                        <div class="mon-ph-left">
+                            <div class="mon-ph-heading">
+                                Monitoreo en Vivo
+                                <span class="mon-live-chip">
+                                    <span class="mon-live-dot"></span> En Vivo
+                                </span>
+                            </div>
+                            <div class="mon-ph-sub">PCs conectadas · actualizado en tiempo real</div>
+                        </div>
+                        <button class="mon-btn-block-all" onclick="bloquearTodas()">
+                            <i class="ph ph-lock"></i> Bloquear Todas
+                        </button>
+                    </div>
+
+                    <!-- KPI CARDS -->
+                    <div id="seccionStats" class="mon-stats">
+                        <div class="mon-stat">
+                            <div class="mon-stat-ghost"><i class="ph ph-computer-tower"></i></div>
+                            <div class="mon-stat-ico"><i class="ph ph-computer-tower"></i></div>
+                            <div class="mon-stat-lbl">Total Equipos</div>
+                            <div class="mon-stat-val" id="totalTerminales">0</div>
+                            <div class="mon-stat-note">PCs conectadas</div>
+                        </div>
+                        <div class="mon-stat ok">
+                            <div class="mon-stat-ghost"><i class="ph ph-activity"></i></div>
+                            <div class="mon-stat-ico"><i class="ph ph-activity"></i></div>
+                            <div class="mon-stat-lbl">Sesiones Activas</div>
+                            <div class="mon-stat-val" id="terminalesActivas">0</div>
+                            <div class="mon-stat-note">En curso ahora</div>
+                        </div>
+                        <div class="mon-stat">
+                            <div class="mon-stat-ghost"><i class="ph ph-clock-counter-clockwise"></i></div>
+                            <div class="mon-stat-ico"><i class="ph ph-clock-counter-clockwise"></i></div>
+                            <div class="mon-stat-lbl">Sesiones Hoy</div>
+                            <div class="mon-stat-val" id="sesionesActivas">0</div>
+                            <div class="mon-stat-note" id="monFechaHoy"></div>
+                        </div>
+                        <div class="mon-stat wrn">
+                            <div class="mon-stat-ghost"><i class="ph ph-student"></i></div>
+                            <div class="mon-stat-ico"><i class="ph ph-student"></i></div>
+                            <div class="mon-stat-lbl">Alumnos Registrados</div>
+                            <div class="mon-stat-val" id="totalAlumnos">0</div>
+                            <div class="mon-stat-note">Total en el sistema</div>
+                        </div>
+                    </div>
+
+                    <!-- EQUIPOS -->
+                    <div class="mon-section-card" id="seccionEquipos">
+                        <div class="mon-section-head">
+                            <div class="mon-section-ttl">
+                                <i class="ph ph-computer-tower"></i> PCs conectadas
+                            </div>
+                            <span class="mon-section-badge" id="badgeEquipos"></span>
+                        </div>
+                        <div class="mon-section-body">
+                            <div id="terminalesGrid" class="terminales-grid"></div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="login-field">
-                    <label class="login-label">Contraseña</label>
-                    <div class="login-input-wrap">
-                        <span class="login-input-icon">
-                            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-                            </svg>
-                        </span>
-                        <input type="password" id="password" placeholder="••••••••" class="login-input" autocomplete="current-password">
+
+                <!-- ══ TAB: HISTORIAL ══ -->
+                <div id="tab-historial" style="display:none" class="hist-view">
+
+                    <!-- Page header -->
+                    <div class="hist-ph">
+                        <div class="hist-ph-left">
+                            <div class="hist-ph-heading">Historial de Sesiones</div>
+                            <div class="hist-ph-sub">Registro completo de sesiones de los equipos de la biblioteca</div>
+                        </div>
+                        <span class="section-badge" id="contadorSesiones"></span>
+                    </div>
+
+                    <!-- Toolbar -->
+                    <div class="hist-toolbar">
+                        <div class="hist-chips">
+                            <button class="hist-chip" id="btn-hoy"  data-periodo="dia"  onclick="setPeriodo('dia')">Hoy</button>
+                            <button class="hist-chip" id="btn-mes"  data-periodo="mes"  onclick="setPeriodo('mes')">Mes</button>
+                            <button class="hist-chip hist-chip-on" id="btn-anio" data-periodo="anio" onclick="setPeriodo('anio')">Año</button>
+                            <button class="hist-chip" id="btn-todo" data-periodo="todo" onclick="setPeriodo('todo')">Todo</button>
+                        </div>
+                        <div class="hist-search">
+                            <i class="ph ph-magnifying-glass hist-search-ico"></i>
+                            <input id="filtroSearch" type="text" placeholder="Buscar nombre, DNI o código…" oninput="aplicarFiltros()">
+                        </div>
+                        <select id="filtroActividad" class="hist-select" onchange="aplicarFiltros()">
+                            <option value="">Todas las actividades</option>
+                            <option value="Investigación">Investigación</option>
+                            <option value="Tarea">Tarea</option>
+                            <option value="Lectura">Lectura</option>
+                            <option value="Examen">Examen</option>
+                            <option value="Lectura de libros digitales">Lectura de libros digitales</option>
+                            <option value="Uso de base de datos">Uso de base de datos</option>
+                            <option value="Trabajos académicos">Trabajos académicos</option>
+                            <option value="Uso de AutoCAD y/o Civil 3D">Uso de AutoCAD y/o Civil 3D</option>
+                            <option value="Clases virtuales">Clases virtuales</option>
+                            <option value="Otros">Otros</option>
+                        </select>
+                        <div class="hist-tb-actions">
+                            <button class="btn-act ghost" id="btnFiltrosAvanzados" onclick="toggleFiltrosAvanzados()">
+                                <i class="ph ph-funnel"></i> Filtros
+                            </button>
+                            <button class="btn-act excel" onclick="exportarExcel()">
+                                <i class="ph ph-file-xls"></i> Excel
+                            </button>
+                            <button class="btn-act pdf" onclick="exportarPdfFiltrado()">
+                                <i class="ph ph-file-pdf"></i> PDF
+                            </button>
+                            <button class="btn-act import" id="btnImportarExcel" onclick="abrirImportarExcel()" style="display:none">
+                                <i class="ph ph-upload-simple"></i> Importar Historial
+                            </button>
+                            <input id="inputImportarExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="ejecutarImportacion(this)">
+                        </div>
+                    </div>
+
+                    <!-- Filtros avanzados (colapsable) -->
+                    <div class="hist-adv-filters" id="histAdvFilters">
+                        <div class="af-field">
+                            <label class="af-lbl">Estado</label>
+                            <select class="hist-select" id="filtroEstado" onchange="aplicarFiltros()" style="width:100%;min-width:0">
+                                <option value="">Todos</option>
+                                <option value="activa">Activa</option>
+                                <option value="cerrada">Cerrada</option>
+                            </select>
+                        </div>
+                        <div class="af-field">
+                            <label class="af-lbl">Mes</label>
+                            <select class="hist-select af-input" id="filtroMes" onchange="aplicarFiltroMesAnio()" style="min-width:110px">
+                                <option value="">— cualquiera —</option>
+                                <option value="01">Enero</option>
+                                <option value="02">Febrero</option>
+                                <option value="03">Marzo</option>
+                                <option value="04">Abril</option>
+                                <option value="05">Mayo</option>
+                                <option value="06">Junio</option>
+                                <option value="07">Julio</option>
+                                <option value="08">Agosto</option>
+                                <option value="09">Septiembre</option>
+                                <option value="10">Octubre</option>
+                                <option value="11">Noviembre</option>
+                                <option value="12">Diciembre</option>
+                            </select>
+                        </div>
+                        <div class="af-field">
+                            <label class="af-lbl">Año</label>
+                            <select class="hist-select af-input" id="filtroAnio" onchange="aplicarFiltroMesAnio()" style="min-width:90px">
+                                <option value="">— cualquiera —</option>
+                            </select>
+                        </div>
+                        <div class="af-field">
+                            <label class="af-lbl">Desde</label>
+                            <input type="date" id="rangoDesde" onchange="limpiarMesAnio(); aplicarFiltros()" class="af-input">
+                        </div>
+                        <div class="af-field">
+                            <label class="af-lbl">Hasta</label>
+                            <input type="date" id="rangoHasta" onchange="limpiarMesAnio(); aplicarFiltros()" class="af-input">
+                        </div>
+                        <div class="af-field" style="justify-content:flex-end">
+                            <button class="af-clear" onclick="limpiarFiltrosAvanzados()">Limpiar filtros</button>
+                        </div>
+                    </div>
+
+                    <!-- Table card -->
+                    <div class="hist-table-card">
+                        <div class="hist-table-scroll">
+                            <table id="tablaSesiones" class="hist-tbl">
+                                <thead>
+                                    <tr>
+                                        <th class="th-sortable" onclick="ordenarPor('pc')" data-col="pc">PC <span class="sort-arrow"></span></th>
+                                        <th class="th-sortable" onclick="ordenarPor('estudiante')" data-col="estudiante">Estudiante <span class="sort-arrow"></span></th>
+                                        <th class="th-sortable" onclick="ordenarPor('dni')" data-col="dni">DNI <span class="sort-arrow"></span></th>
+                                        <th>Facultad</th>
+                                        <th class="th-sortable" onclick="ordenarPor('actividad')" data-col="actividad">Actividad <span class="sort-arrow"></span></th>
+                                        <th>Inicio</th>
+                                        <th>Salida</th>
+                                        <th class="th-sortable" onclick="ordenarPor('fecha')" data-col="fecha">Fecha <i class="ph ph-caret-down" style="font-size:10px;vertical-align:-1px;color:var(--a)"></i></th>
+                                        <th>Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sesionesBody"></tbody>
+                            </table>
+                        </div>
+                        <p id="sinSesiones" class="empty-msg" style="display:none">No hay sesiones registradas</p>
+                        <div id="paginacionSesiones" class="hist-tbl-foot"></div>
+                    </div>
+
+                </div>
+
+                <!-- ══ TAB: BASE DE DATOS (unificado) ══ -->
+                <div id="tab-basedatos" style="display:none">
+
+                    <!-- Sub-pestañas estilo navegador -->
+                    <div class="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-800">
+                        <button id="subtab-btn-estudiantes" onclick="switchSubtab('estudiantes')"
+                            class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-cyan-600 dark:text-cyan-400 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-student"></i> Estudiantes
+                        </button>
+                        <button id="subtab-btn-personal" onclick="switchSubtab('personal')"
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-identification-badge"></i> Personal Universitario
+                        </button>
+                    </div>
+
+                    <!-- Panel: Estudiantes -->
+                    <div id="subtab-estudiantes">
+                        <section id="seccionMaestro" class="section bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm transition-colors">
+                            <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                    <i class="ph ph-database text-cyan-600 dark:text-cyan-400"></i> Base de Datos de Usuarios del Centro de Cómputo
+                                </h3>
+                                <div class="flex gap-2 flex-wrap items-center">
+                                    <button onclick="abrirNuevoUsuario()" class="db-btn db-btn-new">
+                                        <i class="ph ph-user-plus"></i> Nuevo Usuario
+                                    </button>
+                                    <button onclick="exportarMaestroBackup()" class="db-btn db-btn-export">
+                                        <i class="ph ph-file-xls"></i> Exportar Excel
+                                    </button>
+                                    <label class="db-btn db-btn-import cursor-pointer">
+                                        <i class="ph ph-upload-simple"></i> Importar Excel
+                                        <input id="inputMaestroExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="importarMaestro(this)">
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="maestroResultado" style="display:none" class="maestro-resultado mb-4"></div>
+                            <div class="flex gap-3 mb-4 items-center flex-wrap">
+                                <div class="relative flex-1 min-w-52">
+                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm"></i>
+                                    <input id="maestroBuscar" type="text" placeholder="Buscar por nombre, DNI o código..."
+                                        class="input-filtro w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm rounded-lg pl-9 pr-4 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                                        oninput="buscarMaestro()">
+                                </div>
+                                <span id="maestroTotal" class="text-xs text-slate-500 dark:text-slate-400"></span>
+                            </div>
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                                <table class="tabla w-full text-left text-sm">
+                                    <thead>
+                                        <tr class="bg-slate-100 dark:bg-slate-950/50 text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                                            <th class="p-4 font-semibold" style="width:90px">DNI</th>
+                                            <th class="p-4 font-semibold">Nombre Completo</th>
+                                            <th class="p-4 font-semibold" style="width:110px">Código Univ.</th>
+                                            <th class="p-4 font-semibold">Facultad</th>
+                                            <th class="p-4 font-semibold">Escuela</th>
+                                            <th class="p-4 font-semibold" style="width:100px">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="maestroBody" class="divide-y divide-slate-100 dark:divide-slate-800/50"></tbody>
+                                </table>
+                            </div>
+                            <p id="sinMaestro" class="empty-msg text-center text-slate-400 dark:text-slate-600 py-8 text-sm" style="display:none">No hay registros en el maestro</p>
+                            <div id="maestroPaginacion" class="flex gap-1 justify-center mt-4 flex-wrap"></div>
+                        </section>
+                    </div>
+
+                    <!-- Panel: Personal Universitario -->
+                    <div id="subtab-personal" style="display:none">
+                        <section class="section bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm transition-colors">
+                            <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                    <i class="ph ph-identification-badge text-cyan-600 dark:text-cyan-400"></i> Personal de la Universidad
+                                </h3>
+                                <div class="flex gap-2 flex-wrap items-center">
+                                    <button onclick="abrirNuevoPersonal()" class="db-btn db-btn-new">
+                                        <i class="ph ph-user-plus"></i> Nuevo Personal
+                                    </button>
+                                    <button onclick="exportarPersonal()" class="db-btn db-btn-export">
+                                        <i class="ph ph-file-xls"></i> Exportar Excel
+                                    </button>
+                                    <label class="db-btn db-btn-import cursor-pointer">
+                                        <i class="ph ph-upload-simple"></i> Importar Excel
+                                        <input id="inputPersonalExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="importarPersonal(this)">
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="personalResultado" style="display:none" class="maestro-resultado mb-4"></div>
+                            <div class="flex gap-3 mb-4 items-center flex-wrap">
+                                <div class="relative flex-1 min-w-52">
+                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm"></i>
+                                    <input id="personalBuscar" type="text" placeholder="Buscar por nombre, DNI, cargo o área..."
+                                        class="input-filtro w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm rounded-lg pl-9 pr-4 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                                        oninput="buscarPersonal()">
+                                </div>
+                                <span id="personalTotal" class="text-xs text-slate-500 dark:text-slate-400"></span>
+                            </div>
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                                <table class="tabla w-full text-left text-sm">
+                                    <thead>
+                                        <tr class="bg-slate-100 dark:bg-slate-950/50 text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                                            <th class="p-4 font-semibold" style="width:90px">DNI</th>
+                                            <th class="p-4 font-semibold">Nombre Completo</th>
+                                            <th class="p-4 font-semibold">Cargo</th>
+                                            <th class="p-4 font-semibold">Área / Dependencia</th>
+                                            <th class="p-4 font-semibold">Correo</th>
+                                            <th class="p-4 font-semibold">Teléfono</th>
+                                            <th class="p-4 font-semibold" style="width:100px">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="personalBody" class="divide-y divide-slate-100 dark:divide-slate-800/50"></tbody>
+                                </table>
+                            </div>
+                            <p id="sinPersonal" class="empty-msg text-center text-slate-400 dark:text-slate-600 py-8 text-sm" style="display:none">No hay personal registrado</p>
+                            <div id="personalPaginacion" class="flex gap-1 justify-center mt-4 flex-wrap"></div>
+                        </section>
+                    </div>
+
+                </div>
+
+                <!-- ══ TAB: INCIDENCIAS (unificado con Baneados) ══ -->
+                <div id="tab-incidencias" style="display:none">
+
+                    <!-- Sub-pestañas -->
+                    <div class="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-800">
+                        <button id="subtab-btn-incidencias-inc" onclick="switchSubtabInc('inc')"
+                            class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-warning-circle"></i> Incidencias
+                            <span id="incidencias-badge-sub" class="text-[10px] font-bold bg-amber-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none" style="display:none"></span>
+                        </button>
+                        <button id="subtab-btn-incidencias-bans" onclick="switchSubtabInc('bans')"
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-prohibit"></i> Usuarios Baneados
+                        </button>
+                        <button id="subtab-btn-incidencias-sospechas" onclick="switchSubtabInc('sospechas')"
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-eye"></i> Sospechas
+                            <span id="sospechas-badge" class="text-[10px] font-bold bg-violet-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none" style="display:none"></span>
+                        </button>
+                    </div>
+
+                    <!-- Panel: Incidencias -->
+                    <div id="subtab-incidencias-inc">
+                        <section class="section bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-5 shadow-sm transition-colors">
+                            <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+                                <div>
+                                    <h3 class="text-base font-bold text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                                        <i class="ph ph-warning-circle text-lg"></i> Historial de Incidencias
+                                    </h3>
+                                    <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">3 incidencias leves activas = habilita baneo directo · 1 incidencia grave = baneo inmediato recomendado</p>
+                                </div>
+                                <div class="flex gap-2 flex-wrap items-center">
+                                    <span id="incidenciasTotal" class="text-xs text-slate-500 dark:text-slate-400"></span>
+                                    <button onclick="abrirNuevaIncidencia()" class="db-btn db-btn-new">
+                                        <i class="ph ph-plus"></i> Registrar Incidencia
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Alertas de alumnos con 3+ incidencias -->
+                            <div id="incidenciasAlertas" style="display:none" class="mb-4 p-3 rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/30">
+                                <p class="text-xs font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1.5 mb-2">
+                                    <i class="ph ph-warning"></i> Alumnos con 3 o más incidencias activas — requieren atención
+                                </p>
+                                <div id="incidenciasAlertasList" class="flex flex-wrap gap-2"></div>
+                            </div>
+
+                            <div class="flex gap-3 mb-4 items-center flex-wrap">
+                                <div class="relative flex-1 min-w-52">
+                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm"></i>
+                                    <input id="incidenciasBuscar" type="text" placeholder="Buscar por nombre o DNI…"
+                                        class="input-filtro w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm rounded-lg pl-9 pr-4 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 transition-colors placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                                        oninput="filtrarIncidencias()">
+                                </div>
+                                <select id="incidenciasFiltroTipo" class="hist-select" onchange="filtrarIncidencias()">
+                                    <option value="">Todos los tipos</option>
+                                    <option value="leve">Leve</option>
+                                    <option value="grave">Grave</option>
+                                </select>
+                                <label class="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+                                    <input type="checkbox" id="incidenciasSoloActivas" onchange="filtrarIncidencias()" checked
+                                        class="rounded border-slate-300 dark:border-slate-600 text-amber-500 focus:ring-amber-500">
+                                    Solo activas
+                                </label>
+                            </div>
+
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-amber-100 dark:border-amber-900/30">
+                                <table class="tabla w-full text-left text-sm">
+                                    <thead>
+                                        <tr class="bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 text-xs uppercase tracking-wider border-b border-amber-100 dark:border-amber-900/40">
+                                            <th class="p-4 font-semibold">DNI</th>
+                                            <th class="p-4 font-semibold">Nombre</th>
+                                            <th class="p-4 font-semibold">Tipo</th>
+                                            <th class="p-4 font-semibold">Motivo</th>
+                                            <th class="p-4 font-semibold">Descripción</th>
+                                            <th class="p-4 font-semibold">Fecha</th>
+                                            <th class="p-4 font-semibold">Registrado por</th>
+                                            <th class="p-4 font-semibold">Estado</th>
+                                            <th class="p-4 font-semibold" style="width:80px">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="incidenciasBody" class="divide-y divide-amber-50 dark:divide-amber-900/20"></tbody>
+                                </table>
+                            </div>
+                            <p id="sinIncidencias" class="text-center text-slate-400 dark:text-slate-600 py-8 text-sm" style="display:none">No hay incidencias registradas</p>
+                        </section>
+                    </div>
+
+                    <!-- Panel: Sospechas del sistema -->
+                    <div id="subtab-incidencias-sospechas" style="display:none">
+                        <section class="section bg-white dark:bg-slate-900 border border-violet-200 dark:border-violet-900/40 rounded-2xl p-5 shadow-sm transition-colors">
+                            <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+                                <div>
+                                    <h3 class="text-base font-bold text-violet-600 dark:text-violet-400 flex items-center gap-2">
+                                        <i class="ph ph-eye text-lg"></i> Sospechas detectadas por el sistema
+                                    </h3>
+                                    <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Revisar y decidir si escalar a incidencia o descartar</p>
+                                </div>
+                                <div class="flex gap-2 items-center flex-wrap">
+                                    <span id="sospechasTotal" class="text-xs text-slate-500 dark:text-slate-400"></span>
+                                    <select id="sospechasFiltroEstado" onchange="cargarSospechas()" class="hist-select text-xs">
+                                        <option value="pendiente">Pendientes</option>
+                                        <option value="">Todas</option>
+                                        <option value="aprobada">Aprobadas</option>
+                                        <option value="descartada">Descartadas</option>
+                                    </select>
+                                    <input type="date" id="sospechasFiltroFecha" onchange="cargarSospechas()"
+                                        class="hist-select text-xs"
+                                        title="Filtrar por fecha de detección">
+                                    <button onclick="sospechasLimpiarFecha()" class="db-btn db-btn-outline text-xs px-3 py-1.5" title="Limpiar fecha">
+                                        <i class="ph ph-x"></i>
+                                    </button>
+                                    <button onclick="cargarSospechas()" class="db-btn db-btn-outline text-xs px-3 py-1.5">
+                                        <i class="ph ph-arrows-clockwise"></i> Actualizar
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-violet-100 dark:border-violet-900/30">
+                                <table class="tabla w-full text-left text-sm">
+                                    <thead>
+                                        <tr class="bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 text-xs uppercase tracking-wider border-b border-violet-100 dark:border-violet-900/40">
+                                            <th class="p-4 font-semibold">Alumno</th>
+                                            <th class="p-4 font-semibold">Tipo</th>
+                                            <th class="p-4 font-semibold">Detalle</th>
+                                            <th class="p-4 font-semibold">Fecha</th>
+                                            <th class="p-4 font-semibold">Estado</th>
+                                            <th class="p-4 font-semibold" style="width:160px">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="sospechasBody" class="divide-y divide-violet-50 dark:divide-violet-900/20"></tbody>
+                                </table>
+                            </div>
+                            <p id="sinSospechas" class="text-center text-slate-400 dark:text-slate-600 py-8 text-sm" style="display:none">No hay sospechas en este estado</p>
+                        </section>
+                    </div>
+
+                    <!-- Panel: Usuarios Baneados -->
+                    <div id="subtab-incidencias-bans" style="display:none">
+                        <section class="section bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/40 rounded-2xl p-5 shadow-sm transition-colors">
+                            <div class="flex items-center justify-between mb-5">
+                                <h3 class="text-base font-bold text-rose-600 dark:text-rose-400 flex items-center gap-2">
+                                    <i class="ph ph-prohibit text-lg"></i> Usuarios Baneados
+                                </h3>
+                                <span id="bansTotal" class="text-xs text-slate-500 dark:text-slate-400"></span>
+                            </div>
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-rose-100 dark:border-rose-900/30">
+                                <table class="tabla w-full text-left text-sm">
+                                    <thead>
+                                        <tr class="bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 text-xs uppercase tracking-wider border-b border-rose-100 dark:border-rose-900/40">
+                                            <th class="p-4 font-semibold">DNI</th>
+                                            <th class="p-4 font-semibold">Nombre</th>
+                                            <th class="p-4 font-semibold">Motivo</th>
+                                            <th class="p-4 font-semibold">Baneado el</th>
+                                            <th class="p-4 font-semibold">Expira</th>
+                                            <th class="p-4 font-semibold">Por</th>
+                                            <th class="p-4 font-semibold" style="width:110px">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="bansBody" class="divide-y divide-rose-50 dark:divide-rose-900/20"></tbody>
+                                </table>
+                            </div>
+                            <p id="sinBans" class="text-center text-slate-400 dark:text-slate-600 py-8 text-sm">No hay usuarios baneados actualmente</p>
+                        </section>
+                    </div>
+
+                </div>
+
+                <!-- ══ TAB: ACTIVIDAD ══ -->
+                <div id="tab-actividad" style="display:none">
+
+                    <!-- Filtros -->
+                    <div class="flex flex-wrap gap-3 mb-5">
+                        <input id="act-filtro-dni" type="text" maxlength="8" placeholder="DNI alumno"
+                            class="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800 w-36"
+                            oninput="cargarActividad()">
+                        <input id="act-filtro-terminal" type="text" placeholder="PC (ej: PC-01)"
+                            class="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800 w-36"
+                            oninput="cargarActividad()">
+                        <select id="act-filtro-nivel" onchange="cargarActividad()"
+                            class="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800">
+                            <option value="">Todos los niveles</option>
+                            <option value="sospechoso">⚠ Sospechoso</option>
+                            <option value="normal">Normal</option>
+                        </select>
+                        <input id="act-filtro-fecha" type="date"
+                            class="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800"
+                            onchange="cargarActividad()">
+                        <button onclick="actLimpiarFiltros()"
+                            class="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                            <i class="ph ph-x"></i> Limpiar
+                        </button>
+                    </div>
+
+                    <!-- Tabla -->
+                    <div class="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                        <table class="w-full text-sm">
+                            <thead class="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 text-xs uppercase">
+                                <tr>
+                                    <th class="px-4 py-3 text-left">Fecha / Hora</th>
+                                    <th class="px-4 py-3 text-left">PC</th>
+                                    <th class="px-4 py-3 text-left">Alumno</th>
+                                    <th class="px-4 py-3 text-left">DNI</th>
+                                    <th class="px-4 py-3 text-left">Tipo</th>
+                                    <th class="px-4 py-3 text-left">Descripción</th>
+                                    <th class="px-4 py-3 text-left">Nivel</th>
+                                </tr>
+                            </thead>
+                            <tbody id="act-tabla-body">
+                                <tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">Cargando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Paginación -->
+                    <div class="flex items-center justify-between mt-4 text-sm text-slate-500">
+                        <span id="act-total-label">—</span>
+                        <div class="flex gap-2">
+                            <button id="act-btn-prev" onclick="actCambiarPagina(-1)"
+                                class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors">
+                                <i class="ph ph-caret-left"></i> Anterior
+                            </button>
+                            <button id="act-btn-next" onclick="actCambiarPagina(1)"
+                                class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors">
+                                Siguiente <i class="ph ph-caret-right"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <button id="btnLogin" class="login-btn" onclick="login()">Iniciar Sesión</button>
-                <p id="loginError" class="error login-error"></p>
+                <!-- ══ TAB: CONFIGURACIÓN (unificado con Consolas) ══ -->
+                <div id="tab-configuracion" style="display:none">
 
-                <div class="login-footer">
-                    <p>© 2026 UNASAM &mdash; Dirección de Biblioteca Central</p>
+                    <!-- Sub-pestañas -->
+                    <div class="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-800">
+                        <button id="subtab-btn-cfg-actividad" onclick="switchSubtabCfg('actividad')"
+                            class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-cyan-600 dark:text-cyan-400 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-terminal"></i> Actividad del Sistema
+                        </button>
+                        <button id="subtab-btn-cfg-credenciales" onclick="switchSubtabCfg('credenciales')"
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-key"></i> Credenciales
+                        </button>
+                        <button id="subtab-btn-cfg-aplicacion" onclick="switchSubtabCfg('aplicacion')"
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-paint-brush"></i> Aplicación
+                        </button>
+                        <button id="subtab-btn-cfg-actualizaciones" onclick="switchSubtabCfg('actualizaciones')"
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-arrow-circle-up"></i> Actualizaciones
+                        </button>
+                    </div>
+
+                    <!-- Panel: Actividad del Sistema -->
+                    <div id="subtab-cfg-actividad">
+                        <footer id="footer-monitoreo" style="background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);padding:20px;box-shadow:var(--sha)">
+                            <h3 style="font-size:14px;font-weight:700;color:var(--t1);margin-bottom:16px;display:flex;align-items:center;gap:8px">
+                                <i class="ph ph-terminal" style="color:var(--a)"></i> Actividad del Sistema
+                            </h3>
+                            <div class="consolas-wrapper grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="console-box">
+                                    <div class="console-header console-header-activity">
+                                        <span class="console-dot console-dot-activity animate-pulse"></span> Actividad de Terminales
+                                        <span style="margin-left:auto;display:flex;gap:6px">
+                                            <button class="console-btn" title="Descargar log" onclick="descargarLog('activity')"><i class="ph ph-download-simple"></i></button>
+                                        </span>
+                                    </div>
+                                    <div id="console-activity" class="console-content"></div>
+                                </div>
+                                <div class="console-box">
+                                    <div class="console-header console-header-errors">
+                                        <span class="console-dot console-dot-errors"></span> Sistema y Errores
+                                        <span style="margin-left:auto;display:flex;gap:6px">
+                                            <button class="console-btn" title="Descargar log" onclick="descargarLog('errors')"><i class="ph ph-download-simple"></i></button>
+                                        </span>
+                                    </div>
+                                    <div id="console-errors" class="console-content"></div>
+                                </div>
+                            </div>
+                        </footer>
+                    </div>
+
+                    <!-- Panel: Credenciales -->
+                    <div id="subtab-cfg-credenciales" style="display:none">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:960px">
+
+                            <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
+                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
+                                    <i class="ph ph-user-circle text-cyan-500"></i> Contraseña del Admin
+                                </h3>
+                                <p class="text-xs text-slate-500 dark:text-slate-400 mb-5">Cambia la contraseña de la cuenta con acceso básico al panel.</p>
+                                <div class="flex flex-col gap-3">
+                                    <div>
+                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Contraseña actual</label>
+                                        <input id="cfg-admin-actual" type="password" placeholder="••••••••"
+                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Nueva contraseña <span class="text-slate-400">(mín. 6 caracteres)</span></label>
+                                        <input id="cfg-admin-nueva" type="password" placeholder="••••••••"
+                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Confirmar nueva contraseña</label>
+                                        <input id="cfg-admin-confirmar" type="password" placeholder="••••••••"
+                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                    </div>
+                                    <p id="cfg-admin-error" class="text-rose-500 text-xs min-h-4"></p>
+                                    <button onclick="cambiarPasswordAdmin()" class="db-btn db-btn-new self-end">
+                                        <i class="ph ph-floppy-disk"></i> Guardar contraseña
+                                    </button>
+                                </div>
+                            </section>
+
+                            <section class="bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-6 shadow-sm">
+                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
+                                    <i class="ph ph-shield-check text-amber-500"></i> Contraseña del Superadmin
+                                </h3>
+                                <p class="text-xs text-slate-500 dark:text-slate-400 mb-5">Clave requerida para desbloquear controles de equipos y acciones críticas.</p>
+                                <div class="flex flex-col gap-3">
+                                    <div>
+                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Contraseña actual del Superadmin</label>
+                                        <input id="cfg-n2-actual" type="password" placeholder="••••••••"
+                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500 transition-colors">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Nueva contraseña <span class="text-slate-400">(mín. 4 caracteres)</span></label>
+                                        <input id="cfg-n2-nueva" type="password" placeholder="••••••••"
+                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500 transition-colors">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Confirmar nueva contraseña</label>
+                                        <input id="cfg-n2-confirmar" type="password" placeholder="••••••••"
+                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500 transition-colors">
+                                    </div>
+                                    <p id="cfg-n2-error" class="text-rose-500 text-xs min-h-4"></p>
+                                    <button onclick="cambiarPasswordNivel2()" class="db-btn db-btn-export self-end" style="background:oklch(0.65 0.17 70);border-color:oklch(0.60 0.17 70)">
+                                        <i class="ph ph-floppy-disk"></i> Guardar contraseña
+                                    </button>
+                                </div>
+                            </section>
+
+                        </div>
+                    </div>
+
+                    <!-- Panel: Aplicación -->
+                    <div id="subtab-cfg-aplicacion" style="display:none">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:960px">
+
+                            <!-- Logo de la aplicación -->
+                            <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
+                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
+                                    <i class="ph ph-image text-cyan-500"></i> Logo de la Aplicación
+                                </h3>
+                                <p class="text-xs text-slate-500 dark:text-slate-400 mb-5">Aparece en el sidebar del panel y en la pantalla de login.</p>
+
+                                <!-- Preview actual -->
+                                <div class="flex items-center gap-4 mb-5 p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                                    <div id="cfg-logo-preview" class="w-12 h-12 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center overflow-hidden flex-shrink-0">
+                                        <i class="ph ph-books text-cyan-500 text-2xl"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs font-semibold text-slate-700 dark:text-slate-300">Logo actual</p>
+                                        <p id="cfg-logo-nombre" class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Ícono predeterminado</p>
+                                    </div>
+                                </div>
+
+                                <label class="db-btn db-btn-import cursor-pointer w-full justify-center">
+                                    <i class="ph ph-upload-simple"></i> Subir imagen (PNG, JPG, SVG)
+                                    <input id="inputLogo" type="file" accept=".png,.jpg,.jpeg,.svg,.webp" style="display:none" onchange="previsualizarLogo(this)">
+                                </label>
+                                <p class="text-xs text-slate-400 dark:text-slate-500 mt-2 text-center">Recomendado: 128×128 px o más · fondo transparente</p>
+                                <p id="cfg-logo-error" class="text-rose-500 text-xs min-h-4 mt-1"></p>
+                                <button onclick="guardarLogo()" id="btn-guardar-logo" class="db-btn db-btn-new w-full justify-center mt-3" style="display:none">
+                                    <i class="ph ph-floppy-disk"></i> Aplicar logo
+                                </button>
+                            </section>
+
+                            <!-- Textos del login -->
+                            <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
+                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
+                                    <i class="ph ph-text-aa text-cyan-500"></i> Textos del Login
+                                </h3>
+                                <p class="text-xs text-slate-500 dark:text-slate-400 mb-5">Personaliza el título y subtítulo que aparecen en la pantalla de inicio de sesión.</p>
+                                <div class="flex flex-col gap-3">
+                                    <div>
+                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Título principal</label>
+                                        <input id="cfg-login-titulo" type="text" placeholder="Control Biblioteca"
+                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Subtítulo</label>
+                                        <input id="cfg-login-subtitulo" type="text" placeholder="UNASAM — PANEL DE ADMINISTRACIÓN"
+                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Pie de página</label>
+                                        <input id="cfg-login-footer" type="text" placeholder="© 2026 UNASAM — Dirección de Biblioteca Central"
+                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                    </div>
+                                    <p id="cfg-app-error" class="text-rose-500 text-xs min-h-4"></p>
+                                    <button onclick="guardarTextosApp()" class="db-btn db-btn-new self-end">
+                                        <i class="ph ph-floppy-disk"></i> Guardar textos
+                                    </button>
+                                </div>
+                            </section>
+
+                        </div>
+
+                        <!-- Backup de base de datos -->
+                        <div class="mt-5" style="max-width:960px">
+                            <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                                <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-2">
+                                    <i class="ph ph-database text-base"></i> Copia de seguridad
+                                </h3>
+                                <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">
+                                    Descarga un volcado SQL completo con todas las tablas: historial, alumnos, personal, usuarios, bans, terminales e incidencias.
+                                </p>
+                                <button onclick="descargarBackup()" id="btn-backup" class="db-btn db-btn-new flex items-center gap-2">
+                                    <i class="ph ph-download-simple"></i> Descargar backup .sql
+                                </button>
+                                <p id="backup-status" class="text-xs text-slate-400 dark:text-slate-500 mt-2 min-h-4"></p>
+                            </section>
+                        </div>
+
+                    </div>
+
+                    <!-- Panel: Actualizaciones -->
+                    <div id="subtab-cfg-actualizaciones" style="display:none">
+                        <div class="max-w-xl">
+                            <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-2">
+                                <i class="ph ph-arrow-circle-up text-cyan-500"></i> Ruta de distribución del cliente
+                            </h3>
+                            <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">
+                                Carpeta del servidor donde se encuentra el <code>ControlBiblioteca.Client.exe</code> y el <code>version.txt</code> para auto-actualización de las PCs.
+                            </p>
+                            <div class="flex gap-2 mb-3">
+                                <input id="cfg-ruta-distribucion" type="text"
+                                    placeholder="C:\WinSysCache"
+                                    class="flex-1 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800 font-mono">
+                                <button onclick="guardarRutaDistribucion()"
+                                    class="db-btn db-btn-new flex items-center gap-2 whitespace-nowrap">
+                                    <i class="ph ph-floppy-disk"></i> Guardar
+                                </button>
+                            </div>
+                            <p id="cfg-ruta-status" class="text-xs min-h-4"></p>
+
+                            <div class="mt-6 p-4 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50/50 dark:bg-cyan-900/10">
+                                <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-2">
+                                    <i class="ph ph-upload-simple text-cyan-500"></i> Publicar nueva versión
+                                </h3>
+                                <p class="text-xs text-slate-400 dark:text-slate-500 mb-3">
+                                    Subí el <code>ControlBiblioteca.Client.exe</code> y la versión nueva. El servidor lo escribe atómicamente en la ruta de distribución y los kioskos lo aplican al próximo reinicio.
+                                </p>
+
+                                <div class="space-y-2">
+                                    <div>
+                                        <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Versión nueva (ej: 4.1)</label>
+                                        <input id="cfg-publicar-version" type="text" placeholder="4.1"
+                                            class="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800 font-mono">
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Archivo .exe del cliente</label>
+                                        <input id="cfg-publicar-archivo" type="file" accept=".exe"
+                                            class="w-full text-xs file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-cyan-500 file:text-white file:cursor-pointer hover:file:bg-cyan-600 text-slate-500 dark:text-slate-400">
+                                    </div>
+                                    <div class="flex items-center gap-3 pt-1">
+                                        <button id="cfg-publicar-btn" onclick="publicarCliente()"
+                                            class="db-btn db-btn-new flex items-center gap-2 whitespace-nowrap">
+                                            <i class="ph ph-cloud-arrow-up"></i> Publicar
+                                        </button>
+                                        <div id="cfg-publicar-progress" class="flex-1 hidden">
+                                            <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                                                <div id="cfg-publicar-bar" class="bg-cyan-500 h-full transition-all" style="width:0%"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <p id="cfg-publicar-status" class="text-xs min-h-4"></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
+
             </div>
         </main>
     </div>
+</div>
 
-    <!-- Dashboard -->
-    <div id="dashboard" class="dashboard" style="display:none">
-        <header>
-            <h1>📚 Control Biblioteca UNASAM</h1>
-            <div class="header-right">
-                <span id="serverIpBadge" class="server-badge">IP SERVIDOR: ...</span>
-                <span id="wsStatus" class="ws-badge off">○ WS Desconectado</span>
-                <span id="usuarioActual"></span>
-                <button id="btnRol" class="btn-rol" onclick="toggleRol()" title="Cambiar vista"></button>
-                <button id="btnTema" class="btn-tema" onclick="toggleTema()" title="Cambiar tema">🌙</button>
-                <button onclick="logout()" class="btn-logout">Cerrar Sesión</button>
-            </div>
-        </header>
+<!-- NOTIFICACIÓN -->
+<div id="notificacion" class="notificacion"></div>
 
-        <!-- Estadísticas -->
-        <div id="seccionStats" class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-number" id="totalTerminales">0</div>
-                <div class="stat-label">Equipos</div>
-            </div>
-            <div class="stat-card active">
-                <div class="stat-number" id="terminalesActivas">0</div>
-                <div class="stat-label">Activas</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="sesionesActivas">0</div>
-                <div class="stat-label">Sesiones</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="totalAlumnos">0</div>
-                <div class="stat-label">Alumnos</div>
-            </div>
-        </div>
-
-        <!-- Equipos -->
-        <section id="seccionEquipos" class="section">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px">
-                <h2 style="margin:0">Equipos</h2>
-                <div style="display:flex; gap:10px">
-                    <button onclick="finalizarTodo()" class="btn-finalizar">🏁 Finalizar Todas</button>
-                    <button onclick="limpiarTodo()" class="btn-limpiar">🧹 Limpiar Todo</button>
-                    <button onclick="bloquearTodas()" class="btn-bloquear-todas">🔒 Bloquear Todas</button>
-                    <button id="btnMaestro" onclick="toggleMaestro()" class="btn-maestro">🗄️ Base de Datos</button>
-                </div>
-            </div>
-            <div id="terminalesGrid" class="terminales-grid"></div>
-        </section>
-
-        <!-- Historial de Sesiones -->
-        <section class="section">
-            <!-- Barra de periodos -->
-            <div class="periodo-bar">
-                <span class="periodo-label">Período:</span>
-                <button id="btn-hoy"   data-periodo="dia"   onclick="setPeriodo('dia')"   class="btn-periodo btn-periodo-activo">Hoy</button>
-                <button id="btn-mes"   data-periodo="mes"   onclick="setPeriodo('mes')"   class="btn-periodo">Mes</button>
-                <button id="btn-anio"  data-periodo="anio"  onclick="setPeriodo('anio')"  class="btn-periodo">Año</button>
-                <button id="btn-todo"  data-periodo="todo"  onclick="setPeriodo('todo')"  class="btn-periodo">Todo</button>
-                <button id="btn-rango" data-periodo="rango" onclick="setPeriodo('rango')" class="btn-periodo">Rango</button>
-                <div id="panelRango" style="display:none;gap:6px;align-items:center">
-                    <input id="rangoDesde" type="date" onchange="aplicarRango()" class="input-rango">
-                    <span class="periodo-label">→</span>
-                    <input id="rangoHasta" type="date" onchange="aplicarRango()" class="input-rango">
-                </div>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-                <h2 style="margin:0">Historial de Sesiones</h2>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                    <input id="filtroSearch" type="text" placeholder="🔍 Buscar nombre, DNI o código..."
-                        class="input-filtro"
-                        oninput="aplicarFiltros()">
-                    <select id="filtroActividad" class="select-filtro" onchange="aplicarFiltros()">
-                        <option value="">📋 Todas las actividades</option>
-                        <option value="Investigación">Investigación</option>
-                        <option value="Lectura de libros digitales">Lectura de libros digitales</option>
-                        <option value="Uso de base de datos">Uso de base de datos</option>
-                        <option value="Trabajos académicos">Trabajos académicos</option>
-                        <option value="Uso de AutoCAD y/o Civil 3D">Uso de AutoCAD y/o Civil 3D</option>
-                        <option value="Clases virtuales">Clases virtuales</option>
-                        <option value="Otros">Otros</option>
-                    </select>
-                    <button onclick="exportarExcel()" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px">📊 Excel</button>
-                    <button onclick="exportarPdfFiltrado()" style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px">📄 PDF</button>
-                    <button id="btnImportarExcel" onclick="abrirImportarExcel()" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px;display:none">📥 Importar Historial</button>
-                    <input id="inputImportarExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="ejecutarImportacion(this)">
-                </div>
-            </div>
-            <div class="tabla-scroll-wrap">
-                <table id="tablaSesiones" class="tabla">
-                    <thead>
-                        <tr>
-                            <th>PC</th>
-                            <th class="th-sortable" onclick="ordenarPor('estudiante')" data-col="estudiante">Estudiante <span class="sort-arrow"></span></th>
-                            <th class="th-sortable" onclick="ordenarPor('dni')"        data-col="dni">DNI <span class="sort-arrow"></span></th>
-                            <th class="th-sortable" onclick="ordenarPor('facultad')"   data-col="facultad">Facultad <span class="sort-arrow"></span></th>
-                            <th class="th-sortable" onclick="ordenarPor('escuela')"    data-col="escuela">Escuela <span class="sort-arrow"></span></th>
-                            <th class="th-sortable" onclick="ordenarPor('actividad')"  data-col="actividad">Actividad <span class="sort-arrow"></span></th>
-                            <th class="th-sortable" onclick="ordenarPor('inicio')"     data-col="inicio">Inicio <span class="sort-arrow"></span></th>
-                            <th>Salida</th>
-                            <th class="th-sortable" onclick="ordenarPor('fecha')"      data-col="fecha">Fecha <span class="sort-arrow"></span></th>
-                            <th>Estado</th>
-                        </tr>
-                    </thead>
-                    <tbody id="sesionesBody"></tbody>
-                </table>
-            </div>
-            <p id="sinSesiones" class="empty-msg">No hay sesiones registradas</p>
-        </section>
-
-        <!-- ══ BASE DE DATOS DE USUARIOS ══ -->
-        <section id="seccionMaestro" class="section" style="display:none">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
-                <h2 style="margin:0">🗄️ Base de Datos de Usuarios del Centro de Cómputo</h2>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                    <button onclick="abrirNuevoUsuario()" class="btn-importar-maestro" style="cursor:pointer;border:none">➕ Nuevo Usuario</button>
-                    <button onclick="exportarMaestroBackup()" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:bold;font-size:13px" title="Descargar copia de seguridad de todos los usuarios">📊 Exportar Excel</button>
-                    <label class="btn-importar-maestro" title="Importar Excel con columnas: dni, nombre_completo, codigo_universitario, facultad, escuela">
-                        📥 Importar Excel
-                        <input id="inputMaestroExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="importarMaestro(this)">
-                    </label>
-                    <button id="btnLimpiarMaestro" onclick="abrirLimpiarMaestro()" class="btn-limpiar-maestro">🗑️ Limpiar Base de Datos</button>
-                </div>
-            </div>
-
-            <!-- Resultado de importación -->
-            <div id="maestroResultado" style="display:none" class="maestro-resultado"></div>
-
-            <!-- Buscador -->
-            <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
-                <input id="maestroBuscar" type="text" placeholder="🔍 Buscar por nombre, DNI o código..."
-                    class="input-filtro" style="flex:1;min-width:220px"
-                    oninput="buscarMaestro()">
-                <span id="maestroTotal" style="font-size:13px;color:var(--text-secondary)"></span>
-            </div>
-
-            <!-- Tabla -->
-            <div class="tabla-scroll-wrap">
-                <table class="tabla">
-                    <thead>
-                        <tr>
-                            <th style="width:90px">DNI</th>
-                            <th>Nombre Completo</th>
-                            <th style="width:110px">Código Univ.</th>
-                            <th>Facultad</th>
-                            <th>Escuela</th>
-                            <th style="width:100px">Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody id="maestroBody"></tbody>
-                </table>
-            </div>
-            <p id="sinMaestro" class="empty-msg" style="display:none">No hay registros en el maestro</p>
-
-            <!-- Paginación -->
-            <div id="maestroPaginacion" style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap"></div>
-        </section>
-
-        <!-- Modal nuevo usuario manual -->
-        <div id="modal-nuevo-usuario" class="modal-overlay" style="display:none">
-            <div class="modal-content" style="min-width:380px;max-width:460px">
-                <h3>➕ Nuevo Usuario</h3>
-                <p style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">Registra manualmente un alumno, docente, egresado u otro usuario del centro de cómputo.</p>
-
-                <label class="modal-field-label">DNI <span style="color:#ef4444">*</span></label>
-                <input id="nuevo-dni" type="text" maxlength="8" class="modal-input" placeholder="8 dígitos numéricos">
-
-                <label class="modal-field-label">Nombre Completo <span style="color:#ef4444">*</span></label>
-                <input id="nuevo-nombre" type="text" maxlength="200" class="modal-input" placeholder="Apellidos y Nombres">
-
-                <label class="modal-field-label">Código Universitario</label>
-                <input id="nuevo-codigo" type="text" maxlength="30" class="modal-input" placeholder="ej: 191.2503.026">
-
-                <label class="modal-field-label">Facultad</label>
-                <input id="nuevo-facultad" type="text" maxlength="200" class="modal-input" placeholder="ej: FDCCPP">
-
-                <label class="modal-field-label">Escuela</label>
-                <input id="nuevo-escuela" type="text" maxlength="200" class="modal-input" placeholder="ej: INGENIERÍA DE SISTEMAS">
-
-                <p id="nuevo-usuario-error" style="color:#ef4444;font-size:12px;min-height:16px;margin:6px 0 8px"></p>
-                <div class="modal-buttons">
-                    <button id="btn-nuevo-cancelar" class="btn-cancelar">Cancelar</button>
-                    <button id="btn-nuevo-guardar" class="btn-confirmar">💾 Registrar</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Modal edición maestro -->
-        <div id="modal-maestro" class="modal-overlay" style="display:none">
-            <div class="modal-content" style="min-width:360px">
-                <h3>✏️ Editar Alumno</h3>
-                <p id="modal-maestro-dni" style="color:var(--text-secondary);font-size:13px;margin-bottom:12px"></p>
-                <label class="modal-field-label">Nombre Completo</label>
-                <input id="maestro-edit-nombre" type="text" class="modal-input" placeholder="Apellidos Nombres">
-                <label class="modal-field-label">Código Universitario</label>
-                <input id="maestro-edit-codigo" type="text" class="modal-input" placeholder="ej: 161.2502.614">
-                <label class="modal-field-label">Facultad</label>
-                <input id="maestro-edit-facultad" type="text" class="modal-input">
-                <label class="modal-field-label">Escuela</label>
-                <input id="maestro-edit-escuela" type="text" class="modal-input">
-                <p id="modal-maestro-error" style="color:#ef4444;font-size:12px;min-height:16px;margin:6px 0 8px"></p>
-                <div class="modal-buttons">
-                    <button id="btn-maestro-cancelar" class="btn-cancelar">Cancelar</button>
-                    <button id="btn-maestro-guardar" class="btn-confirmar">💾 Guardar</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Consolas de Eventos (Footer Monitoreo) -->
-        <footer id="footer-monitoreo" class="section" style="margin-top: 40px">
-            <div class="consolas-wrapper">
-                <div class="console-box">
-                    <div class="console-header">🟢 ACTIVIDAD DE TERMINALES</div>
-                    <div id="console-activity" class="console-content"></div>
-                </div>
-                <div class="console-box">
-                    <div class="console-header">⚠️ SISTEMA Y ERRORES</div>
-                    <div id="console-errors" class="console-content"></div>
-                </div>
-            </div>
-        </footer>
-    </div>
-
-    <div id="notificacion" class="notificacion"></div>
-
-    <!-- Modal de Advertencia -->
-    <div id="modal-advertencia" class="modal-overlay" style="display:none">
-        <div class="modal-content">
-            <h3 id="modal-titulo">⚠️ Advertencia</h3>
-            <p id="modal-mensaje">¿Estás seguro?</p>
-            <div class="modal-buttons">
-                <button id="btn-modal-cancelar" class="btn-cancelar">Cancelar</button>
-                <button id="btn-modal-confirmar" class="btn-confirmar-rojo">Confirmar</button>
-            </div>
+<!-- MODALES (sin cambios) -->
+<div id="modal-advertencia" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 id="modal-titulo" class="text-base font-bold text-slate-900 dark:text-white mb-3">Advertencia</h3>
+        <p id="modal-mensaje" class="text-sm text-slate-500 dark:text-slate-400 mb-5">¿Estás seguro?</p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-modal-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-modal-confirmar" class="btn-confirmar-rojo text-xs bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Confirmar</button>
         </div>
     </div>
+</div>
 
-    <!-- Modal de Bloqueo Administrativo -->
-    <div id="modal-bloqueo" class="modal-overlay" style="display:none;background:rgba(0,0,0,0.75)">
-        <div class="modal-content modal-bloqueo-content">
-            <h3 class="modal-bloqueo-titulo">⚠️ Confirmar Bloqueo</h3>
-            <p id="modal-bloqueo-mensaje" class="modal-bloqueo-msg"></p>
-            <div class="modal-buttons">
-                <button id="btn-bloqueo-cancelar" class="btn-cancelar">Cancelar</button>
-                <button id="btn-bloqueo-confirmar" class="btn-confirmar-rojo">🔒 Confirmar Bloqueo</button>
-            </div>
+<div id="modal-bloqueo" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content modal-bloqueo-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 class="modal-bloqueo-titulo text-base font-bold text-slate-900 dark:text-white mb-3">Confirmar Bloqueo</h3>
+        <p id="modal-bloqueo-mensaje" class="modal-bloqueo-msg text-sm text-slate-500 dark:text-slate-400 mb-5"></p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-bloqueo-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-bloqueo-confirmar" class="btn-confirmar-rojo text-xs bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Confirmar Bloqueo</button>
         </div>
     </div>
+</div>
 
-    <!-- Modal de Desbloqueo con Actividad -->
-    <div id="modal-desbloqueo" class="modal-overlay" style="display:none">
-        <div class="modal-content" style="min-width:340px">
-            <h3>🔓 Desbloquear Terminal</h3>
-            <p id="modal-desbloqueo-nombre" class="modal-desbloqueo-sub"></p>
-            <label class="modal-field-label">DNI del alumno</label>
-            <input id="modal-dni" type="text" placeholder="8 dígitos" maxlength="8" class="modal-input">
-            <label class="modal-field-label">Actividad a realizar</label>
-            <select id="modal-actividad" class="modal-select">
-                <option value="">-- Seleccione una actividad --</option>
-                <option value="Investigación">Investigación</option>
-                <option value="Lectura de libros digitales">Lectura de libros digitales</option>
-                <option value="Uso de base de datos">Uso de base de datos</option>
-                <option value="Trabajos académicos">Trabajos académicos</option>
-                <option value="Uso de AutoCAD y/o Civil 3D">Uso de AutoCAD y/o Civil 3D</option>
-                <option value="Clases virtuales">Clases virtuales</option>
-                <option value="Otros">Otros (Especificar)</option>
-            </select>
-            <div id="modal-otros-panel" style="display:none;margin-bottom:12px">
-                <input id="modal-otros-texto" type="text" placeholder="Especifique la actividad..." class="modal-input">
-            </div>
-            <p id="modal-desbloqueo-error" style="color:#ef4444;font-size:12px;min-height:16px;margin-bottom:8px"></p>
-            <div class="modal-buttons">
-                <button id="btn-desbloqueo-cancelar" class="btn-cancelar">Cancelar</button>
-                <button id="btn-desbloqueo-confirmar" class="btn-confirmar">Desbloquear</button>
-            </div>
+<div id="modal-desbloqueo" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-lock-open text-emerald-500"></i> Desbloquear Terminal</h3>
+        <p id="modal-desbloqueo-nombre" class="modal-desbloqueo-sub text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">DNI del alumno</label>
+        <input id="modal-dni" type="text" placeholder="8 dígitos" maxlength="8" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Actividad a realizar</label>
+        <select id="modal-actividad" class="modal-select w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+            <option value="">-- Seleccione una actividad --</option>
+            <option value="Investigación">Investigación</option>
+            <option value="Lectura de libros digitales">Lectura de libros digitales</option>
+            <option value="Uso de base de datos">Uso de base de datos</option>
+            <option value="Trabajos académicos">Trabajos académicos</option>
+            <option value="Uso de AutoCAD y/o Civil 3D">Uso de AutoCAD y/o Civil 3D</option>
+            <option value="Clases virtuales">Clases virtuales</option>
+            <option value="Otros">Otros (Especificar)</option>
+        </select>
+        <div id="modal-otros-panel" style="display:none" class="mb-3">
+            <input id="modal-otros-texto" type="text" placeholder="Especifique la actividad..." class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+        </div>
+        <p id="modal-desbloqueo-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-desbloqueo-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-desbloqueo-confirmar" class="btn-confirmar text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Desbloquear</button>
         </div>
     </div>
+</div>
 
-    <!-- Modal: Limpiar Base de Datos de Alumnos -->
-    <div id="modal-limpiar-maestro" class="modal-overlay" style="display:none;background:rgba(0,0,0,0.82)">
-        <div class="modal-content" style="min-width:360px;max-width:460px">
-            <h3 style="color:#dc2626">🗑️ Limpiar Base de Datos de Alumnos</h3>
-
-            <!-- Paso 1: advertencia -->
-            <div id="limpiar-paso1">
-                <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:14px 16px;margin-bottom:16px">
-                    <p style="font-weight:700;color:#b91c1c;margin:0 0 8px">⚠️ ¿Qué hace esta acción?</p>
-                    <ul style="margin:0;padding-left:18px;color:#7f1d1d;font-size:13px;line-height:1.7">
-                        <li>Elimina <strong>todos los registros de estudiantes</strong> del maestro de alumnos.</li>
-                        <li>También elimina <strong>todas las sesiones</strong> asociadas a esos alumnos.</li>
-                        <li>Los equipos registrados y los usuarios administradores <strong>NO se borran</strong>.</li>
-                        <li>Esta acción <strong>es irreversible</strong>. No hay forma de recuperar los datos.</li>
-                    </ul>
-                </div>
-                <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
-                    Para continuar, ingresa la contraseña de Nivel 2 como confirmación de seguridad.
-                </p>
-                <label class="modal-field-label">Contraseña de Nivel 2</label>
-                <input id="limpiar-maestro-pass" type="password" placeholder="••••••••" class="modal-input" autocomplete="off">
-                <p id="limpiar-maestro-error" style="color:#ef4444;font-size:12px;min-height:16px;margin:6px 0 8px"></p>
-                <div class="modal-buttons">
-                    <button id="btn-limpiar-maestro-cancelar" class="btn-cancelar">Cancelar</button>
-                    <button id="btn-limpiar-maestro-confirmar" class="btn-confirmar-rojo">🗑️ Eliminar Todo</button>
-                </div>
-            </div>
+<div id="modal-nuevo-usuario" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-user-plus text-cyan-500"></i> Nuevo Usuario</h3>
+        <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Registra manualmente un alumno, docente, egresado u otro usuario del centro de cómputo.</p>
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">DNI <span class="text-rose-500">*</span></label>
+        <input id="nuevo-dni" type="text" maxlength="8" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="8 dígitos numéricos">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Nombre Completo <span class="text-rose-500">*</span></label>
+        <input id="nuevo-nombre" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="Apellidos y Nombres">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Código Universitario</label>
+        <input id="nuevo-codigo" type="text" maxlength="30" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: 191.2503.026">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Facultad</label>
+        <input id="nuevo-facultad" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: FDCCPP">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Escuela</label>
+        <input id="nuevo-escuela" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: INGENIERÍA DE SISTEMAS">
+        <p id="nuevo-usuario-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-nuevo-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-nuevo-guardar" class="btn-confirmar text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Registrar</button>
         </div>
     </div>
+</div>
 
-    <!-- Modal de Nivel 2 (Acceso Admin) -->
-    <div id="modal-nivel2" class="modal-overlay" style="display:none;background:rgba(0,0,0,0.75)">
-        <div class="modal-content" style="min-width:320px">
-            <h3>🔐 Acceso de Administrador</h3>
-            <p style="color:var(--text-secondary);font-size:13px;margin-bottom:16px">Ingresa la contraseña de nivel 2 para habilitar los controles de equipos.</p>
-            <label class="modal-field-label">Contraseña de Nivel 2</label>
-            <input id="modal-nivel2-pass" type="password" placeholder="••••••••" class="modal-input" autocomplete="off">
-            <p id="modal-nivel2-error" style="color:#ef4444;font-size:12px;min-height:16px;margin:6px 0 8px"></p>
-            <div class="modal-buttons">
-                <button id="btn-nivel2-cancelar" class="btn-cancelar">Cancelar</button>
-                <button id="btn-nivel2-confirmar" class="btn-confirmar">Desbloquear</button>
-            </div>
+<div id="modal-maestro" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-pencil text-amber-500"></i> Editar Alumno</h3>
+        <p id="modal-maestro-dni" class="text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Nombre Completo</label>
+        <input id="maestro-edit-nombre" type="text" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="Apellidos Nombres">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Código Universitario</label>
+        <input id="maestro-edit-codigo" type="text" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: 161.2502.614">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Facultad</label>
+        <input id="maestro-edit-facultad" type="text" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Escuela</label>
+        <input id="maestro-edit-escuela" type="text" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+        <p id="modal-maestro-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-maestro-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-maestro-guardar" class="btn-confirmar text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Guardar</button>
         </div>
     </div>
+</div>
 
-    <script src="static/js/app.js"></script>
+
+<!-- MODAL NUEVO PERSONAL -->
+<div id="modal-nuevo-personal" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-identification-badge text-cyan-500"></i> Nuevo Personal</h3>
+        <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Registra un docente, administrativo u otro trabajador de la universidad.</p>
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">DNI <span class="text-rose-500">*</span></label>
+        <input id="np-dni" type="text" maxlength="8" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="8 dígitos">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Nombre Completo <span class="text-rose-500">*</span></label>
+        <input id="np-nombre" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="Apellidos y Nombres">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Cargo</label>
+        <input id="np-cargo" type="text" maxlength="150" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: Docente, Administrativo">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Área / Dependencia</label>
+        <input id="np-area" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: Biblioteca, FDCCPP">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Correo</label>
+        <input id="np-correo" type="text" maxlength="150" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="usuario@unasam.edu.pe">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Teléfono</label>
+        <input id="np-telefono" type="text" maxlength="20" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: 943 000 000">
+        <p id="np-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-np-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-np-guardar" class="btn-confirmar text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Registrar</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL EDITAR PERSONAL -->
+<div id="modal-editar-personal" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-pencil text-amber-500"></i> Editar Personal</h3>
+        <p id="ep-dni-label" class="text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Nombre Completo</label>
+        <input id="ep-nombre" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Cargo</label>
+        <input id="ep-cargo" type="text" maxlength="150" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Área / Dependencia</label>
+        <input id="ep-area" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Correo</label>
+        <input id="ep-correo" type="text" maxlength="150" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Teléfono</label>
+        <input id="ep-telefono" type="text" maxlength="20" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+        <p id="ep-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-ep-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-ep-guardar" class="btn-confirmar text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-ban" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-prohibit text-rose-500"></i> Banear Usuario</h3>
+        <p id="modal-ban-nombre" class="text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Duración del ban (días)</label>
+        <input id="ban-dias" type="number" min="1" max="365" value="7" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-rose-500 transition-colors">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Motivo <span class="text-rose-500">*</span></label>
+        <input id="ban-motivo" type="text" maxlength="300" placeholder="ej: Conducta inapropiada, uso indebido del equipo..." class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-rose-500 transition-colors">
+        <p id="modal-ban-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-ban-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-ban-confirmar" class="btn-confirmar-rojo text-xs bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Banear</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL REGISTRAR INCIDENCIA -->
+<div id="modal-incidencia" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-warning-circle text-amber-500"></i> Registrar Incidencia</h3>
+        <p id="modal-incidencia-nombre" class="text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">DNI del Alumno <span class="text-rose-500">*</span></label>
+        <input id="inc-dni" type="text" maxlength="8" placeholder="8 dígitos" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Tipo de Incidencia <span class="text-rose-500">*</span></label>
+        <select id="inc-tipo" class="modal-select w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
+            <option value="leve">Leve — advertencia verbal / comportamiento</option>
+            <option value="grave">Grave — daño a equipos / conducta seria</option>
+        </select>
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Motivo <span class="text-rose-500">*</span></label>
+        <input id="inc-motivo" type="text" maxlength="200" placeholder="ej: Uso de redes sociales en hora no permitida" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Descripción (opcional)</label>
+        <textarea id="inc-descripcion" rows="3" maxlength="600" placeholder="Detalle adicional de lo ocurrido…" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors resize-none"></textarea>
+        <div id="inc-advertencia-ban" style="display:none" class="mb-3 p-3 rounded-lg border border-rose-200 dark:border-rose-700/60 bg-rose-50 dark:bg-rose-950/30 text-xs text-rose-700 dark:text-rose-400">
+            <i class="ph ph-warning"></i> Este alumno ya tiene <strong id="inc-contador"></strong> incidencias activas. Al registrar esta, podrás banearlo directamente.
+        </div>
+        <p id="modal-incidencia-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-inc-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-inc-guardar" class="btn-confirmar text-xs bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Registrar</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-nivel2" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-shield-check text-cyan-500"></i> Acceso de Administrador</h3>
+        <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Ingresa la contraseña de nivel 2 para habilitar los controles de equipos.</p>
+        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Contraseña de Nivel 2</label>
+        <input id="modal-nivel2-pass" type="password" placeholder="••••••••" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-2 focus:outline-none focus:border-cyan-500 transition-colors" autocomplete="off">
+        <p id="modal-nivel2-error" class="text-rose-500 text-xs min-h-4 mb-3"></p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-nivel2-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-nivel2-confirmar" class="btn-confirmar text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Desbloquear</button>
+        </div>
+    </div>
+</div>
+
+<script src="static/js/app.js"></script>
+<script>
+// Tema
+(function() {
+    const html = document.documentElement;
+    const icon = document.getElementById('iconTema');
+    const isDark = localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    if (isDark) { html.classList.add('dark'); if(icon){icon.classList.remove('ph-moon');icon.classList.add('ph-sun');} }
+    else { html.classList.remove('dark'); if(icon){icon.classList.remove('ph-sun');icon.classList.add('ph-moon');} }
+})();
+
+// ── Zoom del panel ────────────────────────────────────────────────
+const ZOOM_MIN = 0.5, ZOOM_MAX = 2.0, ZOOM_STEP = 0.1;
+let _zoom = parseFloat(localStorage.getItem('unasam-zoom')) || 1;
+
+function _aplicarZoom() {
+    _zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(_zoom * 100) / 100));
+    document.body.style.zoom = _zoom;
+    // Compensar para que el layout llene el viewport sin espacio vacío ni corte
+    const inv = (100 / _zoom) + 'vh';
+    document.body.style.height    = inv;
+    document.body.style.minHeight = inv;
+    const dash = document.getElementById('dashboard');
+    if (dash) { dash.style.height = inv; }
+    const lbl = document.getElementById('zoomLabel');
+    if (lbl) {
+        lbl.textContent = Math.round(_zoom * 100) + '%';
+        const off = Math.abs(_zoom - 1) > 0.001;
+        lbl.style.color       = off ? 'var(--a)' : '';
+        lbl.style.borderColor = off ? 'var(--a-bdr)' : '';
+    }
+    const btnOut = document.getElementById('zoom-out');
+    const btnIn  = document.getElementById('zoom-in');
+    if (btnOut) btnOut.disabled = _zoom <= ZOOM_MIN + 0.001;
+    if (btnIn)  btnIn.disabled  = _zoom >= ZOOM_MAX - 0.001;
+    localStorage.setItem('unasam-zoom', _zoom);
+}
+
+function ajustarZoom(delta) { _zoom += delta * ZOOM_STEP; _aplicarZoom(); }
+function resetearZoom()      { _zoom = 1; _aplicarZoom(); }
+
+document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key === '+' || e.key === '=') { _zoom += ZOOM_STEP; _aplicarZoom(); e.preventDefault(); }
+    else if (e.key === '-')             { _zoom -= ZOOM_STEP; _aplicarZoom(); e.preventDefault(); }
+    else if (e.key === '0')             { _zoom = 1; _aplicarZoom(); e.preventDefault(); }
+});
+
+window.addEventListener('resize', _aplicarZoom);
+
+_aplicarZoom();
+
+// Tabs del sidebar
+function abrirSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    if (!sidebar || !overlay) return;
+    sidebar.classList.add('open');
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+}
+
+function cerrarSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    if (!sidebar || !overlay) return;
+    sidebar.classList.remove('open');
+    overlay.classList.remove('visible');
+}
+
+function switchSubtab(sub) {
+    ['estudiantes', 'personal'].forEach(s => {
+        const panel = document.getElementById('subtab-' + s);
+        const btn   = document.getElementById('subtab-btn-' + s);
+        if (!panel || !btn) return;
+        const active = s === sub;
+        panel.style.display = active ? '' : 'none';
+        btn.classList.toggle('active', active);
+        btn.classList.toggle('text-cyan-600',        active);
+        btn.classList.toggle('dark:text-cyan-400',   active);
+        btn.classList.toggle('font-semibold',        active);
+        btn.classList.toggle('bg-white',             active);
+        btn.classList.toggle('dark:bg-slate-900',    active);
+        btn.classList.toggle('border-slate-200',     active);
+        btn.classList.toggle('dark:border-slate-700',active);
+        btn.classList.toggle('text-slate-500',       !active);
+        btn.classList.toggle('dark:text-slate-400',  !active);
+        btn.classList.toggle('font-medium',          !active);
+        btn.classList.toggle('border-transparent',   !active);
+    });
+    if (sub === 'estudiantes') { const s = document.getElementById('seccionMaestro'); if(s) s.style.display = ''; cargarMaestro(); }
+    if (sub === 'personal')    cargarPersonal();
+}
+
+function switchSubtabInc(sub) {
+    ['inc', 'bans', 'sospechas'].forEach(s => {
+        const panel = document.getElementById('subtab-incidencias-' + s);
+        const btn   = document.getElementById('subtab-btn-incidencias-' + s);
+        if (!panel || !btn) return;
+        const active = s === sub;
+        panel.style.display = active ? '' : 'none';
+        const colorActivo    = s === 'sospechas' ? 'text-violet-600' : 'text-amber-600';
+        const colorActivoDark= s === 'sospechas' ? 'dark:text-violet-400' : 'dark:text-amber-400';
+        btn.classList.toggle('active',                active);
+        btn.classList.toggle(colorActivo,             active);
+        btn.classList.toggle(colorActivoDark,         active);
+        btn.classList.toggle('font-semibold',         active);
+        btn.classList.toggle('bg-white',              active);
+        btn.classList.toggle('dark:bg-slate-900',     active);
+        btn.classList.toggle('border-slate-200',      active);
+        btn.classList.toggle('dark:border-slate-700', active);
+        btn.classList.toggle('text-slate-500',        !active);
+        btn.classList.toggle('dark:text-slate-400',   !active);
+        btn.classList.toggle('font-medium',           !active);
+        btn.classList.toggle('border-transparent',    !active);
+    });
+    if (sub === 'inc')       cargarIncidencias();
+    if (sub === 'bans')      cargarBans();
+    if (sub === 'sospechas') cargarSospechas();
+}
+
+function switchSubtabCfg(sub) {
+    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones'].forEach(s => {
+        const panel = document.getElementById('subtab-cfg-' + s);
+        const btn   = document.getElementById('subtab-btn-cfg-' + s);
+        if (!panel || !btn) return;
+        const active = s === sub;
+        panel.style.display = active ? '' : 'none';
+        btn.classList.toggle('active',                active);
+        btn.classList.toggle('text-cyan-600',         active);
+        btn.classList.toggle('dark:text-cyan-400',    active);
+        btn.classList.toggle('font-semibold',         active);
+        btn.classList.toggle('bg-white',              active);
+        btn.classList.toggle('dark:bg-slate-900',     active);
+        btn.classList.toggle('border-slate-200',      active);
+        btn.classList.toggle('dark:border-slate-700', active);
+        btn.classList.toggle('text-slate-500',        !active);
+        btn.classList.toggle('dark:text-slate-400',   !active);
+        btn.classList.toggle('font-medium',           !active);
+        btn.classList.toggle('border-transparent',    !active);
+    });
+    if (sub === 'aplicacion'      && typeof _cargarCamposConfigApp === 'function') _cargarCamposConfigApp();
+    if (sub === 'actualizaciones' && typeof cargarRutaDistribucion === 'function') cargarRutaDistribucion();
+}
+
+function switchTab(tab) {
+    const tabs = ['monitoreo', 'historial', 'basedatos', 'incidencias', 'actividad', 'configuracion'];
+    const titles = {
+        monitoreo:    'Monitoreo en Vivo',
+        historial:    'Historial de Sesiones',
+        basedatos:    'Base de Datos',
+        incidencias:  'Incidencias',
+        actividad:    'Actividad de Alumnos',
+        configuracion:'Configuración'
+    };
+    tabs.forEach(t => {
+        const tabEl = document.getElementById('tab-' + t);
+        const navEl = document.getElementById('nav-' + t);
+        if (!tabEl || !navEl) return;
+        const isActive = t === tab;
+        tabEl.style.display = isActive ? '' : 'none';
+        navEl.classList.toggle('nav-item-active', isActive);
+        navEl.classList.toggle('text-slate-600', !isActive);
+        navEl.classList.toggle('dark:text-slate-400', !isActive);
+        navEl.classList.toggle('border-transparent', !isActive);
+    });
+
+    const titleEl = document.getElementById('pageTitle');
+    if (titleEl) titleEl.textContent = titles[tab] || '';
+
+    cerrarSidebar();
+
+    if (tab === 'historial')     aplicarFiltros();
+    if (tab === 'basedatos')     switchSubtab('estudiantes');
+    if (tab === 'incidencias')   switchSubtabInc('inc');
+    if (tab === 'configuracion') switchSubtabCfg('actividad');
+    if (tab === 'actividad')     cargarActividad();
+}
+</script>
 </body>
 </html>

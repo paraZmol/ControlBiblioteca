@@ -12,5 +12,8 @@
   },
   "security": {
     "pass_nivel2": "max123"
+  },
+  "actualizaciones": {
+    "ruta_distribucion": "C:\\WinSysCache"
   }
 }

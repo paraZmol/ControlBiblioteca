@@ -1,73 +1,340 @@
-Asume el rol de Technical Lead y Technical Writer. Tu tarea es analizar todo el repositorio de este proyecto (código fuente del cliente, servidor, base de datos y scripts de despliegue) y redactar un README.md exhaustivo, profesional y muy detallado.
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Biblioteca UNASAM - V2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 850: '#151e2e', 900: '#0f172a', 950: '#020617' },
+                        cyan: { 400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2' }
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        .dark ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        .dark ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-300 font-sans antialiased min-h-screen flex overflow-hidden transition-colors duration-300">
 
-Instrucciones Generales:
+    <!-- SIDEBAR (Navegación Lateral) -->
+    <aside class="w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between transition-colors duration-300 z-20">
+        <!-- Logo Area -->
+        <div>
+            <div class="h-20 flex items-center px-6 border-b border-slate-200 dark:border-slate-800">
+                <div class="flex items-center gap-3">
+                    <i class="ph ph-books text-cyan-600 dark:text-cyan-400 text-3xl"></i>
+                    <div>
+                        <h1 class="text-lg font-black text-slate-900 dark:text-white leading-tight">UNASAM</h1>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 font-medium tracking-widest uppercase">Biblioteca</p>
+                    </div>
+                </div>
+            </div>
 
-Lee todo el árbol de archivos para entender la arquitectura completa.
+            <!-- Navigation Links -->
+            <nav class="p-4 space-y-2">
+                <p class="px-4 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">Menú Principal</p>
+                
+                <button onclick="switchTab('monitoreo')" id="btn-monitoreo" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 font-bold transition-all border border-cyan-200 dark:border-cyan-500/20">
+                    <i class="ph ph-computer-tower text-xl"></i>
+                    Monitoreo en Vivo
+                </button>
+                
+                <button onclick="switchTab('historial')" id="btn-historial" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 font-medium transition-all border border-transparent">
+                    <i class="ph ph-list-dashes text-xl"></i>
+                    Historial de Sesiones
+                </button>
 
-Usa un formato Markdown muy limpio, con índices, tablas, bloques de código, emojis descriptivos y separadores.
+                <button class="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 font-medium transition-all border border-transparent">
+                    <i class="ph ph-student text-xl"></i>
+                    Base de Estudiantes
+                </button>
+            </nav>
+        </div>
 
-Donde sea necesario apoyar con una imagen, utiliza marcadores exactos entre corchetes, por ejemplo: [INSERTAR IMAGEN: Diagrama de Casos de Uso] o [INSERTAR IMAGEN: Captura del Panel de Administración].
+        <!-- System Status & Profile Sidebar Bottom -->
+        <div class="p-4 border-t border-slate-200 dark:border-slate-800 space-y-4">
+            <div class="bg-slate-100 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+                <div class="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-2">
+                    <i class="ph ph-hard-drives"></i> Servidor Local
+                </div>
+                <div class="text-sm font-mono text-slate-900 dark:text-white mb-2">10.21.1.208</div>
+                <div class="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-1 rounded text-xs font-bold w-max border border-emerald-200 dark:border-emerald-500/20">
+                    <span class="relative flex h-1.5 w-1.5"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span></span>
+                    WS ONLINE
+                </div>
+            </div>
 
-Estructura Obligatoria que debe tener el README:
+            <div class="flex items-center justify-between px-2">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-cyan-100 dark:bg-cyan-900 flex items-center justify-center text-cyan-700 dark:text-cyan-300 font-bold">
+                        A
+                    </div>
+                    <div>
+                        <p class="text-sm font-bold text-slate-900 dark:text-white">Admin</p>
+                    </div>
+                </div>
+                <button class="text-slate-400 hover:text-rose-500 transition-colors" title="Cerrar Sesión">
+                    <i class="ph ph-sign-out text-xl"></i>
+                </button>
+            </div>
+        </div>
+    </aside>
 
-1. Encabezado y Contexto:
+    <!-- MAIN CONTENT AREA -->
+    <div class="flex-1 flex flex-col h-screen overflow-hidden">
+        
+        <!-- TOP HEADER -->
+        <header class="h-20 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-8 z-10">
+            <h2 id="page-title" class="text-xl font-bold text-slate-900 dark:text-white">Monitoreo en Vivo</h2>
+            
+            <div class="flex items-center gap-4">
+                <button id="theme-toggle" class="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors focus:outline-none border border-slate-200 dark:border-slate-700">
+                    <i id="theme-icon" class="ph ph-sun text-lg"></i>
+                </button>
+                <button class="bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-500 border border-rose-200 dark:border-rose-500/30 px-4 py-2.5 rounded-xl font-bold transition-colors flex items-center gap-2 text-sm shadow-sm">
+                    <i class="ph ph-lock-key text-lg"></i> Bloquear Todas
+                </button>
+            </div>
+        </header>
 
-Nombre del Proyecto (Sistema de Control de Acceso - Biblioteca Central UNASAM).
+        <!-- SCROLLABLE CONTENT -->
+        <main class="flex-1 overflow-y-auto p-8">
+            <div class="max-w-[1600px] w-full mx-auto">
+                
+                <!-- TAB 1: MONITOREO (KPIs + Equipos) -->
+                <div id="tab-monitoreo" class="space-y-8 block animate-in fade-in duration-300">
+                    
+                    <!-- KPI CARDS -->
+                    <section class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm dark:shadow-md flex flex-col relative overflow-hidden group transition-colors">
+                            <div class="absolute right-0 top-0 opacity-[0.03] dark:opacity-5 text-8xl -mt-4 -mr-4"><i class="ph ph-desktop"></i></div>
+                            <p class="text-slate-500 dark:text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">Total Equipos</p>
+                            <h2 class="text-4xl font-black text-slate-900 dark:text-white">4</h2>
+                        </div>
+                        <div class="bg-white dark:bg-slate-900 border border-cyan-200 dark:border-cyan-500/30 rounded-2xl p-6 shadow-sm dark:shadow-[0_0_15px_rgba(6,182,212,0.1)] flex flex-col relative overflow-hidden group transition-colors">
+                            <div class="absolute right-0 top-0 opacity-10 dark:opacity-5 text-8xl -mt-4 -mr-4 text-cyan-500"><i class="ph ph-users"></i></div>
+                            <p class="text-cyan-600 dark:text-cyan-400 text-sm font-semibold uppercase tracking-wider mb-2">Sesiones Activas</p>
+                            <h2 class="text-4xl font-black text-slate-900 dark:text-white">0</h2>
+                        </div>
+                        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm dark:shadow-md flex flex-col relative overflow-hidden group transition-colors">
+                            <div class="absolute right-0 top-0 opacity-[0.03] dark:opacity-5 text-8xl -mt-4 -mr-4"><i class="ph ph-clock-counter-clockwise"></i></div>
+                            <p class="text-slate-500 dark:text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">Atenciones Hoy</p>
+                            <h2 class="text-4xl font-black text-slate-900 dark:text-white">124</h2>
+                        </div>
+                        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm dark:shadow-md flex flex-col relative overflow-hidden group transition-colors">
+                            <div class="absolute right-0 top-0 opacity-[0.03] dark:opacity-5 text-8xl -mt-4 -mr-4"><i class="ph ph-student"></i></div>
+                            <p class="text-slate-500 dark:text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">Alumnos Registrados</p>
+                            <h2 class="text-4xl font-black text-slate-900 dark:text-white">568</h2>
+                        </div>
+                    </section>
 
-Descripción del problema original (procesos manuales, cuellos de botella) y cómo este sistema lo soluciona (automatización, tiempo real, control estricto).
+                    <!-- GRID DE EQUIPOS -->
+                    <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm dark:shadow-md">
+                        <h3 class="text-lg font-bold text-slate-900 dark:text-white mb-6 border-b border-slate-100 dark:border-slate-800 pb-4">Laboratorio Físico</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
+                            
+                            <!-- PC Card Disponible -->
+                            <div class="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-5 hover:border-cyan-400 dark:hover:border-cyan-500/50 transition-all shadow-sm">
+                                <div class="flex justify-between items-start mb-4">
+                                    <div class="flex items-center gap-3">
+                                        <div class="bg-slate-200 dark:bg-slate-800 p-2 rounded-lg text-slate-500"><i class="ph ph-monitor text-2xl"></i></div>
+                                        <div>
+                                            <h4 class="text-lg font-black text-slate-900 dark:text-white leading-none">B12</h4>
+                                            <p class="text-[10px] text-slate-500 font-mono mt-1">10.21.1.111</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-4">
+                                    <span class="inline-flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold px-2.5 py-1 rounded-md border border-emerald-200 dark:border-emerald-500/20 w-full justify-center">
+                                        <i class="ph ph-check-circle"></i> Libre / Disponible
+                                    </span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button class="bg-white dark:bg-slate-900 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10 dark:hover:text-rose-400 text-slate-600 dark:text-slate-400 py-2 rounded-lg text-xs font-bold transition-colors border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-500/30 flex justify-center items-center gap-1">
+                                        <i class="ph ph-lock-key"></i> Bloquear
+                                    </button>
+                                    <button class="bg-white dark:bg-slate-900 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400 text-slate-600 dark:text-slate-400 py-2 rounded-lg text-xs font-bold transition-colors border border-slate-200 dark:border-slate-700 hover:border-red-200 dark:hover:border-red-500/30 flex justify-center items-center gap-1">
+                                        <i class="ph ph-power"></i> Apagar
+                                    </button>
+                                </div>
+                            </div>
 
-Metodologías aplicadas (levantamiento de requerimientos con stakeholders, iteraciones).
+                            <!-- PC Card Ocupada (Ejemplo) -->
+                            <div class="bg-cyan-50/50 dark:bg-cyan-900/10 border border-cyan-200 dark:border-cyan-800 rounded-xl p-5 shadow-sm relative overflow-hidden">
+                                <div class="absolute top-0 left-0 w-full h-1 bg-cyan-500"></div>
+                                <div class="flex justify-between items-start mb-4">
+                                    <div class="flex items-center gap-3">
+                                        <div class="bg-cyan-100 dark:bg-cyan-900/50 p-2 rounded-lg text-cyan-600 dark:text-cyan-400"><i class="ph ph-user-focus text-2xl"></i></div>
+                                        <div>
+                                            <h4 class="text-lg font-black text-slate-900 dark:text-white leading-none">FISICO</h4>
+                                            <p class="text-[10px] text-slate-500 font-mono mt-1">10.21.1.204</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-4 space-y-1 text-center">
+                                    <p class="text-xs font-bold text-slate-900 dark:text-white truncate" title="Gutierrez Huerta Jhury Isabel">Gutierrez Huerta Jhury</p>
+                                    <p class="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold uppercase tracking-wider">Investigación - 45 min</p>
+                                </div>
+                                <div class="grid grid-cols-1 gap-2">
+                                    <button class="bg-white dark:bg-slate-900 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-500/10 dark:hover:text-amber-400 text-slate-600 dark:text-slate-400 py-2 rounded-lg text-xs font-bold transition-colors border border-slate-200 dark:border-slate-700 flex justify-center items-center gap-2">
+                                        <i class="ph ph-sign-out"></i> Forzar Cierre de Sesión
+                                    </button>
+                                </div>
+                            </div>
 
-2. Arquitectura del Sistema y Tecnologías (Justificación Técnica):
+                        </div>
+                    </section>
+                </div>
 
-Explica por qué se eligieron las tecnologías. Ejemplos:
+                <!-- TAB 2: HISTORIAL (Tabla) -->
+                <div id="tab-historial" class="hidden animate-in fade-in duration-300">
+                    <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm dark:shadow-md flex flex-col overflow-hidden h-[calc(100vh-160px)]">
+                        
+                        <!-- Controles de Tabla -->
+                        <div class="p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex flex-wrap gap-4 items-center justify-between">
+                            <div class="flex gap-2">
+                                <div class="relative">
+                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                                    <input type="text" placeholder="Buscar alumno o DNI..." class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-sm rounded-xl pl-9 pr-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500 w-72">
+                                </div>
+                                <select class="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-sm rounded-xl px-4 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500">
+                                    <option>Todas las Facultades</option>
+                                    <option>FIC</option>
+                                    <option>FCSEC</option>
+                                </select>
+                            </div>
+                            <div class="flex gap-2">
+                                <button class="bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center gap-2">
+                                    <i class="ph ph-file-xls text-lg"></i> Exportar Excel
+                                </button>
+                                <button class="bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-500 border border-rose-200 dark:border-rose-500/30 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center gap-2">
+                                    <i class="ph ph-file-pdf text-lg"></i> PDF
+                                </button>
+                            </div>
+                        </div>
 
-Backend: FastAPI (Python) por su alta velocidad, manejo nativo de asincronía y WebSockets.
+                        <!-- Tabla con Scroll Interno -->
+                        <div class="flex-1 overflow-auto">
+                            <table class="w-full text-left border-collapse relative">
+                                <thead class="sticky top-0 bg-slate-100 dark:bg-slate-950 text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider shadow-sm z-10">
+                                    <tr>
+                                        <th class="p-4 font-bold border-b border-slate-200 dark:border-slate-800">Fecha</th>
+                                        <th class="p-4 font-bold border-b border-slate-200 dark:border-slate-800">PC</th>
+                                        <th class="p-4 font-bold border-b border-slate-200 dark:border-slate-800">Estudiante</th>
+                                        <th class="p-4 font-bold border-b border-slate-200 dark:border-slate-800">DNI</th>
+                                        <th class="p-4 font-bold border-b border-slate-200 dark:border-slate-800">Actividad</th>
+                                        <th class="p-4 font-bold border-b border-slate-200 dark:border-slate-800">Duración</th>
+                                        <th class="p-4 font-bold border-b border-slate-200 dark:border-slate-800 text-right">Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-sm divide-y divide-slate-100 dark:divide-slate-800/50">
+                                    <!-- Rows... -->
+                                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/20">
+                                        <td class="p-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">Hoy, 10:09 AM</td>
+                                        <td class="p-4 font-mono text-slate-700 dark:text-slate-300 font-bold">B12</td>
+                                        <td class="p-4 font-medium text-slate-900 dark:text-white">Gutierrez Huerta Jhury Isabel</td>
+                                        <td class="p-4 font-mono text-slate-500 dark:text-slate-400">60579836</td>
+                                        <td class="p-4 text-slate-600 dark:text-slate-300">Tarea</td>
+                                        <td class="p-4 text-slate-500 dark:text-slate-400">45 min</td>
+                                        <td class="p-4 text-right"><span class="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs px-2.5 py-1 rounded-md border border-emerald-200 dark:border-emerald-500/20 font-bold">Activa</span></td>
+                                    </tr>
+                                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/20 opacity-70">
+                                        <td class="p-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">Hoy, 09:15 AM</td>
+                                        <td class="p-4 font-mono text-slate-700 dark:text-slate-300 font-bold">FISICO</td>
+                                        <td class="p-4 font-medium text-slate-900 dark:text-white">Oropeza Quiñonez Heydi</td>
+                                        <td class="p-4 font-mono text-slate-500 dark:text-slate-400">61155610</td>
+                                        <td class="p-4 text-slate-600 dark:text-slate-300">Investigación</td>
+                                        <td class="p-4 text-slate-500 dark:text-slate-400">1h 12m</td>
+                                        <td class="p-4 text-right"><span class="text-slate-400 dark:text-slate-500 text-xs font-bold">Cerrada</span></td>
+                                    </tr>
+                                    <!-- Repetir filas vacias para ver el scroll -->
+                                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/20 opacity-70"><td class="p-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">Ayer, 16:30 PM</td><td class="p-4 font-mono text-slate-700 dark:text-slate-300 font-bold">NEWTEST</td><td class="p-4 font-medium text-slate-900 dark:text-white">Perez Garcia Juan</td><td class="p-4 font-mono text-slate-500 dark:text-slate-400">77777777</td><td class="p-4 text-slate-600 dark:text-slate-300">Consulta</td><td class="p-4 text-slate-500 dark:text-slate-400">25 min</td><td class="p-4 text-right"><span class="text-slate-400 dark:text-slate-500 text-xs font-bold">Cerrada</span></td></tr>
+                                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/20 opacity-70"><td class="p-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">Ayer, 16:30 PM</td><td class="p-4 font-mono text-slate-700 dark:text-slate-300 font-bold">NEWTEST</td><td class="p-4 font-medium text-slate-900 dark:text-white">Perez Garcia Juan</td><td class="p-4 font-mono text-slate-500 dark:text-slate-400">77777777</td><td class="p-4 text-slate-600 dark:text-slate-300">Consulta</td><td class="p-4 text-slate-500 dark:text-slate-400">25 min</td><td class="p-4 text-right"><span class="text-slate-400 dark:text-slate-500 text-xs font-bold">Cerrada</span></td></tr>
+                                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/20 opacity-70"><td class="p-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">Ayer, 16:30 PM</td><td class="p-4 font-mono text-slate-700 dark:text-slate-300 font-bold">NEWTEST</td><td class="p-4 font-medium text-slate-900 dark:text-white">Perez Garcia Juan</td><td class="p-4 font-mono text-slate-500 dark:text-slate-400">77777777</td><td class="p-4 text-slate-600 dark:text-slate-300">Consulta</td><td class="p-4 text-slate-500 dark:text-slate-400">25 min</td><td class="p-4 text-right"><span class="text-slate-400 dark:text-slate-500 text-xs font-bold">Cerrada</span></td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Paginación -->
+                        <div class="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center text-sm">
+                            <span class="text-slate-500">Mostrando 1-10 de 568</span>
+                            <div class="flex gap-2">
+                                <button class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">Anterior</button>
+                                <button class="px-3 py-1.5 rounded-lg bg-cyan-600 text-white font-bold">1</button>
+                                <button class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">Siguiente</button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
 
-Frontend Cliente (Terminales): C# con WPF por su robustez en el ecosistema Windows de la biblioteca y control de hardware.
+            </div>
+        </main>
+    </div>
 
-Frontend Admin: [Mencionar la tecnología web usada] para una gestión centralizada y responsiva.
+    <!-- Scripts: Tabs y Dark Mode -->
+    <script>
+        // Logica de Tabs (Pestañas)
+        function switchTab(tabName) {
+            // Ocultar todos
+            document.getElementById('tab-monitoreo').classList.add('hidden');
+            document.getElementById('tab-historial').classList.add('hidden');
+            
+            // Resetear estilos de botones
+            const inactiveClass = ['hover:bg-slate-100', 'dark:hover:bg-slate-800/50', 'text-slate-600', 'dark:text-slate-400', 'border-transparent'];
+            const activeClass = ['bg-cyan-50', 'dark:bg-cyan-500/10', 'text-cyan-700', 'dark:text-cyan-400', 'border-cyan-200', 'dark:border-cyan-500/20'];
+            
+            document.getElementById('btn-monitoreo').classList.remove(...activeClass);
+            document.getElementById('btn-monitoreo').classList.add(...inactiveClass);
+            document.getElementById('btn-historial').classList.remove(...activeClass);
+            document.getElementById('btn-historial').classList.add(...inactiveClass);
 
-Base de Datos: MySQL por su integridad relacional y soporte de gran volumen de datos.
+            // Activar el seleccionado
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+            document.getElementById(`btn-${tabName}`).classList.remove(...inactiveClass);
+            document.getElementById(`btn-${tabName}`).classList.add(...activeClass);
 
-Comunicación: WebSockets para validación y control de sesiones únicas en tiempo real.
+            // Cambiar titulo
+            document.getElementById('page-title').innerText = tabName === 'monitoreo' ? 'Monitoreo en Vivo' : 'Historial de Sesiones';
+        }
 
-[INSERTAR IMAGEN: Diagrama de Arquitectura de Red y Tecnologías]
+        // Logica Dark Mode
+        const themeToggleBtn = document.getElementById('theme-toggle');
+        const themeIcon = document.getElementById('theme-icon');
+        const htmlElement = document.documentElement;
 
-3. Estructura de la Base de Datos:
+        const setTheme = (isDark) => {
+            if (isDark) {
+                htmlElement.classList.add('dark');
+                themeIcon.classList.remove('ph-moon');
+                themeIcon.classList.add('ph-sun');
+            } else {
+                htmlElement.classList.remove('dark');
+                themeIcon.classList.remove('ph-sun');
+                themeIcon.classList.add('ph-moon');
+            }
+        };
 
-Explicación detallada del esquema.
+        const isDarkMode = localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        setTheme(isDarkMode);
 
-Tablas principales (Alumnos, Historial, Usuarios Admin).
-
-Explicar la lógica de "Upsert" (evitar duplicidad por DNI) y las relaciones.
-
-[INSERTAR IMAGEN: Diagrama Entidad-Relación (DER)]
-
-4. Módulos del Sistema (A detalle):
-
-Módulo Cliente (EXE): Explicación del flujo del alumno (Ingreso de DNI, selección de motivo, validación WebSocket, manejo condicional del aviso "Usuario no encontrado").
-
-Módulo Servidor (API): Gestión de conexiones concurrentes, endpoints de validación, JWT/Seguridad.
-
-Módulo Administrador (Web): Importación masiva de Excel, reportes PDF/Excel, monitoreo de sesiones activas, control de niveles de acceso (nivel 1 y nivel 2).
-
-[INSERTAR IMAGEN: Interfaz de Terminal de Ingreso]
-
-[INSERTAR IMAGEN: Panel de Control del Administrador]
-
-5. Despliegue y Configuración (Producción):
-
-Requisitos de Hardware y Software.
-
-Explicación de la "Arquitectura de Configuración Centralizada" (uso del config.json como única fuente de la verdad para IP estática, puertos y credenciales).
-
-Explicación del flujo de los scripts .bat (instalar_servidor.bat y servidor_run.bat) y cómo el sistema genera automáticamente el .env y la base de datos sin intervención manual.
-
-6. Versiones y Mantenimiento:
-
-Historial de versiones actual.
-
-Pasos para futuros desarrolladores (cómo levantar el entorno de desarrollo vs producción).
-
-No asumas nada; extrae la información directamente leyendo el código fuente. Escribe el README completo en español técnico, listo para ser copiado y pegado en el repositorio final.
+        themeToggleBtn.addEventListener('click', () => {
+            const isDark = htmlElement.classList.toggle('dark');
+            setTheme(isDark);
+            localStorage.theme = isDark ? 'dark' : 'light';
+        });
+    </script>
+</body>
+</html>

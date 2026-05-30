@@ -160,12 +160,104 @@ class Usuario(Base):
     username:         Mapped[str] = mapped_column(String(50),  unique=True, nullable=False)
     hashed_password:  Mapped[str] = mapped_column(String(255), nullable=False)
     nombre_completo:  Mapped[str] = mapped_column(String(150), nullable=True)
-    rol:              Mapped[str] = mapped_column(String(20),  default="encargado")
+    rol:              Mapped[str] = mapped_column(String(20),  default="admin")
     activo:           Mapped[bool]= mapped_column(Boolean, default=True)
     intentos_fallidos: Mapped[int] = mapped_column(Integer, default=0)
     bloqueado_hasta:  Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self): return f"<Usuario {self.username} ({self.rol})>"
+
+
+class Ban(Base):
+    __tablename__ = "bans"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:            Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dni_alumno:    Mapped[str] = mapped_column(ForeignKey("alumnos_maestro.dni", ondelete="CASCADE"), nullable=False, index=True)
+    motivo:        Mapped[str] = mapped_column(String(300), nullable=False)
+    fecha_ini:     Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    fecha_fin:     Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    baneado_por:   Mapped[str] = mapped_column(String(50), nullable=True)
+    levantado_por: Mapped[str] = mapped_column(String(50), nullable=True)
+    fecha_levantado: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+    alumno: Mapped["AlumnoMaestro"] = relationship()
+
+    def __repr__(self): return f"<Ban {self.id} alumno={self.dni_alumno} hasta={self.fecha_fin}>"
+
+
+class Incidencia(Base):
+    __tablename__ = "incidencias"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:              Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dni_alumno:      Mapped[str] = mapped_column(ForeignKey("alumnos_maestro.dni", ondelete="CASCADE"), nullable=False, index=True)
+    nombre_alumno:   Mapped[str] = mapped_column(String(200), nullable=False)
+    tipo:            Mapped[str] = mapped_column(String(10),  nullable=False, default="leve")  # leve | grave
+    motivo:          Mapped[str] = mapped_column(String(200), nullable=False)
+    descripcion:     Mapped[str] = mapped_column(String(600), nullable=True)
+    fecha:           Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    registrado_por:  Mapped[str] = mapped_column(String(50),  nullable=False)
+    activa:          Mapped[bool] = mapped_column(Boolean, default=True)  # False = reseteada por ban levantado
+
+    alumno: Mapped["AlumnoMaestro"] = relationship()
+
+    def __repr__(self): return f"<Incidencia {self.id} alumno={self.dni_alumno} tipo={self.tipo}>"
+
+
+class PersonalUniversidad(Base):
+    __tablename__ = "personal_universidad"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    dni:        Mapped[str] = mapped_column(String(8),   primary_key=True)
+    nombre:     Mapped[str] = mapped_column(String(200), nullable=False)
+    cargo:      Mapped[str] = mapped_column(String(150), nullable=True)
+    area:       Mapped[str] = mapped_column(String(200), nullable=True)
+    correo:     Mapped[str] = mapped_column(String(150), nullable=True)
+    telefono:   Mapped[str] = mapped_column(String(20),  nullable=True)
+    activo:     Mapped[bool] = mapped_column(Boolean, default=True)
+
+    def __repr__(self): return f"<PersonalUniversidad {self.dni}: {self.nombre}>"
+
+
+class Sospecha(Base):
+    __tablename__ = "sospechas"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:            Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dni_alumno:    Mapped[str] = mapped_column(ForeignKey("alumnos_maestro.dni", ondelete="CASCADE"), nullable=False, index=True)
+    nombre_alumno: Mapped[str] = mapped_column(String(200), nullable=False)
+    tipo:          Mapped[str] = mapped_column(String(50),  nullable=False)   # cambio_pc_rapido | dni_baneado_intento | sesion_larga
+    detalle:       Mapped[str] = mapped_column(String(600), nullable=False)
+    fecha:         Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    estado:        Mapped[str] = mapped_column(String(20),  default="pendiente")  # pendiente | aprobada | descartada
+    revisado_por:  Mapped[str] = mapped_column(String(50),  nullable=True)
+    fecha_revision: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+    alumno: Mapped["AlumnoMaestro"] = relationship()
+
+    def __repr__(self): return f"<Sospecha {self.id} dni={self.dni_alumno} tipo={self.tipo}>"
+
+
+class ActividadLog(Base):
+    __tablename__ = "actividad_logs"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:              Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_terminal:     Mapped[int] = mapped_column(ForeignKey("terminales.id", ondelete="CASCADE"), nullable=False, index=True)
+    nombre_terminal: Mapped[str] = mapped_column(String(100), nullable=False)
+    dni_alumno:      Mapped[str] = mapped_column(ForeignKey("alumnos_maestro.dni", ondelete="CASCADE"), nullable=False, index=True)
+    nombre_alumno:   Mapped[str] = mapped_column(String(200), nullable=False)
+    tipo:            Mapped[str] = mapped_column(String(30),  nullable=False)   # proceso | archivo | comando | navegador
+    descripcion:     Mapped[str] = mapped_column(String(300), nullable=False)
+    detalle:         Mapped[str] = mapped_column(String(600), nullable=True)
+    nivel:           Mapped[str] = mapped_column(String(20),  nullable=False, default="normal")  # normal | sospechoso
+    fecha_hora:      Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+
+    terminal: Mapped["Terminal"]      = relationship()
+    alumno:   Mapped["AlumnoMaestro"] = relationship()
+
+    def __repr__(self): return f"<ActividadLog {self.id} {self.tipo} {self.dni_alumno}>"
 
 
 # ── Alias legacy: Alumno → AlumnoMaestro para no romper main.py ──────

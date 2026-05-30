@@ -9,12 +9,15 @@ import asyncio
 
 import hashlib
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, delete
 from database import init_db, async_session
-from models import AlumnoMaestro, Usuario, Terminal, Sesion, Facultad, Escuela
+from models import AlumnoMaestro, Usuario, Terminal, Sesion, Facultad, Escuela, Ban, PersonalUniversidad, ActividadLog, Sospecha
+from sqlalchemy.ext.asyncio import AsyncSession
+from database import get_db
+from pydantic import BaseModel as _BaseModel
 from auth_service import hashear_password, obtener_usuario_actual
 from api.endpoints import router as api_router
 from core.websocket_manager import manager
@@ -171,6 +174,24 @@ async def _migrar_columnas():
             try:
                 await db.execute(text("ALTER TABLE catalogo_motivos ADD COLUMN activo BOOLEAN DEFAULT TRUE"))
             except Exception: pass
+            # Tabla sospechas
+            try:
+                await db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS sospechas (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        dni_alumno VARCHAR(8) NOT NULL,
+                        nombre_alumno VARCHAR(200) NOT NULL,
+                        tipo VARCHAR(50) NOT NULL,
+                        detalle VARCHAR(600) NOT NULL,
+                        fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        estado VARCHAR(20) DEFAULT 'pendiente',
+                        revisado_por VARCHAR(50) NULL,
+                        fecha_revision DATETIME NULL,
+                        INDEX idx_sospecha_dni (dni_alumno),
+                        FOREIGN KEY (dni_alumno) REFERENCES alumnos_maestro(dni) ON DELETE CASCADE
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """))
+            except Exception: pass
             await db.commit()
     except Exception as e:
         logger.error(f"Error en migraciones: {e}")
@@ -184,11 +205,7 @@ async def _limpiar_sesiones_fantasma():
         try:
             async with async_session() as db:
                 from sqlalchemy import text as _text
-                db_url = os.getenv("DATABASE_URL", "")
-                if "sqlite" in db_url:
-                    query = _text("SELECT id, id_terminal FROM sesiones WHERE estado='activa' AND confirmada=0 AND (strftime('%s','now') - strftime('%s', hora_entrada)) > 10")
-                else:
-                    query = _text("SELECT id, id_terminal FROM sesiones WHERE estado='activa' AND confirmada=0 AND TIMESTAMPDIFF(SECOND, hora_entrada, NOW()) > 10")
+                query = _text("SELECT id, id_terminal FROM sesiones WHERE estado='activa' AND confirmada=0 AND TIMESTAMPDIFF(SECOND, hora_entrada, NOW()) > 10")
                 res = await db.execute(query)
                 fantasmas = res.fetchall()
                 for row in fantasmas:
@@ -246,7 +263,7 @@ async def lifespan(_app: FastAPI):
                 username="admin",
                 hashed_password=hashear_password("admin123"),
                 nombre_completo="Administrador",
-                rol="admin"
+                rol="superadmin"
             )
             db.add(admin)
             await db.commit()
@@ -301,16 +318,76 @@ async def server_info():
 # ── Endpoint de configuración de roles ────────────────────────────────
 
 @app.get("/api/config/nivel2-hash")
-async def nivel2_hash(admin: Usuario = Depends(obtener_usuario_actual)):
-    """Devuelve el SHA-256 de la contraseña Nivel 2 (nunca la clave en claro).
-    Requiere autenticación JWT válida.
-    """
+async def nivel2_hash(
+    admin: Usuario = Depends(obtener_usuario_actual),
+    db: AsyncSession = Depends(get_db),
+):
+    """Devuelve el SHA-256 de la contraseña Nivel 2 desde ajustes_sistema."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo superadmin puede ver este recurso")
+    from sqlalchemy import text as _text
+    res = await db.execute(_text("SELECT valor FROM ajustes_sistema WHERE clave='pass_nivel2_hash'"))
+    row = res.fetchone()
+    if row:
+        return {"hash": row[0]}
+    # fallback al .env si aún no se migró
     raw = os.getenv("PASS_NIVEL2", "")
     if not raw:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail="PASS_NIVEL2 no configurada en el servidor")
-    h = hashlib.sha256(raw.encode()).hexdigest()
-    return {"hash": h}
+        raise HTTPException(status_code=503, detail="Contraseña Nivel 2 no configurada")
+    return {"hash": hashlib.sha256(raw.encode()).hexdigest()}
+
+
+class _CambiarPasswordAdmin(_BaseModel):
+    password_actual: str
+    password_nueva: str
+
+class _CambiarNivel2(_BaseModel):
+    password_actual_nivel2: str   # en claro — se verifica contra el hash guardado
+    password_nueva: str
+
+
+@app.put("/api/config/password-admin")
+async def cambiar_password_admin(
+    datos: _CambiarPasswordAdmin,
+    admin: Usuario = Depends(obtener_usuario_actual),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cambia la contraseña del usuario admin autenticado."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo superadmin puede cambiar contraseñas")
+    from auth_service import verificar_password
+    if not verificar_password(datos.password_actual, admin.hashed_password):
+        raise HTTPException(status_code=400, detail="La contraseña actual es incorrecta")
+    if len(datos.password_nueva) < 6:
+        raise HTTPException(status_code=422, detail="La nueva contraseña debe tener al menos 6 caracteres")
+    res = await db.execute(select(Usuario).where(Usuario.username == admin.username))
+    usuario = res.scalar_one_or_none()
+    usuario.hashed_password = hashear_password(datos.password_nueva)
+    await db.commit()
+    return {"mensaje": "Contraseña actualizada correctamente"}
+
+
+@app.put("/api/config/password-nivel2")
+async def cambiar_password_nivel2(
+    datos: _CambiarNivel2,
+    admin: Usuario = Depends(obtener_usuario_actual),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cambia la contraseña de Nivel 2 (verificando la actual)."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden cambiar la contraseña de Nivel 2")
+    from sqlalchemy import text as _text
+    res = await db.execute(_text("SELECT valor FROM ajustes_sistema WHERE clave='pass_nivel2_hash'"))
+    row = res.fetchone()
+    hash_actual = row[0] if row else hashlib.sha256(os.getenv("PASS_NIVEL2", "").encode()).hexdigest()
+    if hashlib.sha256(datos.password_actual_nivel2.encode()).hexdigest() != hash_actual:
+        raise HTTPException(status_code=400, detail="La contraseña de Nivel 2 actual es incorrecta")
+    if len(datos.password_nueva) < 4:
+        raise HTTPException(status_code=422, detail="La nueva contraseña debe tener al menos 4 caracteres")
+    nuevo_hash = hashlib.sha256(datos.password_nueva.encode()).hexdigest()
+    await db.execute(_text("INSERT INTO ajustes_sistema (clave, valor) VALUES ('pass_nivel2_hash', :h) ON DUPLICATE KEY UPDATE valor=:h"), {"h": nuevo_hash})
+    await db.commit()
+    return {"mensaje": "Contraseña de Nivel 2 actualizada correctamente"}
 
 
 # ── Endpoint de limpieza y mantenimiento ───────────────────────────
@@ -324,7 +401,7 @@ async def limpiar_todo(
     Solo administradores pueden ejecutar esta operación.
     Requiere autenticación JWT válida con rol='admin'.
     """
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         logger.warning(f"[SEGURIDAD] Usuario '{admin.username}' ({admin.rol}) intentó ejecutar LIMPIAR-TODO sin autorización")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo administradores pueden ejecutar esta operación")
     
@@ -640,6 +717,76 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             await manager.notificar_evento(f"✅ Desbloqueo confirmado en {terminal_id}", "login")
                 await manager.notificar_admins()
 
+            elif tipo == "actividad":
+                # Evento de actividad del alumno en la PC (proceso, archivo, comando, navegador)
+                async with async_session() as db:
+                    t = await _buscar_terminal(db, terminal_id, terminal_ip)
+                    if not t:
+                        continue
+                    # Buscar sesión activa para obtener el alumno
+                    res_s = await db.execute(
+                        select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
+                    )
+                    sesion = res_s.scalar_one_or_none()
+                    if not sesion:
+                        continue  # sin sesión activa, ignorar
+
+                    res_a = await db.execute(
+                        select(AlumnoMaestro).where(AlumnoMaestro.dni == sesion.dni_alumno)
+                    )
+                    alumno = res_a.scalar_one_or_none()
+                    if not alumno:
+                        continue
+
+                    tipo_ev    = str(data.get("evento",      "proceso")).strip()
+                    descripcion= str(data.get("descripcion", "")).strip()[:300]
+                    detalle    = str(data.get("detalle",     "") or "").strip()[:600]
+                    nivel      = str(data.get("nivel",       "normal")).strip()
+                    if nivel not in ("normal", "sospechoso"):
+                        nivel = "normal"
+
+                    log = ActividadLog(
+                        id_terminal     = t.id,
+                        nombre_terminal = t.nombre_red,
+                        dni_alumno      = alumno.dni,
+                        nombre_alumno   = alumno.nombre,
+                        tipo            = tipo_ev,
+                        descripcion     = descripcion,
+                        detalle         = detalle or None,
+                        nivel           = nivel,
+                    )
+                    db.add(log)
+
+                    # Si es sospechoso, crear sospecha automáticamente
+                    if nivel == "sospechoso":
+                        sosp = Sospecha(
+                            dni_alumno    = alumno.dni,
+                            nombre_alumno = alumno.nombre,
+                            tipo          = "actividad_sospechosa",
+                            detalle       = f"[{t.nombre_red}] {descripcion}" + (f" — {detalle}" if detalle else ""),
+                        )
+                        db.add(sosp)
+                        await db.flush()
+                        await manager._broadcast_admins({
+                            "tipo":    "sospecha",
+                            "nivel":   "alerta",
+                            "mensaje": f"⚠ {alumno.nombre} ({alumno.dni}) en {t.nombre_red}: {descripcion}",
+                        })
+
+                    await db.commit()
+                    logger.info(f"[ACT] {t.nombre_red} | {alumno.dni} | {tipo_ev} | {nivel} | {descripcion}")
+
+                    # Notificar al panel admin en tiempo real
+                    await manager._broadcast_admins({
+                        "tipo":            "actividad",
+                        "nombre_terminal": t.nombre_red,
+                        "dni_alumno":      alumno.dni,
+                        "nombre_alumno":   alumno.nombre,
+                        "tipo_evento":     tipo_ev,
+                        "descripcion":     descripcion,
+                        "nivel":           nivel,
+                    })
+
             elif tipo == "logout":
                 logger.info(f"[WS] {terminal_id} logout recibido")
                 async with async_session() as db:
@@ -686,9 +833,38 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
 # ── WebSocket para panel admin ──────────────────────────────────────
 
 @app.websocket("/ws/admin")
-async def websocket_admin(websocket: WebSocket):
+async def websocket_admin(websocket: WebSocket, token: str = Query(default="")):
     """WebSocket bidireccional: recibe comandos del admin y envía push de estado."""
-    await manager.conectar_admin(websocket)
+    # Aceptar primero (Starlette requiere accept() antes de close() con código custom)
+    await websocket.accept()
+
+    # ── Validar JWT ──
+    if not token:
+        await websocket.close(code=4001, reason="Token requerido")
+        return
+    try:
+        from auth_service import SECRET_KEY, ALGORITHM
+        from jose import jwt as _jwt
+        payload = _jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username:
+            raise ValueError("Token sin subject")
+        async with async_session() as db:
+            res = await db.execute(select(Usuario).where(Usuario.username == username))
+            user = res.scalar_one_or_none()
+            if not user or not user.activo:
+                raise ValueError("Usuario inactivo o inexistente")
+            if user.rol not in ("superadmin", "admin"):
+                raise ValueError("Rol insuficiente")
+    except Exception as e:
+        logger.warning(f"[WS-Admin] Conexión rechazada: {e}")
+        await websocket.close(code=4003, reason="Token inválido o expirado")
+        return
+
+    # Conexión autenticada — registrar en el manager (ya aceptada arriba)
+    manager._admins.append(websocket)
+    logger.info("Panel admin conectado (autenticado)")
+    await manager._enviar_estado(websocket)
     try:
         while True:
             try:

@@ -1,11 +1,12 @@
 # endpoints.py - Rutas de la API REST
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile
+import asyncio
+from datetime import datetime, date, timedelta
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
-from models import AlumnoMaestro, Terminal, Sesion, Usuario, Facultad, Escuela
+from models import AlumnoMaestro, Terminal, Sesion, Usuario, Facultad, Escuela, Ban, PersonalUniversidad, Incidencia, Sospecha, ActividadLog
 Alumno = AlumnoMaestro  # alias local para compatibilidad con código legacy
 from auth_service import (
     verificar_password, hashear_password, crear_token, obtener_usuario_actual
@@ -41,7 +42,7 @@ class UsuarioCrear(BaseModel):
     username: str
     password: str
     nombre_completo: str | None = None
-    rol: str = "encargado"
+    rol: str = "admin"
 
 
 # ── Server Info ────────────────────────────────────────────────────
@@ -85,7 +86,7 @@ async def registrar_usuario(
     admin: Usuario = Depends(obtener_usuario_actual)
 ):
     """Registrar nuevo usuario (solo admins)."""
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden crear usuarios")
     nuevo = Usuario(
         username=datos.username,
@@ -141,7 +142,7 @@ async def exportar_alumnos(
     import openpyxl
     from sqlalchemy.orm import joinedload
 
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden exportar el backup")
 
     result = await db.execute(
@@ -244,6 +245,42 @@ async def iniciar_sesion(
     terminal.estado = "activo"
     db.add(sesion)
     await db.flush()
+
+    # ── Detección de anomalías ────────────────────────────────────
+    ahora = datetime.now()
+
+    # 1. Cambios rápidos de PC: 3+ sesiones en terminales distintas en los últimos 5 min
+    ventana = ahora - timedelta(minutes=5)
+    res_rec = await db.execute(
+        select(Sesion)
+        .where(Sesion.dni_alumno == alumno.dni, Sesion.hora_entrada >= ventana)
+        .order_by(Sesion.hora_entrada.desc())
+    )
+    sesiones_recientes = res_rec.scalars().all()
+    terminales_distintas = {s.id_terminal for s in sesiones_recientes}
+    if len(terminales_distintas) >= 3:
+        detalle = (
+            f"{alumno.nombre} inició sesión en {len(terminales_distintas)} PCs distintas "
+            f"en los últimos 5 minutos ({len(sesiones_recientes)} intentos). "
+            f"Posible uso compartido de credencial."
+        )
+        sospecha = Sospecha(
+            dni_alumno=alumno.dni,
+            nombre_alumno=alumno.nombre,
+            tipo="cambio_pc_rapido",
+            detalle=detalle,
+        )
+        db.add(sospecha)
+        await db.flush()
+        await manager.broadcast({
+            "tipo": "sospecha",
+            "nivel": "alerta",
+            "mensaje": f"⚠ SOSPECHA — {alumno.nombre} (DNI {alumno.dni}): cambió de PC "
+                       f"{len(terminales_distintas)} veces en 5 min",
+            "sospecha_id": sospecha.id,
+        })
+
+    await db.commit()
     return {"sesion_id": sesion.id, "mensaje": "Sesión iniciada", "alumno": alumno.nombre}
 
 
@@ -297,13 +334,38 @@ _SORT_MAP = {
 }
 
 
-def _aplicar_filtro_fecha(q, periodo: str | None, fecha_inicio: str | None, fecha_fin: str | None):
+def _aplicar_filtro_fecha(q, periodo: str | None, fecha_inicio: str | None, fecha_fin: str | None,
+                          mes: str | None = None, anio: str | None = None):
     """Aplica filtro de fecha sobre Sesion.fecha_uso (columna DATE en MySQL)."""
-    from datetime import date, timedelta
+    from datetime import date
+    import calendar
 
     hoy = date.today()
 
-    if periodo == "dia" or periodo is None:
+    # Mes + año específico tiene prioridad sobre los chips rápidos
+    if mes and anio:
+        anio_i = int(anio)
+        mes_i  = int(mes)
+        ultimo = calendar.monthrange(anio_i, mes_i)[1]
+        q = q.where(
+            Sesion.fecha_uso >= date(anio_i, mes_i, 1),
+            Sesion.fecha_uso <= date(anio_i, mes_i, ultimo),
+        )
+    elif anio and not mes:
+        anio_i = int(anio)
+        q = q.where(
+            Sesion.fecha_uso >= date(anio_i, 1, 1),
+            Sesion.fecha_uso <= date(anio_i, 12, 31),
+        )
+    elif mes and not anio:
+        mes_i  = int(mes)
+        anio_i = hoy.year
+        ultimo = calendar.monthrange(anio_i, mes_i)[1]
+        q = q.where(
+            Sesion.fecha_uso >= date(anio_i, mes_i, 1),
+            Sesion.fecha_uso <= date(anio_i, mes_i, ultimo),
+        )
+    elif periodo == "dia" or periodo is None:
         q = q.where(Sesion.fecha_uso == hoy)
     elif periodo == "mes":
         q = q.where(
@@ -333,9 +395,13 @@ async def sesiones_activas(
     actividad:    str | None = None,
     sort_by:      str = "fecha",
     order:        str = "desc",
-    periodo:      str | None = None,   # dia | mes | anio | rango | todo
-    fecha_inicio: str | None = None,   # YYYY-MM-DD (solo con periodo=rango)
-    fecha_fin:    str | None = None,   # YYYY-MM-DD (solo con periodo=rango)
+    periodo:      str | None = None,
+    fecha_inicio: str | None = None,
+    fecha_fin:    str | None = None,
+    mes:          str | None = None,
+    anio:         str | None = None,
+    limit:        int = 30,
+    offset:       int = 0,
 ):
     """Historial con filtros de búsqueda, actividad, fecha y ordenamiento."""
     from sqlalchemy import or_
@@ -350,7 +416,7 @@ async def sesiones_activas(
          .outerjoin(Facultad, Escuela.id_facultad        == Facultad.id)
          .outerjoin(FacDir,   AlumnoMaestro.id_facultad  == FacDir.id))
 
-    q = _aplicar_filtro_fecha(q, periodo, fecha_inicio, fecha_fin)
+    q = _aplicar_filtro_fecha(q, periodo, fecha_inicio, fecha_fin, mes, anio)
 
     if search:
         like = f"%{search}%"
@@ -365,6 +431,11 @@ async def sesiones_activas(
     cols = _SORT_MAP.get(sort_by.lower(), (Sesion.hora_entrada,))
     q = q.order_by(*cols) if order.lower() == "asc" else q.order_by(*[c.desc() for c in cols])
 
+    from sqlalchemy import func as _func
+    total_result = await db.execute(select(_func.count()).select_from(q.subquery()))
+    total = total_result.scalar() or 0
+
+    q = q.offset(offset).limit(limit)
     result = await db.execute(q)
     rows = []
     for s, a, t, esc_obj, fac_obj, fac_dir in result.all():
@@ -392,7 +463,501 @@ async def sesiones_activas(
             "activa":          s.activa,
             "duracion_min":    duracion_min,
         })
-    return rows
+    return {"total": total, "items": rows}
+
+
+@router.get("/admin/estadisticas/grafico")
+async def estadisticas_grafico(
+    eje_x:        str = "dia",
+    eje_y:        str = "sesiones",
+    periodo:      str = "todo",
+    mes:          str | None = None,
+    anio:         str | None = None,
+    fecha_inicio: str | None = None,
+    fecha_fin:    str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    from sqlalchemy import text as _text
+    import calendar as _cal
+
+    hoy = date.today()
+
+    # ── Filtro de periodo ──────────────────────────────────────────
+    if mes and anio:
+        anio_i, mes_i = int(anio), int(mes)
+        ultimo = _cal.monthrange(anio_i, mes_i)[1]
+        filtro_periodo = (
+            f"AND DATE(hora_entrada) >= '{date(anio_i, mes_i, 1)}' "
+            f"AND DATE(hora_entrada) <= '{date(anio_i, mes_i, ultimo)}'"
+        )
+    elif anio and not mes:
+        anio_i = int(anio)
+        filtro_periodo = (
+            f"AND DATE(hora_entrada) >= '{date(anio_i, 1, 1)}' "
+            f"AND DATE(hora_entrada) <= '{date(anio_i, 12, 31)}'"
+        )
+    elif mes and not anio:
+        mes_i = int(mes); ultimo = _cal.monthrange(hoy.year, mes_i)[1]
+        filtro_periodo = (
+            f"AND DATE(hora_entrada) >= '{date(hoy.year, mes_i, 1)}' "
+            f"AND DATE(hora_entrada) <= '{date(hoy.year, mes_i, ultimo)}'"
+        )
+    elif periodo == "rango" and fecha_inicio and fecha_fin:
+        filtro_periodo = (
+            f"AND DATE(hora_entrada) >= '{fecha_inicio}' "
+            f"AND DATE(hora_entrada) <= '{fecha_fin}'"
+        )
+    else:
+        filtro_periodo = {
+            "dia":  "AND DATE(hora_entrada) = CURDATE()",
+            "mes":  "AND hora_entrada >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)",
+            "anio": "AND hora_entrada >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)",
+            "todo": "",
+        }.get(periodo, "")
+
+    # ── Agrupación eje X ──────────────────────────────────────────
+    agrupacion = {
+        "dia":    "DATE(hora_entrada)",
+        "semana": "DATE(DATE_SUB(hora_entrada, INTERVAL WEEKDAY(hora_entrada) DAY))",
+        "mes":    "DATE_FORMAT(hora_entrada, '%Y-%m-01')",
+    }.get(eje_x, "DATE(hora_entrada)")
+
+    label_format = {
+        "dia":    "DATE_FORMAT(hora_entrada, '%d %b')",
+        "semana": "DATE_FORMAT(DATE_SUB(hora_entrada, INTERVAL WEEKDAY(hora_entrada) DAY), '%d %b')",
+        "mes":    "DATE_FORMAT(hora_entrada, '%b %Y')",
+    }.get(eje_x, "DATE_FORMAT(hora_entrada, '%d %b')")
+
+    # ── Métrica eje Y ──────────────────────────────────────────────
+    metrica = {
+        "sesiones": "COUNT(*)",
+        "usuarios": "COUNT(DISTINCT dni_alumno)",
+        "duracion": "ROUND(AVG(TIMESTAMPDIFF(MINUTE, hora_entrada, COALESCE(hora_salida, NOW()))), 1)",
+    }.get(eje_y, "COUNT(*)")
+
+    sql = f"""
+        SELECT
+            {label_format}      AS label,
+            {agrupacion}        AS periodo_key,
+            {metrica}           AS valor
+        FROM sesiones
+        WHERE hora_entrada IS NOT NULL
+        {filtro_periodo}
+        GROUP BY periodo_key, label
+        ORDER BY periodo_key ASC
+    """
+
+    res  = await db.execute(_text(sql))
+    rows = res.fetchall()
+
+    return {
+        "labels": [r[0] for r in rows],
+        "valores": [float(r[2]) if r[2] is not None else 0 for r in rows],
+        "eje_y":   eje_y,
+        "eje_x":   eje_x,
+        "periodo": periodo,
+    }
+
+
+@router.get("/admin/estadisticas/distribucion")
+async def estadisticas_distribucion(
+    grupo:        str = "facultad",   # facultad | escuela | actividad
+    periodo:      str = "todo",
+    mes:          str | None = None,
+    anio:         str | None = None,
+    fecha_inicio: str | None = None,
+    fecha_fin:    str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    from sqlalchemy import text as _text
+    import calendar as _cal
+
+    hoy = date.today()
+
+    if mes and anio:
+        anio_i, mes_i = int(anio), int(mes)
+        ultimo = _cal.monthrange(anio_i, mes_i)[1]
+        filtro = (f"AND DATE(s.hora_entrada) >= '{date(anio_i, mes_i, 1)}' "
+                  f"AND DATE(s.hora_entrada) <= '{date(anio_i, mes_i, ultimo)}'")
+    elif anio and not mes:
+        anio_i = int(anio)
+        filtro = (f"AND DATE(s.hora_entrada) >= '{date(anio_i,1,1)}' "
+                  f"AND DATE(s.hora_entrada) <= '{date(anio_i,12,31)}'")
+    elif mes and not anio:
+        mes_i = int(mes); ultimo = _cal.monthrange(hoy.year, mes_i)[1]
+        filtro = (f"AND DATE(s.hora_entrada) >= '{date(hoy.year, mes_i, 1)}' "
+                  f"AND DATE(s.hora_entrada) <= '{date(hoy.year, mes_i, ultimo)}'")
+    elif periodo == "rango" and fecha_inicio and fecha_fin:
+        filtro = (f"AND DATE(s.hora_entrada) >= '{fecha_inicio}' "
+                  f"AND DATE(s.hora_entrada) <= '{fecha_fin}'")
+    else:
+        filtro = {
+            "dia":  "AND DATE(s.hora_entrada) = CURDATE()",
+            "mes":  "AND s.hora_entrada >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            "anio": "AND s.hora_entrada >= DATE_SUB(NOW(), INTERVAL 1 YEAR)",
+            "todo": "",
+        }.get(periodo, "")
+
+    if grupo == "facultad":
+        sql = f"""
+            SELECT COALESCE(f.nombre, f2.nombre, 'Sin facultad') AS grupo, COUNT(*) AS total
+            FROM sesiones s
+            JOIN alumnos_maestro a ON s.dni_alumno = a.dni
+            LEFT JOIN escuelas e   ON a.id_escuela  = e.id
+            LEFT JOIN facultades f ON e.id_facultad = f.id
+            LEFT JOIN facultades f2 ON a.id_facultad = f2.id
+            WHERE s.hora_entrada IS NOT NULL {filtro}
+            GROUP BY grupo ORDER BY total DESC LIMIT 15
+        """
+    elif grupo == "escuela":
+        sql = f"""
+            SELECT COALESCE(e.nombre, 'Sin escuela') AS grupo, COUNT(*) AS total
+            FROM sesiones s
+            JOIN alumnos_maestro a ON s.dni_alumno = a.dni
+            LEFT JOIN escuelas e   ON a.id_escuela  = e.id
+            WHERE s.hora_entrada IS NOT NULL {filtro}
+            GROUP BY grupo ORDER BY total DESC LIMIT 15
+        """
+    elif grupo == "terminal":
+        sql = f"""
+            SELECT COALESCE(t.nombre_red, t.ip, 'Sin terminal') AS grupo, COUNT(*) AS total
+            FROM sesiones s
+            JOIN terminales t ON s.id_terminal = t.id
+            WHERE s.hora_entrada IS NOT NULL {filtro}
+            GROUP BY grupo ORDER BY total DESC LIMIT 20
+        """
+    else:  # actividad
+        sql = f"""
+            SELECT COALESCE(NULLIF(TRIM(s.razon_uso),''), 'Sin especificar') AS grupo, COUNT(*) AS total
+            FROM sesiones s
+            WHERE s.hora_entrada IS NOT NULL {filtro}
+            GROUP BY grupo ORDER BY total DESC LIMIT 15
+        """
+
+    res  = await db.execute(_text(sql))
+    rows = res.fetchall()
+    return {
+        "labels": [r[0] for r in rows],
+        "valores": [int(r[1]) for r in rows],
+        "grupo": grupo,
+    }
+
+
+@router.get("/admin/estadisticas/heatmap")
+async def estadisticas_heatmap(
+    periodo:      str = "todo",
+    mes:          str | None = None,
+    anio:         str | None = None,
+    fecha_inicio: str | None = None,
+    fecha_fin:    str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    """Devuelve conteo de sesiones por día_semana (0=Lun..6=Dom) x hora (0..23)."""
+    from sqlalchemy import text as _text
+    import calendar as _cal
+
+    hoy = date.today()
+
+    if mes and anio:
+        anio_i, mes_i = int(anio), int(mes)
+        ultimo = _cal.monthrange(anio_i, mes_i)[1]
+        filtro = (f"AND DATE(hora_entrada) >= '{date(anio_i, mes_i, 1)}' "
+                  f"AND DATE(hora_entrada) <= '{date(anio_i, mes_i, ultimo)}'")
+    elif anio and not mes:
+        anio_i = int(anio)
+        filtro = (f"AND DATE(hora_entrada) >= '{date(anio_i,1,1)}' "
+                  f"AND DATE(hora_entrada) <= '{date(anio_i,12,31)}'")
+    elif mes and not anio:
+        mes_i = int(mes); ultimo = _cal.monthrange(hoy.year, mes_i)[1]
+        filtro = (f"AND DATE(hora_entrada) >= '{date(hoy.year, mes_i, 1)}' "
+                  f"AND DATE(hora_entrada) <= '{date(hoy.year, mes_i, ultimo)}'")
+    elif periodo == "rango" and fecha_inicio and fecha_fin:
+        filtro = (f"AND DATE(hora_entrada) >= '{fecha_inicio}' "
+                  f"AND DATE(hora_entrada) <= '{fecha_fin}'")
+    else:
+        filtro = {
+            "dia":  "AND DATE(hora_entrada) = CURDATE()",
+            "mes":  "AND hora_entrada >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            "anio": "AND hora_entrada >= DATE_SUB(NOW(), INTERVAL 1 YEAR)",
+            "todo": "",
+        }.get(periodo, "")
+
+    sql = f"""
+        SELECT WEEKDAY(hora_entrada) AS dia, HOUR(hora_entrada) AS hora, COUNT(*) AS total
+        FROM sesiones
+        WHERE hora_entrada IS NOT NULL {filtro}
+        GROUP BY dia, hora
+        ORDER BY dia, hora
+    """
+    res  = await db.execute(_text(sql))
+    rows = res.fetchall()
+
+    # matriz 7 × 24 inicializada en 0
+    matriz = [[0]*24 for _ in range(7)]
+    for dia, hora, total in rows:
+        if 0 <= dia <= 6 and 0 <= hora <= 23:
+            matriz[dia][hora] = int(total)
+
+    return {"matriz": matriz}   # matriz[0]=Lunes .. matriz[6]=Domingo
+
+
+@router.get("/admin/backup-sql")
+async def backup_sql(
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    """Genera un volcado SQL completo de la BD y lo devuelve como descarga."""
+    import subprocess, re
+    from fastapi.responses import StreamingResponse
+    from datetime import datetime as _dt
+    import os
+
+    # Parsear credenciales desde DATABASE_URL
+    db_url = os.getenv("DATABASE_URL", "")
+    m = re.match(r"mysql\+asyncmy://([^:]+):([^@]+)@([^:/]+):?(\d+)?/(.+)", db_url)
+    if not m:
+        raise HTTPException(status_code=500, detail="No se pudo leer la configuración de BD")
+
+    user, password, host, port, dbname = m.group(1), m.group(2), m.group(3), m.group(4) or "3306", m.group(5)
+    timestamp = _dt.now().strftime("%Y%m%d_%H%M%S")
+    filename  = f"backup_{dbname}_{timestamp}.sql"
+
+    cmd = [
+        "mysqldump",
+        f"--user={user}",
+        f"--password={password}",
+        f"--host={host}",
+        f"--port={port}",
+        "--single-transaction",   # consistencia sin bloquear tablas InnoDB
+        "--routines",             # incluir stored procedures/functions
+        "--triggers",             # incluir triggers
+        "--set-gtid-purged=OFF",  # evita error si GTID no está habilitado
+        dbname,
+    ]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"mysqldump falló: {stderr.decode()[:300]}")
+
+    return StreamingResponse(
+        iter([stdout]),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Sospechas ────────────────────────────────────────────────────────
+
+@router.get("/admin/sospechas")
+async def listar_sospechas(
+    estado: str | None = None,   # pendiente | aprobada | descartada
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    from sqlalchemy import func as _func
+    q = select(Sospecha).order_by(Sospecha.fecha.desc())
+    if estado:
+        q = q.where(Sospecha.estado == estado)
+    total = (await db.execute(select(_func.count()).select_from(q.subquery()))).scalar()
+    rows  = (await db.execute(q.offset(offset).limit(limit))).scalars().all()
+    return {
+        "total": total,
+        "items": [
+            {
+                "id":            s.id,
+                "dni":           s.dni_alumno,
+                "nombre_alumno": s.nombre_alumno,
+                "tipo":          s.tipo,
+                "detalle":       s.detalle,
+                "fecha":         s.fecha,
+                "estado":        s.estado,
+                "revisado_por":  s.revisado_por,
+                "fecha_revision": s.fecha_revision,
+            }
+            for s in rows
+        ],
+    }
+
+
+@router.post("/admin/sospechas/{sospecha_id}/aprobar")
+async def aprobar_sospecha(
+    sospecha_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Convierte la sospecha en incidencia leve y la marca como aprobada."""
+    res = await db.execute(select(Sospecha).where(Sospecha.id == sospecha_id))
+    sospecha = res.scalar_one_or_none()
+    if not sospecha:
+        raise HTTPException(status_code=404, detail="Sospecha no encontrada")
+    if sospecha.estado != "pendiente":
+        raise HTTPException(status_code=409, detail="La sospecha ya fue revisada")
+
+    inc = Incidencia(
+        dni_alumno=sospecha.dni_alumno,
+        nombre_alumno=sospecha.nombre_alumno,
+        tipo="leve",
+        motivo=_TIPO_LABEL.get(sospecha.tipo, sospecha.tipo),
+        descripcion=sospecha.detalle,
+        registrado_por=f"sistema (aprobado por {admin.username})",
+    )
+    db.add(inc)
+
+    sospecha.estado        = "aprobada"
+    sospecha.revisado_por  = admin.username
+    sospecha.fecha_revision = datetime.now()
+    await db.commit()
+    return {"mensaje": "Sospecha aprobada e incidencia registrada"}
+
+
+@router.post("/admin/sospechas/{sospecha_id}/descartar")
+async def descartar_sospecha(
+    sospecha_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    res = await db.execute(select(Sospecha).where(Sospecha.id == sospecha_id))
+    sospecha = res.scalar_one_or_none()
+    if not sospecha:
+        raise HTTPException(status_code=404, detail="Sospecha no encontrada")
+    if sospecha.estado != "pendiente":
+        raise HTTPException(status_code=409, detail="La sospecha ya fue revisada")
+
+    sospecha.estado         = "descartada"
+    sospecha.revisado_por   = admin.username
+    sospecha.fecha_revision = datetime.now()
+    await db.commit()
+    return {"mensaje": "Sospecha descartada"}
+
+
+_TIPO_LABEL = {
+    "cambio_pc_rapido":   "Cambio rápido de PC (posible uso compartido)",
+    "dni_baneado_intento": "Intento de ingreso con DNI baneado",
+    "sesion_larga":        "Sesión excesivamente larga sin cierre",
+}
+
+
+# ── Actividad Logs ───────────────────────────────────────────────────
+
+@router.get("/admin/actividad")
+async def listar_actividad(
+    dni:      str | None = None,
+    terminal: str | None = None,
+    nivel:    str | None = None,   # normal | sospechoso
+    fecha:    str | None = None,   # YYYY-MM-DD
+    limit:    int = 200,
+    offset:   int = 0,
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    from sqlalchemy import func as _func
+    q = select(ActividadLog).order_by(ActividadLog.fecha_hora.desc())
+    if dni:
+        q = q.where(ActividadLog.dni_alumno == dni)
+    if terminal:
+        q = q.where(ActividadLog.nombre_terminal.ilike(f"%{terminal}%"))
+    if nivel:
+        q = q.where(ActividadLog.nivel == nivel)
+    if fecha:
+        try:
+            d = date.fromisoformat(fecha)
+            q = q.where(ActividadLog.fecha_hora >= datetime(d.year, d.month, d.day, 0, 0, 0))
+            q = q.where(ActividadLog.fecha_hora <  datetime(d.year, d.month, d.day, 23, 59, 59))
+        except ValueError:
+            pass
+
+    total = (await db.execute(select(_func.count()).select_from(q.subquery()))).scalar()
+    rows  = (await db.execute(q.offset(offset).limit(limit))).scalars().all()
+
+    return {
+        "total": total,
+        "items": [
+            {
+                "id":              r.id,
+                "id_terminal":     r.id_terminal,
+                "nombre_terminal": r.nombre_terminal,
+                "dni_alumno":      r.dni_alumno,
+                "nombre_alumno":   r.nombre_alumno,
+                "tipo":            r.tipo,
+                "descripcion":     r.descripcion,
+                "detalle":         r.detalle,
+                "nivel":           r.nivel,
+                "fecha_hora":      r.fecha_hora,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/admin/actividad/resumen-hoy")
+async def resumen_actividad_hoy(
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    """Conteo de eventos sospechosos del día para el badge del menú."""
+    from sqlalchemy import func as _func
+    hoy = date.today()
+    desde = datetime(hoy.year, hoy.month, hoy.day, 0, 0, 0)
+    total_sosp = (await db.execute(
+        select(_func.count()).where(
+            ActividadLog.nivel == "sospechoso",
+            ActividadLog.fecha_hora >= desde,
+        )
+    )).scalar()
+    total_hoy = (await db.execute(
+        select(_func.count()).where(ActividadLog.fecha_hora >= desde)
+    )).scalar()
+    return {"sospechosos_hoy": total_sosp, "total_hoy": total_hoy}
+
+
+@router.get("/admin/actividad/resumen-por-pc")
+async def resumen_actividad_por_pc(
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    """Resumen de actividad del día agrupado por PC, para las tarjetas del panel."""
+    from sqlalchemy import func as _func, case
+    hoy   = date.today()
+    desde = datetime(hoy.year, hoy.month, hoy.day, 0, 0, 0)
+
+    # Total eventos y sospechosos por PC hoy
+    q = (
+        select(
+            ActividadLog.nombre_terminal,
+            ActividadLog.id_terminal,
+            _func.count().label("total"),
+            _func.sum(case((ActividadLog.nivel == "sospechoso", 1), else_=0)).label("sospechosos"),
+            _func.max(ActividadLog.fecha_hora).label("ultimo_evento"),
+            _func.max(ActividadLog.descripcion).label("ultima_descripcion"),
+        )
+        .where(ActividadLog.fecha_hora >= desde)
+        .group_by(ActividadLog.nombre_terminal, ActividadLog.id_terminal)
+        .order_by(_func.max(ActividadLog.fecha_hora).desc())
+    )
+    rows = (await db.execute(q)).all()
+    return {
+        "items": [
+            {
+                "nombre_terminal":    r.nombre_terminal,
+                "id_terminal":        r.id_terminal,
+                "total_hoy":          r.total,
+                "sospechosos_hoy":    int(r.sospechosos or 0),
+                "ultimo_evento":      r.ultimo_evento,
+                "ultima_descripcion": r.ultima_descripcion,
+            }
+            for r in rows
+        ]
+    }
 
 
 @router.get("/admin/exportar-excel")
@@ -474,6 +1039,8 @@ async def exportar_pdf(
     periodo:      str | None = None,
     fecha_inicio: str | None = None,
     fecha_fin:    str | None = None,
+    mes:          str | None = None,
+    anio:         str | None = None,
 ):
     """Genera PDF con estadísticas rápidas + tabla filtrada/ordenada."""
     import io
@@ -492,7 +1059,7 @@ async def exportar_pdf(
          .join(Terminal, Sesion.id_terminal == Terminal.id)
          .outerjoin(Escuela, AlumnoMaestro.id_escuela == Escuela.id)
          .outerjoin(Facultad, Escuela.id_facultad == Facultad.id))
-    q = _aplicar_filtro_fecha(q, periodo, fecha_inicio, fecha_fin)
+    q = _aplicar_filtro_fecha(q, periodo, fecha_inicio, fecha_fin, mes, anio)
     if search:
         like = f"%{search}%"
         q = q.where(or_(
@@ -705,7 +1272,7 @@ async def cerrar_todas_sesiones(
     admin: Usuario = Depends(obtener_usuario_actual)
 ):
     """Cierra todas las sesiones activas en el sistema."""
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
     
     res = await db.execute(select(Sesion).where(Sesion.estado == "activa"))
@@ -739,7 +1306,7 @@ async def limpiar_sesiones(
     from main import logger
     logger.info(f"[ADMIN] Usuario '{admin.username}' solicitó LIMPIAR HISTORIAL DE SESIONES")
 
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
 
     # Primero notificar a los clientes WPF que vuelvan al login antes de borrar
@@ -767,7 +1334,7 @@ async def importar_excel_upload(
     import io
     import openpyxl
 
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
 
     logger.info(f"[ADMIN] '{admin.username}' inició importación de Excel")
@@ -944,7 +1511,7 @@ async def importar_maestro(
     import io
     import openpyxl
 
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
 
     contenido = await archivo.read()
@@ -1141,7 +1708,7 @@ async def listar_maestro(
     offset: int = 0,
 ):
     """Lista paginada del maestro de alumnos con búsqueda opcional."""
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden acceder a la base de datos")
     from sqlalchemy import or_, func
     from sqlalchemy.orm import aliased
@@ -1200,7 +1767,7 @@ async def crear_usuario_manual(
     admin: Usuario = Depends(obtener_usuario_actual),
 ):
     """Registra manualmente un nuevo usuario en el maestro."""
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden agregar usuarios")
 
     if not datos.dni.isdigit() or len(datos.dni) != 8:
@@ -1258,7 +1825,7 @@ async def actualizar_maestro(
     admin: Usuario = Depends(obtener_usuario_actual),
 ):
     """Edición manual de un registro del maestro por DNI."""
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden editar el maestro")
     res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni))
     alumno = res.scalar_one_or_none()
@@ -1301,7 +1868,7 @@ async def eliminar_maestro(
     admin: Usuario = Depends(obtener_usuario_actual),
 ):
     """Elimina un registro del maestro por DNI, incluyendo todas sus sesiones."""
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden eliminar del maestro")
     res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni))
     alumno = res.scalar_one_or_none()
@@ -1326,7 +1893,7 @@ async def reset_maestro(
     from main import logger
     logger.info(f"[ADMIN] Usuario '{admin.username}' solicitó LIMPIAR MAESTRO DE ALUMNOS")
 
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
 
     res = await db.execute(select(Sesion))
@@ -1350,6 +1917,457 @@ async def reset_maestro(
     return {"mensaje": f"Base de datos limpiada: {total_alumnos} alumno(s) y {total_sesiones} sesión(es) eliminados. Terminales y usuarios administradores conservados."}
 
 
+class BanCreate(BaseModel):
+    dni: str
+    motivo: str
+    dias: int = 7
+
+
+class PersonalCreate(BaseModel):
+    dni:      str
+    nombre:   str
+    cargo:    str | None = None
+    area:     str | None = None
+    correo:   str | None = None
+    telefono: str | None = None
+
+
+class PersonalUpdate(BaseModel):
+    nombre:   str | None = None
+    cargo:    str | None = None
+    area:     str | None = None
+    correo:   str | None = None
+    telefono: str | None = None
+
+
+@router.post("/admin/bans")
+async def crear_ban(
+    datos: BanCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Banea a un alumno por N días (solo admin)."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden banear usuarios")
+    res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == datos.dni))
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Alumno no encontrado")
+    from datetime import timedelta
+    ahora = datetime.now()
+    fecha_fin = ahora + timedelta(days=datos.dias)
+    if not datos.motivo or not datos.motivo.strip():
+        raise HTTPException(status_code=422, detail="El motivo del ban es obligatorio")
+    ban = Ban(
+        dni_alumno=datos.dni,
+        motivo=datos.motivo.strip(),
+        fecha_ini=ahora,
+        fecha_fin=fecha_fin,
+        baneado_por=admin.username,
+    )
+    db.add(ban)
+    await db.commit()
+    return {"mensaje": f"Alumno {datos.dni} baneado hasta {fecha_fin.strftime('%d/%m/%Y')}", "fecha_fin": fecha_fin}
+
+
+@router.delete("/admin/bans/{ban_id}")
+async def eliminar_ban(
+    ban_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Levanta un ban por su ID y resetea las incidencias activas del alumno (solo admin)."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden levantar bans")
+    res = await db.execute(select(Ban).where(Ban.id == ban_id))
+    ban = res.scalar_one_or_none()
+    if not ban:
+        raise HTTPException(status_code=404, detail="Ban no encontrado")
+    ahora = datetime.now()
+    ban.levantado_por  = admin.username
+    ban.fecha_levantado = ahora
+    ban.fecha_fin      = ahora  # expirar inmediatamente
+    # Resetear todas las incidencias activas del alumno
+    await db.execute(
+        update(Incidencia)
+        .where(Incidencia.dni_alumno == ban.dni_alumno, Incidencia.activa == True)
+        .values(activa=False)
+    )
+    await db.commit()
+    return {"mensaje": "Ban levantado y incidencias reseteadas correctamente"}
+
+
+@router.get("/admin/bans")
+async def listar_bans(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Lista todos los bans activos (no expirados)."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden ver bans")
+    from sqlalchemy.orm import joinedload
+    ahora = datetime.now()
+    res = await db.execute(
+        select(Ban)
+        .options(joinedload(Ban.alumno))
+        .where((Ban.fecha_fin == None) | (Ban.fecha_fin > ahora))
+        .order_by(Ban.fecha_ini.desc())
+    )
+    bans = res.scalars().all()
+    return [
+        {
+            "id":          b.id,
+            "dni":         b.dni_alumno,
+            "nombre":      b.alumno.nombre if b.alumno else b.dni_alumno,
+            "motivo":      b.motivo or "",
+            "fecha_ini":   b.fecha_ini,
+            "fecha_fin":   b.fecha_fin,
+            "baneado_por": b.baneado_por or "",
+        }
+        for b in bans
+    ]
+
+
+@router.get("/admin/bans/check/{dni}")
+async def check_ban(
+    dni: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Verifica si un DNI tiene ban activo (usado por el WebSocket del kiosco)."""
+    ahora = datetime.now()
+    res = await db.execute(
+        select(Ban)
+        .where(Ban.dni_alumno == dni)
+        .where((Ban.fecha_fin == None) | (Ban.fecha_fin > ahora))
+    )
+    ban = res.scalar_one_or_none()
+    if ban:
+        return {"baneado": True, "motivo": ban.motivo or "Acceso restringido", "fecha_fin": ban.fecha_fin}
+    return {"baneado": False}
+
+
+@router.get("/admin/personal")
+async def listar_personal(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Lista paginada del personal universitario."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden acceder al personal")
+    from sqlalchemy import or_, func
+    q = select(PersonalUniversidad)
+    if search:
+        like = f"%{search}%"
+        q = q.where(or_(
+            PersonalUniversidad.dni.ilike(like),
+            PersonalUniversidad.nombre.ilike(like),
+            PersonalUniversidad.cargo.ilike(like),
+            PersonalUniversidad.area.ilike(like),
+        ))
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
+    q = q.order_by(PersonalUniversidad.nombre).offset(offset).limit(limit)
+    rows = (await db.execute(q)).scalars().all()
+    return {
+        "total": total,
+        "personal": [
+            {
+                "dni":      p.dni,
+                "nombre":   p.nombre,
+                "cargo":    p.cargo or "",
+                "area":     p.area or "",
+                "correo":   p.correo or "",
+                "telefono": p.telefono or "",
+                "activo":   p.activo,
+            }
+            for p in rows
+        ]
+    }
+
+
+@router.post("/admin/personal/nuevo", status_code=201)
+async def crear_personal(
+    datos: PersonalCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Registra un nuevo miembro del personal universitario."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden registrar personal")
+    if not datos.dni.isdigit() or len(datos.dni) != 8:
+        raise HTTPException(status_code=422, detail="El DNI debe tener exactamente 8 dígitos")
+    if not datos.nombre.strip():
+        raise HTTPException(status_code=422, detail="El nombre es obligatorio")
+    res = await db.execute(select(PersonalUniversidad).where(PersonalUniversidad.dni == datos.dni))
+    if res.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Ya existe personal con DNI {datos.dni}")
+    db.add(PersonalUniversidad(
+        dni=datos.dni,
+        nombre=datos.nombre.strip(),
+        cargo=datos.cargo.strip() if datos.cargo else None,
+        area=datos.area.strip() if datos.area else None,
+        correo=datos.correo.strip() if datos.correo else None,
+        telefono=datos.telefono.strip() if datos.telefono else None,
+    ))
+    await db.commit()
+    return {"mensaje": f"Personal '{datos.nombre.strip()}' registrado correctamente"}
+
+
+@router.put("/admin/personal/{dni}")
+async def actualizar_personal(
+    dni: str,
+    datos: PersonalUpdate,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Edita un registro de personal por DNI."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden editar personal")
+    res = await db.execute(select(PersonalUniversidad).where(PersonalUniversidad.dni == dni))
+    p = res.scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Personal no encontrado")
+    if datos.nombre is not None:   p.nombre   = datos.nombre.strip()
+    if datos.cargo is not None:    p.cargo    = datos.cargo.strip() or None
+    if datos.area is not None:     p.area     = datos.area.strip() or None
+    if datos.correo is not None:   p.correo   = datos.correo.strip() or None
+    if datos.telefono is not None: p.telefono = datos.telefono.strip() or None
+    await db.commit()
+    return {"mensaje": f"Personal {dni} actualizado correctamente"}
+
+
+@router.delete("/admin/personal/{dni}")
+async def eliminar_personal(
+    dni: str,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Elimina un registro de personal por DNI."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden eliminar personal")
+    res = await db.execute(select(PersonalUniversidad).where(PersonalUniversidad.dni == dni))
+    p = res.scalar_one_or_none()
+    if not p:
+        raise HTTPException(status_code=404, detail="Personal no encontrado")
+    await db.delete(p)
+    await db.commit()
+    return {"mensaje": f"Personal {dni} eliminado correctamente"}
+
+
+@router.post("/admin/personal/importar")
+async def importar_personal(
+    archivo: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Importación masiva de personal desde Excel. Upsert por DNI."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
+    import io, openpyxl
+    contenido = await archivo.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
+        ws = wb.active
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Archivo inválido: {e}")
+
+    hdrs = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+
+    def col(*opts):
+        for o in opts:
+            if o in hdrs: return hdrs.index(o)
+        return None
+
+    idx_dni      = col("dni")
+    idx_nombre   = col("nombre completo", "nombre", "apellidos y nombres", "apellidos nombres", "trabajador")
+    idx_cargo    = col("cargo", "puesto")
+    idx_area     = col("área", "area", "oficina", "dependencia")
+    idx_correo   = col("correo", "email", "correo electrónico", "correo electronico")
+    idx_telefono = col("teléfono", "telefono", "celular")
+
+    if idx_dni is None:
+        raise HTTPException(status_code=400, detail="Columna 'DNI' no encontrada")
+
+    def cell(fila, idx):
+        return str(fila[idx]).strip() if idx is not None and idx < len(fila) and fila[idx] is not None else ""
+
+    insertados = actualizados = errores = 0
+    for num_fila, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if all(v is None for v in fila): continue
+        dni = cell(fila, idx_dni).replace(" ", "").replace("-", "")
+        if not dni.isdigit() or len(dni) != 8:
+            errores += 1; continue
+        nombre = cell(fila, idx_nombre)
+        if not nombre: errores += 1; continue
+        res = await db.execute(select(PersonalUniversidad).where(PersonalUniversidad.dni == dni))
+        existente = res.scalar_one_or_none()
+        if existente:
+            existente.nombre   = nombre
+            existente.cargo    = cell(fila, idx_cargo)    or None
+            existente.area     = cell(fila, idx_area)     or None
+            existente.correo   = cell(fila, idx_correo)   or None
+            existente.telefono = cell(fila, idx_telefono) or None
+            actualizados += 1
+        else:
+            db.add(PersonalUniversidad(
+                dni=dni, nombre=nombre,
+                cargo=cell(fila, idx_cargo) or None,
+                area=cell(fila, idx_area) or None,
+                correo=cell(fila, idx_correo) or None,
+                telefono=cell(fila, idx_telefono) or None,
+            ))
+            insertados += 1
+        if (insertados + actualizados) % 200 == 0:
+            await db.flush()
+    await db.commit()
+    return {"mensaje": f"{insertados} nuevo(s), {actualizados} actualizado(s), {errores} ignorado(s)",
+            "insertados": insertados, "actualizados": actualizados, "errores": errores}
+
+
+@router.get("/admin/personal/exportar")
+async def exportar_personal(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Exporta el personal a Excel."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden exportar personal")
+    import io, openpyxl
+    from fastapi.responses import StreamingResponse
+    rows = (await db.execute(select(PersonalUniversidad).order_by(PersonalUniversidad.nombre))).scalars().all()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Personal Universidad"
+    ws.append(["DNI", "Nombre Completo", "Cargo", "Área", "Correo", "Teléfono"])
+    for p in rows:
+        ws.append([p.dni, p.nombre, p.cargo or "", p.area or "", p.correo or "", p.telefono or ""])
+    buf = io.BytesIO()
+    wb.save(buf); buf.seek(0)
+    return StreamingResponse(buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=personal_universidad.xlsx",
+                 "Access-Control-Expose-Headers": "Content-Disposition"})
+
+
+# ── Incidencias ─────────────────────────────────────────────────────
+
+class IncidenciaCreate(BaseModel):
+    dni: str
+    tipo: str = "leve"          # leve | grave
+    motivo: str
+    descripcion: str | None = None
+
+
+@router.post("/admin/incidencias", status_code=201)
+async def crear_incidencia(
+    datos: IncidenciaCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Registra una incidencia (leve o grave) para un alumno."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden registrar incidencias")
+    if datos.tipo not in ("leve", "grave"):
+        raise HTTPException(status_code=422, detail="El tipo debe ser 'leve' o 'grave'")
+    res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == datos.dni))
+    alumno = res.scalar_one_or_none()
+    if not alumno:
+        raise HTTPException(status_code=404, detail="Alumno no encontrado")
+    inc = Incidencia(
+        dni_alumno=datos.dni,
+        nombre_alumno=alumno.nombre,
+        tipo=datos.tipo,
+        motivo=datos.motivo.strip(),
+        descripcion=datos.descripcion.strip() if datos.descripcion else None,
+        registrado_por=admin.username,
+    )
+    db.add(inc)
+    await db.commit()
+    # Contar incidencias activas para incluir en la respuesta
+    cnt_q = await db.execute(
+        select(Incidencia)
+        .where(Incidencia.dni_alumno == datos.dni, Incidencia.activa == True)
+    )
+    total_activas = len(cnt_q.scalars().all())
+    return {"mensaje": f"Incidencia registrada para {alumno.nombre}", "total_activas": total_activas}
+
+
+@router.get("/admin/incidencias")
+async def listar_incidencias(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+    dni: str | None = None,
+    solo_activas: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+):
+    """Lista incidencias con filtro opcional por DNI y estado."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden ver incidencias")
+    from sqlalchemy import func
+    q = select(Incidencia).order_by(Incidencia.fecha.desc())
+    if dni:
+        q = q.where(Incidencia.dni_alumno == dni)
+    if solo_activas:
+        q = q.where(Incidencia.activa == True)
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
+    rows = (await db.execute(q.offset(offset).limit(limit))).scalars().all()
+    return {
+        "total": total,
+        "items": [
+            {
+                "id":             i.id,
+                "dni":            i.dni_alumno,
+                "nombre_alumno":  i.nombre_alumno,
+                "tipo":           i.tipo,
+                "motivo":         i.motivo,
+                "descripcion":    i.descripcion or "",
+                "fecha":          i.fecha,
+                "registrado_por": i.registrado_por,
+                "activa":         i.activa,
+            }
+            for i in rows
+        ],
+    }
+
+
+@router.get("/admin/incidencias/resumen")
+async def resumen_incidencias(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Devuelve conteo de incidencias activas agrupado por alumno (para badges y alertas)."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden ver incidencias")
+    from sqlalchemy import func
+    rows = (await db.execute(
+        select(Incidencia.dni_alumno, Incidencia.nombre_alumno, func.count(Incidencia.id).label("total"))
+        .where(Incidencia.activa == True)
+        .group_by(Incidencia.dni_alumno, Incidencia.nombre_alumno)
+        .order_by(func.count(Incidencia.id).desc())
+    )).all()
+    return [{"dni": r.dni_alumno, "nombre": r.nombre_alumno, "total": r.total} for r in rows]
+
+
+@router.delete("/admin/incidencias/{incidencia_id}")
+async def eliminar_incidencia(
+    incidencia_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Elimina (desactiva) una incidencia individual."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden eliminar incidencias")
+    res = await db.execute(select(Incidencia).where(Incidencia.id == incidencia_id))
+    inc = res.scalar_one_or_none()
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incidencia no encontrada")
+    inc.activa = False
+    await db.commit()
+    return {"mensaje": "Incidencia eliminada correctamente"}
+
+
 @router.delete("/admin/reset-total")
 async def reset_total(
     db: AsyncSession = Depends(get_db),
@@ -1359,7 +2377,7 @@ async def reset_total(
     from main import logger
     logger.info(f"[ADMIN] Usuario '{admin.username}' solicitó RESET TOTAL")
 
-    if admin.rol != "admin":
+    if admin.rol != "superadmin":
         logger.warning(f"[ADMIN] Intento de reset rechazado para usuario '{admin.username}' (no es admin)")
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
 
@@ -1374,3 +2392,178 @@ async def reset_total(
     await db.commit()
     await manager.notificar_evento("🧹 RESET TOTAL: El sistema ha sido reseteado por el administrador", "warning")
     return {"mensaje": "Todo el sistema ha sido limpiado correctamente"}
+
+
+# ── Auto-actualización del cliente ──────────────────────────────────
+
+RUTA_DISTRIBUCION_DEFAULT = r"C:\WinSysCache"
+
+async def _obtener_ruta_distribucion(db: AsyncSession) -> str:
+    from sqlalchemy import text as _text
+    res = await db.execute(_text("SELECT valor FROM ajustes_sistema WHERE clave='ruta_distribucion'"))
+    row = res.fetchone()
+    return row[0] if row else RUTA_DISTRIBUCION_DEFAULT
+
+
+@router.get("/version")
+async def obtener_version(db: AsyncSession = Depends(get_db)):
+    """Devuelve la versión actual del cliente disponible para descarga."""
+    import pathlib
+    ruta = await _obtener_ruta_distribucion(db)
+    version_file = pathlib.Path(ruta) / "version.txt"
+    if not version_file.exists():
+        return {"version": "0.0"}
+    # utf-8-sig descarta el BOM que Notepad agrega al guardar como UTF-8
+    return {"version": version_file.read_text(encoding="utf-8-sig").strip()}
+
+
+@router.get("/descargar-cliente")
+async def descargar_cliente(db: AsyncSession = Depends(get_db)):
+    """Sirve el ejecutable del cliente para auto-actualización."""
+    import pathlib
+    from fastapi.responses import StreamingResponse
+    ruta = await _obtener_ruta_distribucion(db)
+    exe_path = pathlib.Path(ruta) / "ControlBiblioteca.Client.exe"
+    if not exe_path.exists():
+        raise HTTPException(status_code=404, detail="Ejecutable no disponible en el servidor")
+
+    file_size = exe_path.stat().st_size
+
+    def iterfile():
+        with open(exe_path, "rb") as f:
+            while chunk := f.read(1024 * 64):  # 64 KB por chunk
+                yield chunk
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": 'attachment; filename="ControlBiblioteca.Client.exe"',
+            "Content-Length": str(file_size),
+        },
+    )
+
+
+@router.get("/admin/config/ruta-distribucion")
+async def obtener_ruta_distribucion_config(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Devuelve la ruta de distribución actual del cliente."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo superadmin")
+    ruta = await _obtener_ruta_distribucion(db)
+    return {"ruta": ruta}
+
+
+@router.post("/admin/config/ruta-distribucion")
+async def guardar_ruta_distribucion(
+    datos: dict,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Actualiza la ruta de distribución del cliente."""
+    import pathlib
+    from sqlalchemy import text as _text
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo superadmin")
+    ruta = str(datos.get("ruta", "")).strip()
+    if not ruta:
+        raise HTTPException(status_code=422, detail="Ruta no puede estar vacía")
+    # Verificar que la carpeta existe
+    if not pathlib.Path(ruta).exists():
+        raise HTTPException(status_code=422, detail=f"La carpeta '{ruta}' no existe en el servidor")
+    await db.execute(
+        _text("INSERT INTO ajustes_sistema (clave, valor) VALUES ('ruta_distribucion', :v) ON DUPLICATE KEY UPDATE valor=:v"),
+        {"v": ruta}
+    )
+    await db.commit()
+    return {"mensaje": "Ruta actualizada correctamente", "ruta": ruta}
+
+
+@router.post("/admin/publicar-cliente")
+async def publicar_cliente(
+    archivo: UploadFile,
+    version: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """
+    Sube un nuevo ControlBiblioteca.Client.exe a la ruta de distribución y
+    actualiza version.txt. Los kioskos lo recogen en su próximo arranque.
+    Sólo superadmin. El archivo se escribe primero a .tmp y luego se renombra
+    atómicamente para que ningún kiosco descargue un .exe a medio escribir.
+    """
+    import pathlib
+    from main import logger
+
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo superadmin")
+
+    version = (version or "").strip()
+    if not version:
+        raise HTTPException(status_code=422, detail="La versión no puede estar vacía")
+
+    # Validar primeros bytes — debe ser un PE (Windows .exe empieza con MZ)
+    primer_chunk = await archivo.read(2)
+    if primer_chunk[:2] != b"MZ":
+        raise HTTPException(status_code=422, detail="El archivo no es un .exe válido (firma MZ ausente)")
+
+    ruta = await _obtener_ruta_distribucion(db)
+    dir_dist = pathlib.Path(ruta)
+    if not dir_dist.exists():
+        try:
+            dir_dist.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"No se pudo crear la carpeta '{ruta}': {e}")
+
+    exe_dst = dir_dist / "ControlBiblioteca.Client.exe"
+    exe_tmp = dir_dist / "ControlBiblioteca.Client.exe.tmp"
+    ver_dst = dir_dist / "version.txt"
+
+    # Escritura en streaming a .tmp (evita cargar 150MB en RAM)
+    bytes_escritos = 0
+    try:
+        with open(exe_tmp, "wb") as fout:
+            fout.write(primer_chunk)
+            bytes_escritos += len(primer_chunk)
+            while True:
+                chunk = await archivo.read(1024 * 256)  # 256 KB por chunk
+                if not chunk:
+                    break
+                fout.write(chunk)
+                bytes_escritos += len(chunk)
+    except Exception as e:
+        try: exe_tmp.unlink(missing_ok=True)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail=f"Error escribiendo archivo: {e}")
+
+    if bytes_escritos < 1024 * 1024:  # < 1MB es claramente inválido
+        try: exe_tmp.unlink(missing_ok=True)
+        except Exception: pass
+        raise HTTPException(status_code=422, detail=f"Archivo demasiado pequeño ({bytes_escritos} bytes)")
+
+    # Reemplazo atómico: si exe_dst existe, lo borramos primero. En Windows
+    # `replace` es atómico y funciona aunque el destino exista.
+    try:
+        exe_tmp.replace(exe_dst)
+    except Exception as e:
+        try: exe_tmp.unlink(missing_ok=True)
+        except Exception: pass
+        raise HTTPException(status_code=500, detail=f"No se pudo reemplazar el ejecutable: {e}")
+
+    # Escribir version.txt
+    try:
+        ver_dst.write_text(version, encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"No se pudo escribir version.txt: {e}")
+
+    logger.info(f"[ADMIN] '{admin.username}' publicó cliente v{version} ({bytes_escritos:,} bytes) en {ruta}")
+    await manager.notificar_evento(f"📦 Cliente v{version} publicado. Los kioskos se actualizarán al reiniciar.", "info")
+
+    return {
+        "mensaje": "Cliente publicado correctamente",
+        "version": version,
+        "tamano_bytes": bytes_escritos,
+        "ruta": str(exe_dst),
+    }
