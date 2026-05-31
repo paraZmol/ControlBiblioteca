@@ -615,6 +615,28 @@ namespace ControlBiblioteca.Client.UI
                     case "heartbeat_ack":
                         break;
 
+                    case "hello_ack":
+                    case "config_backdoor_update":
+                        try
+                        {
+                            int mods = root.GetProperty("backdoor_modifiers").GetInt32();
+                            int key  = root.GetProperty("backdoor_key").GetInt32();
+                            string pin = root.GetProperty("backdoor_pin").GetString() ?? "";
+                            LogDebug($"[Backdoor] Config recibida del servidor: Mod: {mods}, Key: {key}, Pin: {pin}");
+                            Dispatcher.Invoke(() =>
+                            {
+                                if (Application.Current is App app)
+                                {
+                                    app.ActualizarBackdoorConfig(mods, key, pin);
+                                }
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            LogDebug($"ERROR al procesar config backdoor del server: {ex.Message}");
+                        }
+                        break;
+
                     case "remote_command":
                         try
                         {

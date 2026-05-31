@@ -154,7 +154,7 @@ namespace ControlBiblioteca.Client
             AppLog("Iniciando NetworkEnsurer, UIWatchdog y Backdoor...");
             IniciarNetworkEnsurer();
             IniciarUIWatchdog();
-            _backdoor = new MantenimientoBackdoor(this);
+            _backdoor = new MantenimientoBackdoor(this, config);
             AppLog("Servicios internos iniciados.");
 
             // ── AUTO-ACTUALIZACIÓN ────────────────────────────────────────────────
@@ -188,7 +188,10 @@ namespace ControlBiblioteca.Client
 
                 if (hayUpdate)
                 {
-                    // El bat ya fue lanzado — cerrar este proceso
+                    // El bat ya fue lanzado pero hacemos una pausa para mantener la
+                    // pantalla de carga visible mientras arranca el nuevo proceso.
+                    await Task.Delay(4000);
+
                     Dispatcher.Invoke(() =>
                     {
                         LiberarMutex();
@@ -407,6 +410,11 @@ namespace ControlBiblioteca.Client
                 _mutex = null;
                 _esDuenoMutex = false;
             }
+        }
+
+        internal void ActualizarBackdoorConfig(int modifiers, int key, string pin)
+        {
+            _backdoor?.ActualizarConfig(modifiers, key, pin);
         }
 
         protected override void OnExit(ExitEventArgs e)
