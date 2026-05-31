@@ -10,6 +10,10 @@ namespace ControlBiblioteca.Client.Services
         public string TerminalName { get; set; } = "";
         public string ServerIp     { get; set; } = "127.0.0.1";
         public int    ServerPort   { get; set; } = 8000;
+        
+        public int    BackdoorModifiers { get; set; } = 0x0003; // MOD_CONTROL | MOD_ALT
+        public int    BackdoorKey       { get; set; } = 0x7B;   // VK_F12
+        public string BackdoorPin       { get; set; } = "UNASAM2025";
 
         internal string WsBaseUrl => $"ws://{ServerIp}:{ServerPort}";
 

@@ -19,18 +19,10 @@ namespace ControlBiblioteca.Client.Services
     /// El hotkey se registra a nivel de sistema vía RegisterHotKey, por lo que funciona
     /// incluso cuando el KeyboardHook de la app está activo bloqueando otras combinaciones.
     /// </summary>
-    public sealed class MantenimientoBackdoor : IDisposable
+    internal sealed class MantenimientoBackdoor : IDisposable
     {
-        // Ctrl+Alt+F12
-        private const int HOTKEY_ID   = 0x4D41; // 'MA' de Mantenimiento
-        private const int MOD_CONTROL = 0x0002;
-        private const int MOD_ALT     = 0x0001;
-        private const int VK_F12      = 0x7B;
-        private const int WM_HOTKEY   = 0x0312;
-
-        // ── CAMBIAR ANTES DE DESPLEGAR EN PRODUCCIÓN ─────────────────────────────
-        private const string PIN = "UNASAM2025";
-        // ─────────────────────────────────────────────────────────────────────────
+        private const int HOTKEY_ID = 0x4D41; // 'MA' de Mantenimiento
+        private const int WM_HOTKEY = 0x0312;
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool RegisterHotKey(IntPtr hWnd, int id, int fsModifiers, int vk);
@@ -39,12 +31,14 @@ namespace ControlBiblioteca.Client.Services
         private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
         private readonly App _app;
+        private readonly KioscoConfig _config;
         private HwndSource? _hwnd;
         private bool _disposed;
 
-        public MantenimientoBackdoor(App app)
+        public MantenimientoBackdoor(App app, KioscoConfig config)
         {
             _app = app;
+            _config = config;
             // La ventana de mensajes debe crearse en el hilo de UI
             app.Dispatcher.Invoke(CrearVentanaMensajes);
         }
@@ -63,9 +57,9 @@ namespace ControlBiblioteca.Client.Services
             _hwnd = new HwndSource(param);
             _hwnd.AddHook(WndProc);
 
-            bool ok = RegisterHotKey(_hwnd.Handle, HOTKEY_ID, MOD_CONTROL | MOD_ALT, VK_F12);
+            bool ok = RegisterHotKey(_hwnd.Handle, HOTKEY_ID, _config.BackdoorModifiers, _config.BackdoorKey);
             if (!ok)
-                System.Diagnostics.Debug.WriteLine("[Backdoor] No se pudo registrar Ctrl+Alt+F12.");
+                System.Diagnostics.Debug.WriteLine($"[Backdoor] No se pudo registrar el atajo (Mod: {_config.BackdoorModifiers}, Key: {_config.BackdoorKey}).");
         }
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -130,7 +124,7 @@ namespace ControlBiblioteca.Client.Services
 
             void Verificar(object? s, RoutedEventArgs ev)
             {
-                if (pinBox.Password == PIN)
+                if (pinBox.Password == _config.BackdoorPin)
                 {
                     ventana.Close();
                     _app.EscaparAExplorer("maintenance_backdoor");
@@ -160,6 +154,31 @@ namespace ControlBiblioteca.Client.Services
             ventana.Content = panel;
             ventana.Loaded += (_, _) => pinBox.Focus();
             ventana.ShowDialog();
+        }
+
+        public void ActualizarConfig(int modifiers, int key, string pin)
+        {
+            _app.Dispatcher.Invoke(() =>
+            {
+                if (_hwnd != null)
+                {
+                    UnregisterHotKey(_hwnd.Handle, HOTKEY_ID);
+                }
+
+                _config.BackdoorModifiers = modifiers;
+                _config.BackdoorKey = key;
+                _config.BackdoorPin = pin;
+                _config.Guardar();
+
+                if (_hwnd != null)
+                {
+                    bool ok = RegisterHotKey(_hwnd.Handle, HOTKEY_ID, modifiers, key);
+                    if (!ok)
+                        System.Diagnostics.Debug.WriteLine($"[Backdoor] No se pudo re-registrar el atajo (Mod: {modifiers}, Key: {key}).");
+                    else
+                        System.Diagnostics.Debug.WriteLine($"[Backdoor] Atajo re-registrado exitosamente (Mod: {modifiers}, Key: {key}).");
+                }
+            });
         }
 
         public void Dispose()

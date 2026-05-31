@@ -31,9 +31,16 @@ namespace ControlBiblioteca.Client.UI
 
         public void ActualizarMensaje(string mensaje)
         {
-            // Permite mostrar estado de actualización en la pantalla de carga
-            // La VentanaCarga.xaml tiene un TextBlock con nombre TxtEstado si se desea mostrar
             System.Diagnostics.Debug.WriteLine($"[AutoUpdater] {mensaje}");
+            //if (TxtEstado.Visibility == Visibility.Collapsed)
+            if (PanelActualizacion.Visibility == Visibility.Collapsed)
+            {
+                //TxtEstado.Visibility = Visibility.Visible;
+                //BarraProgreso.Visibility = Visibility.Visible;
+                PanelActualizacion.Visibility = Visibility.Visible;
+            }
+            
+            TxtEstado.Text = mensaje;
         }
 
         protected override void OnSourceInitialized(EventArgs e)
