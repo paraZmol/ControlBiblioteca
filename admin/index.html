@@ -781,6 +781,10 @@
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-arrow-circle-up"></i> Actualizaciones
                         </button>
+                        <button id="subtab-btn-cfg-backdoor" onclick="switchSubtabCfg('backdoor')"
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-lock-key"></i> Backdoor
+                        </button>
                     </div>
 
                     <!-- Panel: Actividad del Sistema -->
@@ -1009,6 +1013,69 @@
                                     </div>
                                     <p id="cfg-publicar-status" class="text-xs min-h-4"></p>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Panel: Backdoor -->
+                    <div id="subtab-cfg-backdoor" style="display:none">
+                        <div class="max-w-xl">
+                            <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-2">
+                                <i class="ph ph-keyboard text-cyan-500"></i> Atajo de Mantenimiento
+                            </h3>
+                            <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">
+                                Configura la combinación de teclas y el PIN requerido para desbloquear la terminal de forma silenciosa.
+                            </p>
+                            
+                            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm mb-5">
+                                <div class="flex flex-col gap-4">
+                                    <div>
+                                        <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2">Modificadores (puedes seleccionar varios)</label>
+                                        <div class="flex gap-4">
+                                            <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
+                                                <input type="checkbox" id="cfg-backdoor-ctrl" class="rounded border-slate-300 dark:border-slate-600 text-cyan-500 focus:ring-cyan-500"> Ctrl
+                                            </label>
+                                            <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
+                                                <input type="checkbox" id="cfg-backdoor-alt" class="rounded border-slate-300 dark:border-slate-600 text-cyan-500 focus:ring-cyan-500"> Alt
+                                            </label>
+                                            <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
+                                                <input type="checkbox" id="cfg-backdoor-shift" class="rounded border-slate-300 dark:border-slate-600 text-cyan-500 focus:ring-cyan-500"> Shift
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2">Tecla Principal</label>
+                                        <select id="cfg-backdoor-key" class="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white">
+                                            <!-- Teclas F1-F24 -->
+                                            <option value="112">F1</option>
+                                            <option value="113">F2</option>
+                                            <option value="114">F3</option>
+                                            <option value="115">F4</option>
+                                            <option value="116">F5</option>
+                                            <option value="117">F6</option>
+                                            <option value="118">F7</option>
+                                            <option value="119">F8</option>
+                                            <option value="120">F9</option>
+                                            <option value="121">F10</option>
+                                            <option value="122">F11</option>
+                                            <option value="123">F12</option>
+                                            <!-- Otras teclas usuales -->
+                                            <option value="77">M</option>
+                                            <option value="80">P</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2">PIN de Desbloqueo</label>
+                                        <input id="cfg-backdoor-pin" type="text" placeholder="Ej: UNASAM2025"
+                                            class="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white">
+                                    </div>
+                                </div>
+                                <div class="mt-5 text-right">
+                                    <button onclick="guardarConfigBackdoor()" class="db-btn db-btn-new inline-flex items-center gap-2">
+                                        <i class="ph ph-floppy-disk"></i> Guardar
+                                    </button>
+                                </div>
+                                <p id="cfg-backdoor-status" class="text-xs min-h-4 mt-2 text-right"></p>
                             </div>
                         </div>
                     </div>
@@ -1343,7 +1410,7 @@ function switchSubtabInc(sub) {
 }
 
 function switchSubtabCfg(sub) {
-    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones'].forEach(s => {
+    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones', 'backdoor'].forEach(s => {
         const panel = document.getElementById('subtab-cfg-' + s);
         const btn   = document.getElementById('subtab-btn-cfg-' + s);
         if (!panel || !btn) return;
@@ -1364,6 +1431,7 @@ function switchSubtabCfg(sub) {
     });
     if (sub === 'aplicacion'      && typeof _cargarCamposConfigApp === 'function') _cargarCamposConfigApp();
     if (sub === 'actualizaciones' && typeof cargarRutaDistribucion === 'function') cargarRutaDistribucion();
+    if (sub === 'backdoor'        && typeof cargarConfigBackdoor === 'function') cargarConfigBackdoor();
 }
 
 function switchTab(tab) {

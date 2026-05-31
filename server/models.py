@@ -260,5 +260,17 @@ class ActividadLog(Base):
     def __repr__(self): return f"<ActividadLog {self.id} {self.tipo} {self.dni_alumno}>"
 
 
+class ConfiguracionKiosco(Base):
+    __tablename__ = "configuracion_kiosco"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:                 Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    backdoor_modifiers: Mapped[int] = mapped_column(Integer, default=3)      # 0x0003 (Ctrl+Alt)
+    backdoor_key:       Mapped[int] = mapped_column(Integer, default=123)    # 0x7B (F12)
+    backdoor_pin:       Mapped[str] = mapped_column(String(50), default="UNASAM2025")
+
+    def __repr__(self): return f"<ConfiguracionKiosco ID={self.id}>"
+
+
 # ── Alias legacy: Alumno → AlumnoMaestro para no romper main.py ──────
 Alumno = AlumnoMaestro

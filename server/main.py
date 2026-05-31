@@ -390,6 +390,55 @@ async def cambiar_password_nivel2(
     return {"mensaje": "Contraseña de Nivel 2 actualizada correctamente"}
 
 
+class _ConfiguracionKioscoReq(_BaseModel):
+    backdoor_modifiers: int
+    backdoor_key: int
+    backdoor_pin: str
+
+@app.get("/api/config/backdoor")
+async def obtener_config_backdoor(
+    admin: Usuario = Depends(obtener_usuario_actual),
+    db: AsyncSession = Depends(get_db)
+):
+    from models import ConfiguracionKiosco
+    res = await db.execute(select(ConfiguracionKiosco).limit(1))
+    cfg = res.scalar_one_or_none()
+    if not cfg:
+        cfg = ConfiguracionKiosco()
+        db.add(cfg)
+        await db.commit()
+        await db.refresh(cfg)
+    return {
+        "backdoor_modifiers": cfg.backdoor_modifiers,
+        "backdoor_key": cfg.backdoor_key,
+        "backdoor_pin": cfg.backdoor_pin
+    }
+
+@app.put("/api/config/backdoor")
+async def actualizar_config_backdoor(
+    datos: _ConfiguracionKioscoReq,
+    admin: Usuario = Depends(obtener_usuario_actual),
+    db: AsyncSession = Depends(get_db)
+):
+    from models import ConfiguracionKiosco
+    res = await db.execute(select(ConfiguracionKiosco).limit(1))
+    cfg = res.scalar_one_or_none()
+    if not cfg:
+        cfg = ConfiguracionKiosco()
+        db.add(cfg)
+    cfg.backdoor_modifiers = datos.backdoor_modifiers
+    cfg.backdoor_key = datos.backdoor_key
+    cfg.backdoor_pin = datos.backdoor_pin
+    await db.commit()
+    await manager.broadcast({
+        "tipo": "config_backdoor_update",
+        "backdoor_modifiers": cfg.backdoor_modifiers,
+        "backdoor_key": cfg.backdoor_key,
+        "backdoor_pin": cfg.backdoor_pin
+    })
+    return {"mensaje": "Configuración de Kiosco actualizada correctamente"}
+
+
 # ── Endpoint de limpieza y mantenimiento ───────────────────────────
 
 @app.post("/api/limpiar-todo")
@@ -566,7 +615,25 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         logger.info(f"[WS] Nueva terminal '{hostname}' registrada con IP={terminal_ip}")
                     await db.commit()
 
-                await websocket.send_json({"tipo": "hello_ack", "hostname": hostname})
+                    from models import ConfiguracionKiosco
+                    res_cfg = await db.execute(select(ConfiguracionKiosco).limit(1))
+                    cfg = res_cfg.scalar_one_or_none()
+                    if not cfg:
+                        cfg = ConfiguracionKiosco()
+                        db.add(cfg)
+                        await db.commit()
+                        await db.refresh(cfg)
+                    backdoor_modifiers = cfg.backdoor_modifiers
+                    backdoor_key = cfg.backdoor_key
+                    backdoor_pin = cfg.backdoor_pin
+
+                await websocket.send_json({
+                    "tipo": "hello_ack",
+                    "hostname": hostname,
+                    "backdoor_modifiers": backdoor_modifiers,
+                    "backdoor_key": backdoor_key,
+                    "backdoor_pin": backdoor_pin
+                })
                 await manager.notificar_admins()
 
             elif tipo == "login_request":
