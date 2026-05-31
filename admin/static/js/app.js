@@ -3901,3 +3901,78 @@ async function publicarCliente() {
 
     xhr.send(fd);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN — BACKDOOR
+// ═══════════════════════════════════════════════════════════════════
+
+async function cargarConfigBackdoor() {
+    try {
+        const res = await fetch(`${API_BASE}/config/backdoor`, { headers: authHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        const mods = data.backdoor_modifiers;
+        const eAlt = document.getElementById('cfg-backdoor-alt');
+        const eCtrl = document.getElementById('cfg-backdoor-ctrl');
+        const eShift = document.getElementById('cfg-backdoor-shift');
+        
+        if (eAlt) eAlt.checked = (mods & 0x0001) !== 0;
+        if (eCtrl) eCtrl.checked = (mods & 0x0002) !== 0;
+        if (eShift) eShift.checked = (mods & 0x0004) !== 0;
+        
+        const eKey = document.getElementById('cfg-backdoor-key');
+        if (eKey) eKey.value = data.backdoor_key;
+        
+        const ePin = document.getElementById('cfg-backdoor-pin');
+        if (ePin) ePin.value = data.backdoor_pin;
+    } catch(e) {
+        console.error('Error cargando config backdoor:', e);
+    }
+}
+
+async function guardarConfigBackdoor() {
+    const status = document.getElementById('cfg-backdoor-status');
+    const setStatus = (txt, color) => {
+        if(status) { status.textContent = txt; status.className = `text-xs min-h-4 mt-2 text-right ${color}`; }
+    };
+    
+    let mods = 0;
+    if (document.getElementById('cfg-backdoor-alt')?.checked) mods |= 0x0001;
+    if (document.getElementById('cfg-backdoor-ctrl')?.checked) mods |= 0x0002;
+    if (document.getElementById('cfg-backdoor-shift')?.checked) mods |= 0x0004;
+    
+    if (mods === 0) {
+        setStatus('Debes seleccionar al menos un modificador (Ctrl, Alt o Shift).', 'text-red-500');
+        return;
+    }
+    
+    const key = parseInt(document.getElementById('cfg-backdoor-key')?.value || 0, 10);
+    const pin = (document.getElementById('cfg-backdoor-pin')?.value || '').trim();
+    
+    if (!pin) {
+        setStatus('El PIN de desbloqueo no puede estar vacío.', 'text-red-500');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE}/config/backdoor`, {
+            method: 'PUT',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                backdoor_modifiers: mods,
+                backdoor_key: key,
+                backdoor_pin: pin
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            setStatus(data.detail || 'Error al guardar configuración.', 'text-red-500');
+            return;
+        }
+        setStatus('✓ Configuración guardada correctamente.', 'text-emerald-500');
+        setTimeout(() => { if(status) status.textContent = ''; }, 3000);
+    } catch (e) {
+        setStatus('Error de conexión.', 'text-red-500');
+    }
+}
