@@ -50,7 +50,13 @@
       "Bash(\"/c/Program Files/dotnet/dotnet.exe\" build -c Release --nologo)",
       "Bash(\"/c/Program Files/dotnet/dotnet.exe\" publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o publish/ --nologo)",
       "Bash(\"/c/Program Files/dotnet/dotnet.exe\" publish -c Release -r win-x64 --self-contained true \"-p:PublishSingleFile=true\" -o publish/ --nologo)",
-      "Bash(xxd \"c:/Users/nunes/StudioProjects/control/server/publish/client/version.txt\")"
+      "Bash(xxd \"c:/Users/nunes/StudioProjects/control/server/publish/client/version.txt\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\nunes\\\\StudioProjects\\\\control\" -Recurse -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object FullName)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\nunes\\\\StudioProjects\\\\control\" -Recurse -File | Where-Object { $_.Extension -in @\\('.html', '.js', '.css', '.txt'\\) } | Select-Object -First 50 FullName)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\nunes\\\\StudioProjects\\\\control\\\\client\" -Recurse -File)",
+      "Bash(Select-Object -First 50)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\nunes\\\\StudioProjects\\\\control\" -File -Depth 0 | Where-Object { $_.Extension -eq '.txt' } | Select-Object Name)"
     ],
     "additionalDirectories": [
       "\\tmp",
