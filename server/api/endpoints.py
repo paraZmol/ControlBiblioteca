@@ -1708,8 +1708,8 @@ async def listar_maestro(
     offset: int = 0,
 ):
     """Lista paginada del maestro de alumnos con búsqueda opcional."""
-    if admin.rol != "superadmin":
-        raise HTTPException(status_code=403, detail="Solo administradores pueden acceder a la base de datos")
+    if admin.rol not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
     from sqlalchemy import or_, func
     from sqlalchemy.orm import aliased
     FacDir2 = aliased(Facultad, name="fac_direct2")
@@ -1767,8 +1767,8 @@ async def crear_usuario_manual(
     admin: Usuario = Depends(obtener_usuario_actual),
 ):
     """Registra manualmente un nuevo usuario en el maestro."""
-    if admin.rol != "superadmin":
-        raise HTTPException(status_code=403, detail="Solo administradores pueden agregar usuarios")
+    if admin.rol not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
 
     if not datos.dni.isdigit() or len(datos.dni) != 8:
         raise HTTPException(status_code=422, detail="El DNI debe tener exactamente 8 dígitos numéricos")
@@ -2266,8 +2266,8 @@ async def crear_incidencia(
     admin: Usuario = Depends(obtener_usuario_actual),
 ):
     """Registra una incidencia (leve o grave) para un alumno."""
-    if admin.rol != "superadmin":
-        raise HTTPException(status_code=403, detail="Solo administradores pueden registrar incidencias")
+    if admin.rol not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
     if datos.tipo not in ("leve", "grave"):
         raise HTTPException(status_code=422, detail="El tipo debe ser 'leve' o 'grave'")
     res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == datos.dni))

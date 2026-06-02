@@ -1,0 +1,574 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Monitor, 
+  History, 
+  AlertTriangle, 
+  Activity, 
+  Moon, 
+  Sun, 
+  LogOut, 
+  Search, 
+  Filter, 
+  Download, 
+  Terminal, 
+  ShieldAlert, 
+  Eye, 
+  Plus, 
+  Server, 
+  Power,
+  Lock,
+  ChevronRight,
+  Clock,
+  Users,
+  Wifi,
+  Cpu,
+  MoreHorizontal,
+  Calendar,
+  FileText,
+  CheckCircle2,
+  UserX
+} from 'lucide-react';
+
+// --- MOCK DATA ---
+const mockPCs = Array.from({ length: 27 }, (_, i) => {
+  if (i === 0) return { id: 1, name: 'MEICAGOD', status: 'disponible', ip: '10.21.1.121', user: null, uptime: '12h 45m' };
+  if (i === 1) return { id: 2, name: 'YORU', status: 'ocupado', ip: '10.21.1.122', user: 'Jorge Miller', uptime: '2h 10m' };
+  if (i === 2) return { id: 3, name: 'YOTSUBITA', status: 'mantenimiento', ip: '10.21.1.123', user: null, uptime: '0h 0m' };
+  if (i === 3) return { id: 4, name: 'PC-04', status: 'disponible', ip: '10.21.1.124', user: null, uptime: '5h 22m' };
+  if (i === 4) return { id: 5, name: 'PC-05', status: 'apagado', ip: '10.21.1.125', user: null, uptime: '-' };
+  if (i === 5) return { id: 6, name: 'MEICA020202', status: 'ocupado', ip: '10.21.1.126', user: 'Abel Aniceto', uptime: '1h 05m' };
+
+  const statuses = ['disponible', 'disponible', 'ocupado', 'apagado', 'mantenimiento', 'ocupado'];
+  const status = statuses[i % 6];
+  const hasUser = status === 'ocupado';
+
+  return {
+    id: i + 1,
+    name: `PC-${(i + 1).toString().padStart(2, '0')}`,
+    status: status,
+    ip: `10.21.1.${120 + i + 1}`,
+    user: hasUser ? `Estudiante ${i + 1}` : null,
+    uptime: status !== 'apagado' && status !== 'mantenimiento' ? `${(i % 5) + 1}h ${(i * 12) % 60}m` : '-',
+  };
+});
+
+const mockSessions = [
+  { id: 1, pc: 'YORU', student: 'Jorge Miller Nuñez', dni: '70234305', faculty: 'Ciencias', activity: 'Uso de base de datos', duration: '2h 15m', date: '29/05/2026', time: '14:30 - 16:45', status: 'Completada' },
+  { id: 2, pc: 'YOTSUBITA', student: 'Cristian Arnold Poma', dni: '70272118', faculty: 'Ingeniería', activity: 'AutoCAD / Civil 3D', duration: '4h 30m', date: '29/05/2026', time: '09:00 - 13:30', status: 'Completada' },
+  { id: 3, pc: 'MEICAGOD', student: 'Ana Lopez Soto', dni: '71234567', faculty: 'Letras', activity: 'Lectura de libros digitales', duration: '1h 10m', date: '28/05/2026', time: '18:20 - 19:30', status: 'Completada' },
+  { id: 4, pc: 'PC-04', student: 'Abel Alejandro Aniceto', dni: '71396514', faculty: 'Ciencias', activity: 'Investigación', duration: 'En curso', date: '29/05/2026', time: '16:00 - Actualidad', status: 'Activa' },
+];
+
+const mockLogs = [
+  { id: 1, time: '6:06:03 PM', pc: 'YORU', student: 'Jorge Miller', type: 'Navegador', desc: 'Abrió msedge.exe', level: 'info' },
+  { id: 2, time: '6:03:07 PM', pc: 'YORU', student: 'Jorge Miller', type: 'Proceso', desc: 'Abrió Notepad', level: 'info' },
+  { id: 3, time: '6:33:25 PM', pc: 'YOTSUBITA', student: 'Abel Aniceto', type: 'Comando', desc: 'Ejecutó cmd.exe', level: 'critical' },
+  { id: 4, time: '6:33:13 PM', pc: 'MEICA020202', student: 'Jorge Miller', type: 'Comando', desc: 'Ejecutó powershell.exe', level: 'critical' },
+];
+
+const mockIncidents = [
+  { id: 1, user: 'Jorge Miller Nuñez', dni: '70234305', type: 'LEVE', reason: 'Discusión', desc: 'Altercado por el uso de la PC', time: 'Hace 2 horas', status: 'Activa' },
+  { id: 2, user: 'Abel Alejandro Aniceto', dni: '71396514', type: 'GRAVE', reason: 'Daño equipo', desc: 'Teclado desconectado a la fuerza', time: 'Ayer', status: 'En Revisión' },
+  { id: 3, user: 'Cristian Arnold Poma', dni: '70272118', type: 'LEVE', reason: 'Uso indebido', desc: 'Visualizando contenido no académico', time: 'Hace 3 días', status: 'Resuelta' },
+];
+
+// --- COMPONENTES UI ---
+
+const StatusDot = ({ status }) => {
+  const colors = {
+    disponible: 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]',
+    ocupado: 'bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]',
+    mantenimiento: 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]',
+    apagado: 'bg-zinc-500',
+  };
+  return <div className={`w-2.5 h-2.5 rounded-full ${colors[status] || colors.apagado}`} />;
+};
+
+const BentoCard = ({ children, className = '', title, icon: Icon, action }) => (
+  <div className={`bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 flex flex-col ${className}`}>
+    {(title || Icon || action) && (
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex items-center gap-2 text-zinc-800 dark:text-zinc-200 font-semibold">
+          {Icon && <Icon size={18} className="text-indigo-500" />}
+          {title}
+        </div>
+        {action}
+      </div>
+    )}
+    <div className="flex-1 flex flex-col">{children}</div>
+  </div>
+);
+
+// --- VISTAS ---
+
+const MonitoreoView = () => (
+  <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6 h-full auto-rows-min animate-in fade-in zoom-in-95 duration-500">
+    
+    {/* Resumen Principal (Ocupa 2 columnas) */}
+    <BentoCard className="md:col-span-2 xl:col-span-2 relative overflow-hidden group">
+      <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 dark:bg-indigo-500/20 rounded-full blur-3xl -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
+      <div className="relative z-10 flex justify-between h-full">
+        <div className="flex flex-col justify-between">
+          <div>
+            <h2 className="text-4xl font-bold text-zinc-900 dark:text-white tracking-tight">Centro de Control</h2>
+            <p className="text-zinc-500 dark:text-zinc-400 mt-1 flex items-center gap-2">
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              Sistema operando en tiempo real
+            </p>
+          </div>
+          <div className="flex gap-8 mt-8">
+            <div>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 font-medium">Equipos Online</p>
+              <p className="text-3xl font-bold text-zinc-900 dark:text-white mt-1">4<span className="text-lg text-zinc-400">/6</span></p>
+            </div>
+            <div>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 font-medium">Uso de Red</p>
+              <p className="text-3xl font-bold text-zinc-900 dark:text-white mt-1">24<span className="text-lg text-zinc-400">MB/s</span></p>
+            </div>
+          </div>
+        </div>
+        <div className="hidden sm:flex flex-col items-end gap-2">
+           <button className="flex items-center gap-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 px-5 py-2.5 rounded-xl font-medium transition-transform hover:scale-105 active:scale-95 shadow-lg shadow-zinc-900/20 dark:shadow-white/10">
+            <Lock size={16} /> Bloquear Sala
+          </button>
+        </div>
+      </div>
+    </BentoCard>
+
+    {/* Alertas Rápidas */}
+    <BentoCard title="Alertas Activas" icon={ShieldAlert} className="xl:col-span-1 bg-rose-50/50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/30">
+      <div className="space-y-3 mt-2">
+        {mockIncidents.map(inc => (
+          <div key={inc.id} className="p-3 rounded-2xl bg-white dark:bg-zinc-900/50 border border-rose-100 dark:border-rose-900/50 flex items-start gap-3">
+            <div className={`p-2 rounded-xl ${inc.type === 'GRAVE' ? 'bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-400' : 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400'}`}>
+              <AlertTriangle size={16} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{inc.user}</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 line-clamp-1">{inc.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </BentoCard>
+
+    {/* Actividad Reciente Mini */}
+    <BentoCard title="Últimos Eventos" icon={Activity} className="xl:col-span-1" action={<button className="text-xs text-indigo-500 font-medium">Ver todo</button>}>
+      <div className="relative border-l-2 border-zinc-100 dark:border-zinc-800 ml-3 mt-2 space-y-4">
+        {mockLogs.slice(0, 3).map((log, i) => (
+          <div key={log.id} className="relative pl-5">
+            <div className={`absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${log.level === 'critical' ? 'bg-rose-500 ring-4 ring-rose-50 dark:ring-rose-900/30' : 'bg-zinc-300 dark:bg-zinc-600'}`}></div>
+            <p className="text-xs text-zinc-400 font-mono mb-0.5">{log.time} · {log.pc}</p>
+            <p className="text-sm text-zinc-800 dark:text-zinc-200">{log.desc}</p>
+          </div>
+        ))}
+      </div>
+    </BentoCard>
+
+    {/* Grid Espacial de PCs (Ocupa todo el ancho restante) */}
+    <BentoCard title="Mapa de Nodos (PCs)" icon={Server} className="md:col-span-3 xl:col-span-4 min-h-[400px]">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
+        {mockPCs.map(pc => (
+          <div key={pc.id} className="group flex flex-col p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/40 hover:bg-white dark:hover:bg-zinc-800 border border-zinc-200/60 dark:border-zinc-700/50 transition-all duration-300 hover:shadow-xl hover:shadow-indigo-500/5 hover:-translate-y-1">
+            <div className="flex justify-between items-start mb-3">
+              <div className="flex items-center gap-3">
+                <StatusDot status={pc.status} />
+                <div>
+                  <h3 className="font-bold text-zinc-900 dark:text-white tracking-wide">{pc.name}</h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">{pc.ip}</p>
+                </div>
+              </div>
+              <button className="text-zinc-400 hover:text-indigo-500 transition-colors">
+                <MoreHorizontal size={18} />
+              </button>
+            </div>
+            
+            <div className="h-12 flex items-end">
+              {pc.user ? (
+                <div className="w-full flex items-center justify-between bg-indigo-50 dark:bg-indigo-500/10 rounded-xl p-2 border border-indigo-100 dark:border-indigo-500/20">
+                  <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300 truncate pr-2">{pc.user}</span>
+                  <span className="text-xs text-indigo-500/70 font-mono whitespace-nowrap">{pc.uptime}</span>
+                </div>
+              ) : (
+                <p className="text-sm text-zinc-400 dark:text-zinc-500 italic px-1">Sin usuario asignado</p>
+              )}
+            </div>
+
+            {/* Acciones Visibles por Defecto */}
+            <div className="mt-3">
+              <div className="flex gap-2 h-10">
+                <button className="flex-1 flex justify-center items-center gap-2 bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 rounded-xl hover:bg-rose-200 dark:hover:bg-rose-900/50 transition-colors text-sm font-medium shadow-sm" title="Bloquear">
+                  <Lock size={16} /> Bloquear
+                </button>
+                <button className="flex-1 flex justify-center items-center gap-2 bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300 rounded-xl hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-colors text-sm font-medium shadow-sm" title="Apagar">
+                  <Power size={16} /> Apagar
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </BentoCard>
+  </div>
+);
+
+const ActividadView = () => (
+  <BentoCard className="h-full flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+      <div>
+        <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">Flujo de Actividad</h2>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Registro de eventos del sistema y aplicaciones</p>
+      </div>
+      <div className="flex bg-zinc-100 dark:bg-zinc-800/50 rounded-xl p-1">
+        <button className="px-4 py-1.5 text-sm font-medium rounded-lg bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm transition-all">Todos</button>
+        <button className="px-4 py-1.5 text-sm font-medium rounded-lg text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all">Sospechosos</button>
+      </div>
+    </div>
+
+    {/* Tabla / Lista de eventos modernizada */}
+    <div className="flex-1 overflow-auto pr-2 custom-scrollbar">
+      <div className="space-y-2">
+        {mockLogs.map((log) => (
+          <div key={log.id} className="group flex items-center gap-4 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 rounded-2xl transition-colors border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700">
+            <div className="w-24 shrink-0 text-xs text-zinc-400 font-mono text-right">{log.time}</div>
+            
+            <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${log.level === 'critical' ? 'bg-rose-100 text-rose-500 dark:bg-rose-900/30' : 'bg-indigo-50 text-indigo-500 dark:bg-indigo-900/20'}`}>
+              {log.level === 'critical' ? <Terminal size={18} /> : <Activity size={18} />}
+            </div>
+
+            <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+              <div>
+                <p className="text-sm font-bold text-zinc-900 dark:text-white truncate">{log.pc}</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{log.student}</p>
+              </div>
+              <div className="sm:col-span-2">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 mb-1">
+                  {log.type}
+                </span>
+                <p className={`text-sm ${log.level === 'critical' ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-zinc-700 dark:text-zinc-300'}`}>
+                  {log.desc}
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
+        {/* Fillers visuales */}
+        {[...Array(5)].map((_, i) => (
+          <div key={`fill-${i}`} className="group flex items-center gap-4 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 rounded-2xl transition-colors border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700">
+             <div className="w-24 shrink-0 text-xs text-zinc-400 font-mono text-right">6:00:00 PM</div>
+             <div className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-indigo-50 text-indigo-500 dark:bg-indigo-900/20"><Activity size={18} /></div>
+             <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+               <div><p className="text-sm font-bold text-zinc-900 dark:text-white truncate">YORU</p><p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">Jorge Miller</p></div>
+               <div className="sm:col-span-2"><p className="text-sm text-zinc-700 dark:text-zinc-300">Actividad normal registrada</p></div>
+             </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </BentoCard>
+);
+
+const HistorialView = () => (
+  <BentoCard className="h-full flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+      <div>
+        <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">Historial de Sesiones</h2>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Registro detallado de uso de equipos por estudiantes</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <div className="relative group">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 group-focus-within:text-indigo-500 transition-colors" size={16} />
+          <input type="text" placeholder="Buscar DNI o nombre..." className="pl-9 pr-4 py-2 bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 dark:text-white w-full sm:w-64 transition-all" />
+        </div>
+        <button className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800/50 hover:bg-zinc-200 dark:hover:bg-zinc-700/50 border border-zinc-200 dark:border-zinc-700/50 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 transition-all">
+          <Filter size={16} /> Filtros
+        </button>
+        <button className="flex items-center gap-2 px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-sm font-medium transition-all shadow-lg shadow-indigo-500/20">
+          <Download size={16} /> Exportar
+        </button>
+      </div>
+    </div>
+
+    <div className="flex-1 overflow-auto pr-2 custom-scrollbar">
+      <div className="space-y-3">
+        {mockSessions.map((session) => (
+          <div key={session.id} className="group relative flex flex-col sm:flex-row gap-4 p-4 rounded-2xl bg-zinc-50/50 dark:bg-zinc-800/30 border border-zinc-100 dark:border-zinc-800 hover:border-indigo-500/30 transition-all duration-300 hover:shadow-md hover:shadow-indigo-500/5">
+            {/* Fecha y PC */}
+            <div className="flex sm:flex-col justify-between sm:justify-center items-start sm:w-32 shrink-0 border-b sm:border-b-0 sm:border-r border-zinc-200 dark:border-zinc-700/50 pb-3 sm:pb-0 sm:pr-4">
+              <div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium mb-1 flex items-center gap-1.5"><Calendar size={12} /> {session.date}</p>
+                <div className="inline-flex px-2 py-1 bg-indigo-100 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 text-xs font-bold rounded-lg border border-indigo-200 dark:border-indigo-500/20">
+                  {session.pc}
+                </div>
+              </div>
+              <div className="sm:hidden">
+                <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${session.status === 'Activa' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20' : 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300'}`}>
+                  {session.status}
+                </span>
+              </div>
+            </div>
+
+            {/* Detalles del Alumno */}
+            <div className="flex-1 min-w-0 flex flex-col justify-center">
+              <h3 className="text-base font-bold text-zinc-900 dark:text-white truncate">{session.student}</h3>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                <span className="font-mono text-xs bg-zinc-200/50 dark:bg-zinc-700/50 px-1.5 py-0.5 rounded">{session.dni}</span>
+                <span>•</span>
+                <span className="truncate">{session.faculty}</span>
+                <span>•</span>
+                <span className="text-zinc-600 dark:text-zinc-300 truncate">{session.activity}</span>
+              </div>
+            </div>
+
+            {/* Tiempo y Estado */}
+            <div className="hidden sm:flex flex-col items-end justify-center shrink-0 w-36 pl-4 border-l border-zinc-200 dark:border-zinc-700/50">
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-200">{session.duration}</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-0.5 mb-2">{session.time}</p>
+              <span className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-md ${session.status === 'Activa' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 animate-pulse' : 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400'}`}>
+                {session.status}
+              </span>
+            </div>
+          </div>
+        ))}
+
+        {/* Fillers visuales para rellenar la tabla */}
+        {[...Array(4)].map((_, i) => (
+          <div key={`hist-fill-${i}`} className="group relative flex flex-col sm:flex-row gap-4 p-4 rounded-2xl bg-zinc-50/30 dark:bg-zinc-800/20 border border-zinc-100 dark:border-zinc-800/50 opacity-60">
+             <div className="flex sm:flex-col justify-between items-start sm:w-32 shrink-0 sm:border-r border-zinc-200 dark:border-zinc-700/50 sm:pr-4">
+                <div>
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-1 flex items-center gap-1.5"><Calendar size={12} /> 20/05/2026</p>
+                  <div className="inline-flex px-2 py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 text-xs font-bold rounded-lg border border-zinc-200 dark:border-zinc-700">PC-OLD</div>
+                </div>
+             </div>
+             <div className="flex-1 min-w-0 flex flex-col justify-center">
+                <h3 className="text-base font-bold text-zinc-700 dark:text-zinc-400 truncate">Estudiante Anterior</h3>
+                <p className="text-sm text-zinc-400 mt-1">70000000 • Ingeniería • Uso general</p>
+             </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </BentoCard>
+);
+
+const AlertasView = () => (
+  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full auto-rows-min animate-in fade-in zoom-in-95 duration-500">
+    
+    {/* Columna Izquierda: Resumen y Acciones */}
+    <div className="space-y-6 lg:col-span-1 flex flex-col">
+      <BentoCard className="relative overflow-hidden group">
+        <div className="absolute -right-6 -top-6 w-32 h-32 bg-rose-500/10 dark:bg-rose-500/20 rounded-full blur-2xl"></div>
+        <div className="flex items-center gap-4 relative z-10">
+          <div className="w-14 h-14 rounded-2xl bg-rose-100 dark:bg-rose-500/20 flex items-center justify-center text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30">
+            <ShieldAlert size={28} />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Atención Requerida</p>
+            <h3 className="text-3xl font-bold text-zinc-900 dark:text-white">2 <span className="text-base font-normal text-zinc-400">activas</span></h3>
+          </div>
+        </div>
+        <p className="text-xs text-zinc-500 mt-4 leading-relaxed relative z-10">
+          Las incidencias graves pueden resultar en suspensión automática del sistema para el estudiante infractor.
+        </p>
+        <button className="mt-6 w-full flex items-center justify-center gap-2 py-3 bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-xl font-bold transition-all shadow-lg shadow-zinc-900/20 dark:shadow-white/10">
+          <Plus size={18} /> Registrar Incidencia
+        </button>
+      </BentoCard>
+
+      <BentoCard title="Usuarios Restringidos" icon={UserX} className="flex-1">
+        <div className="flex flex-col gap-3 mt-2">
+           <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800">
+             <div>
+               <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200">Pedro Castillo</p>
+               <p className="text-xs text-zinc-500">Hasta 30/05/2026</p>
+             </div>
+             <span className="text-xs font-bold text-rose-600 dark:text-rose-400">BANEADO</span>
+           </div>
+           <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800">
+             <div>
+               <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200">Maria Fernandez</p>
+               <p className="text-xs text-zinc-500">Advertencia formal</p>
+             </div>
+             <span className="text-xs font-bold text-amber-600 dark:text-amber-400">OBSERVADA</span>
+           </div>
+        </div>
+      </BentoCard>
+    </div>
+
+    {/* Columna Derecha: Lista de Alertas */}
+    <BentoCard className="lg:col-span-2 h-full flex flex-col" title="Registro de Incidencias" icon={AlertTriangle}>
+      
+      <div className="flex gap-2 mb-4">
+        <button className="px-4 py-1.5 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-sm font-medium shadow-sm">Todas</button>
+        <button className="px-4 py-1.5 rounded-lg text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm font-medium transition-colors">Graves</button>
+        <button className="px-4 py-1.5 rounded-lg text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm font-medium transition-colors">Resueltas</button>
+      </div>
+
+      <div className="flex-1 overflow-auto pr-2 custom-scrollbar space-y-3">
+        {mockIncidents.map((incident) => (
+          <div key={incident.id} className="relative group bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 sm:p-5 hover:shadow-lg transition-all duration-300 overflow-hidden">
+            
+            {/* Indicador de severidad lateral */}
+            <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${incident.type === 'GRAVE' ? 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.6)]' : 'bg-amber-400'}`}></div>
+
+            <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pl-2">
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-md ${incident.type === 'GRAVE' ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'}`}>
+                    {incident.type}
+                  </span>
+                  <span className="text-xs text-zinc-400 flex items-center gap-1"><Clock size={12} /> {incident.time}</span>
+                  {incident.status === 'Resuelta' && (
+                    <span className="text-xs text-emerald-500 flex items-center gap-1"><CheckCircle2 size={12} /> Resuelta</span>
+                  )}
+                </div>
+                
+                <h4 className="text-lg font-bold text-zinc-900 dark:text-white mb-1">{incident.reason}</h4>
+                <p className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed mb-4">{incident.desc}</p>
+                
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-100 dark:border-zinc-700/50">
+                  <UserX size={14} className="text-zinc-400" />
+                  <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{incident.user}</span>
+                  <span className="text-xs font-mono text-zinc-400 ml-2 border-l border-zinc-300 dark:border-zinc-600 pl-2">{incident.dni}</span>
+                </div>
+              </div>
+
+              {/* Boton de acción Rápida */}
+              {incident.status !== 'Resuelta' && (
+                <button className="shrink-0 px-4 py-2 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors shadow-sm">
+                  Gestionar
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </BentoCard>
+  </div>
+);
+
+
+// --- APLICACIÓN PRINCIPAL ---
+
+export default function AdminDashboard() {
+  const [currentView, setCurrentView] = useState('monitoreo');
+  const [darkMode, setDarkMode] = useState(true); // Iniciamos en modo oscuro por su aspecto más innovador
+
+  useEffect(() => {
+    if (darkMode) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+  }, [darkMode]);
+
+  const navItems = [
+    { id: 'monitoreo', icon: Cpu, label: 'Nodos' },
+    { id: 'actividad', icon: Activity, label: 'Eventos' },
+    { id: 'historial', icon: History, label: 'Historial' },
+    { id: 'incidencias', icon: AlertTriangle, label: 'Alertas' },
+  ];
+
+  return (
+    <div className={`min-h-screen bg-[#f3f4f6] dark:bg-[#09090b] font-sans transition-colors duration-300 ${darkMode ? 'dark' : ''} flex items-center justify-center p-2 sm:p-4 md:p-6 lg:p-8`}>
+      
+      {/* Contenedor principal estilo "Ventana Flotante" (Glassmorphism + Spatial) */}
+      <div className="w-full max-w-screen-2xl h-[90vh] min-h-[700px] flex gap-6">
+        
+        {/* Sidebar Flotante y Estilizada */}
+        <nav className="w-20 lg:w-64 h-full flex flex-col justify-between bg-white/60 dark:bg-zinc-900/40 backdrop-blur-2xl rounded-3xl border border-white/40 dark:border-zinc-800/50 shadow-2xl overflow-hidden shrink-0">
+          
+          {/* Logo Area */}
+          <div className="h-24 flex items-center justify-center lg:justify-start lg:px-8 border-b border-zinc-200/50 dark:border-zinc-800/50">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-indigo-500/30">
+              U
+            </div>
+            <div className="hidden lg:block ml-4">
+              <h1 className="font-bold text-zinc-900 dark:text-white tracking-wide">UNASAM</h1>
+              <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Biblioteca_OS</p>
+            </div>
+          </div>
+
+          {/* Nav Links */}
+          <div className="flex-1 py-8 px-4 flex flex-col gap-2">
+            {navItems.map(item => {
+              const isActive = currentView === item.id;
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setCurrentView(item.id)}
+                  className={`relative flex items-center justify-center lg:justify-start gap-4 p-4 rounded-2xl transition-all duration-300 group overflow-hidden ${
+                    isActive 
+                      ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-md border border-zinc-100 dark:border-zinc-700/50' 
+                      : 'text-zinc-500 hover:bg-white/50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500 rounded-r-full"></div>}
+                  <Icon size={22} className={`transition-transform duration-300 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
+                  <span className="hidden lg:block font-medium">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Footer Sidebar */}
+          <div className="p-4 border-t border-zinc-200/50 dark:border-zinc-800/50">
+            <div className="hidden lg:flex items-center justify-between mb-4 px-2">
+              <div className="flex items-center gap-2 text-xs font-mono text-emerald-600 dark:text-emerald-400">
+                <Wifi size={14} /> Local WS
+              </div>
+              <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-zinc-100 dark:bg-zinc-800 rounded-full text-zinc-600 dark:text-zinc-400 hover:text-indigo-500 transition-colors">
+                {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+            </div>
+            <div className="flex items-center justify-center lg:justify-start gap-3 p-2 lg:p-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800/50">
+               <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold border border-indigo-200 dark:border-indigo-800/50">
+                AD
+              </div>
+              <div className="hidden lg:block">
+                <p className="text-sm font-bold text-zinc-900 dark:text-white">Admin</p>
+                <p className="text-xs text-zinc-500">Sesión iniciada</p>
+              </div>
+            </div>
+          </div>
+        </nav>
+
+        {/* Área Principal de Contenido */}
+        <main className="flex-1 h-full overflow-y-auto custom-scrollbar relative">
+          
+          {/* Fondo decorativo sutil para el área principal */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-3xl">
+             <div className="absolute -top-[30%] -right-[10%] w-[70%] h-[70%] rounded-full bg-indigo-400/5 dark:bg-indigo-500/5 blur-[120px]"></div>
+             <div className="absolute -bottom-[30%] -left-[10%] w-[50%] h-[50%] rounded-full bg-emerald-400/5 dark:bg-emerald-500/5 blur-[100px]"></div>
+          </div>
+
+          <div className="relative z-10 h-full">
+            {currentView === 'monitoreo' && <MonitoreoView />}
+            {currentView === 'actividad' && <ActividadView />}
+            {currentView === 'historial' && <HistorialView />}
+            {currentView === 'incidencias' && <AlertasView />}
+          </div>
+        </main>
+
+      </div>
+      
+      {/* Estilos globales para la scrollbar transparente */}
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background-color: rgba(156, 163, 175, 0.3);
+          border-radius: 20px;
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+          background-color: rgba(82, 82, 91, 0.5);
+        }
+      `}} />
+    </div>
+  );
+}
