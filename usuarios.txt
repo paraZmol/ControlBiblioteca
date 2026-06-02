@@ -1,0 +1,23 @@
+═══════════════════════════════════════════
+  USUARIOS DEL SISTEMA — Control Biblioteca
+═══════════════════════════════════════════
+
+NIVEL 1 — Admin
+───────────────
+Usuario  : superadmin 
+Contraseña: admin123
+
+Acceso   : Monitoreo, Eventos, Historial, Alertas,
+           Configuracion > Backdoor
+
+
+NIVEL 2 — Super Admin
+──────────────────────
+Usuario  : admin
+Contraseña: max123
+
+Acceso   : Todo lo anterior +
+           Base de Datos,
+           Configuracion completa
+
+═══════════════════════════════════════════

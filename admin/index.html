@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es" class="dark">
 <head>
     <meta charset="UTF-8">
@@ -9,39 +9,38 @@
         tailwind.config = {
             darkMode: 'class',
             theme: { extend: { colors: {
-                slate: { 850: '#151e2e', 900: '#0f172a', 950: '#020617' },
-                cyan:  { 400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2' }
+                zinc: { 950: '#09090b' }
             }}}
         }
     </script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link rel="stylesheet" href="static/css/style.css">
+    <link rel="stylesheet" href="static/css/style.css?v=16">
     <style>
-        ::-webkit-scrollbar { width:8px; height:8px; }
-        .dark ::-webkit-scrollbar-track { background:#0f172a; }
-        ::-webkit-scrollbar-track { background:#f1f5f9; }
-        .dark ::-webkit-scrollbar-thumb { background:#334155; border-radius:4px; }
-        ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:4px; }
+        ::-webkit-scrollbar { width:6px; height:6px; }
+        .dark ::-webkit-scrollbar-track { background:transparent; }
+        ::-webkit-scrollbar-track { background:transparent; }
+        .dark ::-webkit-scrollbar-thumb { background:rgba(82,82,91,.5); border-radius:20px; }
+        ::-webkit-scrollbar-thumb { background:rgba(156,163,175,.35); border-radius:20px; }
         #dashboard { background: inherit; }
-        #tablaSesiones tbody tr:hover { background: rgba(51,65,85,0.15); }
-        .dark #tablaSesiones tbody tr:hover { background: rgba(51,65,85,0.25); }
-        .btn-periodo-activo { background:#0891b2 !important; color:#fff !important; border-color:#0891b2 !important; }
+        #tablaSesiones tbody tr:hover { background: rgba(82,82,91,0.10); }
+        .dark #tablaSesiones tbody tr:hover { background: rgba(82,82,91,0.20); }
+        .btn-periodo-activo { background: var(--a) !important; color:#fff !important; border-color: var(--a) !important; }
         .th-sortable { cursor:pointer; }
-        .th-sortable:hover { color:#22d3ee; }
+        .th-sortable:hover { color: var(--a); }
         /* Sidebar nav activo */
         .nav-item-active {
-            background: rgba(6,182,212,0.1);
-            color: #22d3ee;
-            border-color: rgba(6,182,212,0.2);
+            background: var(--a-dim);
+            color: var(--a);
+            border-color: var(--a-bdr);
         }
         html:not(.dark) .nav-item-active {
-            background: #ecfeff;
-            color: #0891b2;
-            border-color: #a5f3fc;
+            background: var(--a-dim);
+            color: var(--a);
+            border-color: var(--a-bdr);
         }
     </style>
 </head>
-<body class="text-slate-700 dark:text-slate-300 font-sans antialiased transition-colors duration-300" style="margin:0;padding:0;overflow:hidden;height:100vh">
+<body class="font-sans antialiased" style="margin:0;padding:0;overflow:hidden;height:100vh;color:var(--t1)">
 
 <!-- LOGIN (sin cambios) -->
 <div id="loginPanel" class="login-fullscreen">
@@ -88,74 +87,72 @@
 </div>
 
 <!-- DASHBOARD con Sidebar -->
-<div id="dashboard" class="dashboard flex flex-row h-screen" style="display:none">
+<div id="dashboard" class="dashboard" style="display:none">
 
     <!-- Overlay para cerrar sidebar en móvil -->
     <div id="sidebarOverlay" class="sidebar-overlay" onclick="cerrarSidebar()"></div>
 
+    <!-- Ventana flotante -->
+    <div class="app-window">
+
     <!-- ══ SIDEBAR ══ -->
-    <aside id="sidebar" class="sidebar w-60 flex-shrink-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between transition-colors duration-300 z-20">
+    <aside id="sidebar" class="sidebar transition-colors duration-300 z-20">
         <!-- Logo -->
         <div>
-            <div class="h-16 flex items-center px-5 border-b border-slate-200 dark:border-slate-800">
-                <div class="flex items-center gap-3">
-                    <i class="ph ph-books text-cyan-600 dark:text-cyan-400 text-2xl"></i>
-                    <div>
-                        <h1 class="text-base font-black text-slate-900 dark:text-white leading-tight">UNASAM</h1>
-                        <p class="text-[10px] text-slate-500 dark:text-slate-400 font-medium tracking-widest uppercase">Biblioteca</p>
-                    </div>
+            <div class="sidebar-logo-area">
+                <div class="sidebar-logo-badge">U</div>
+                <div class="sidebar-logo-text">
+                    <h1>UNASAM</h1>
+                    <p>Biblioteca_OS</p>
                 </div>
             </div>
 
             <!-- Nav -->
-            <nav class="p-3 space-y-1">
-                <p class="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2 mt-1">Menú Principal</p>
-
+            <nav class="sidebar-nav">
                 <button onclick="switchTab('monitoreo')" id="nav-monitoreo"
-                    class="nav-item nav-item-active w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold transition-all border border-transparent text-sm">
-                    <i class="ph ph-computer-tower text-lg"></i> Monitoreo en Vivo
-                </button>
-
-                <button onclick="switchTab('historial')" id="nav-historial"
-                    class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-transparent text-sm">
-                    <i class="ph ph-list-dashes text-lg"></i> Historial de Sesiones
-                </button>
-
-<button onclick="switchTab('basedatos')" id="nav-basedatos"
-                    class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-transparent text-sm">
-                    <i class="ph ph-database text-lg"></i> Base de Datos
-                </button>
-
-                <button onclick="switchTab('incidencias')" id="nav-incidencias"
-                    class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-transparent text-sm">
-                    <i class="ph ph-warning-circle text-lg"></i> Incidencias
-                    <span id="incidencias-badge" class="ml-auto text-[10px] font-bold bg-amber-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none" style="display:none"></span>
+                    class="nav-item nav-item-active">
+                    <i class="ph ph-cpu"></i>
+                    <span>Nodos</span>
                 </button>
 
                 <button onclick="switchTab('actividad')" id="nav-actividad"
-                    class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-transparent text-sm">
-                    <i class="ph ph-activity text-lg"></i> Actividad
-                    <span id="actividad-badge" class="ml-auto text-[10px] font-bold bg-red-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none" style="display:none"></span>
+                    class="nav-item">
+                    <i class="ph ph-activity"></i>
+                    <span>Eventos</span>
+                    <span id="actividad-badge" class="nav-badge" style="display:none"></span>
+                </button>
+
+                <button onclick="switchTab('historial')" id="nav-historial"
+                    class="nav-item">
+                    <i class="ph ph-clock-counter-clockwise"></i>
+                    <span>Historial</span>
+                </button>
+
+                <button onclick="switchTab('incidencias')" id="nav-incidencias"
+                    class="nav-item">
+                    <i class="ph ph-warning-circle"></i>
+                    <span>Alertas</span>
+                    <span id="incidencias-badge" class="nav-badge" style="display:none"></span>
+                </button>
+
+                <button onclick="switchTab('basedatos')" id="nav-basedatos"
+                    class="nav-item">
+                    <i class="ph ph-database"></i>
+                    <span>Base de Datos</span>
                 </button>
 
                 <button onclick="switchTab('configuracion')" id="nav-configuracion"
-                    class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all border border-transparent text-sm">
-                    <i class="ph ph-gear text-lg"></i> Configuración
+                    class="nav-item">
+                    <i class="ph ph-gear"></i>
+                    <span>Configuración</span>
                 </button>
             </nav>
         </div>
 
         <!-- Sidebar Bottom -->
-        <div class="p-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
-            <!-- Server status -->
-            <div class="bg-slate-100 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-                <div class="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
-                    <i class="ph ph-hard-drives text-xs"></i> Servidor Local
-                </div>
-                <div class="mb-2">
-                    <p class="text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">IP Servidor:</p>
-                    <p id="serverIpBadge" class="server-badge text-sm font-mono font-bold text-slate-900 dark:text-white">...</p>
-                </div>
+        <div class="sidebar-footer">
+            <!-- WS + Server status -->
+            <div class="sidebar-ws-row">
                 <span id="wsStatus" class="ws-badge off inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-md border font-bold w-max transition-colors">
                     <span class="relative flex h-1.5 w-1.5">
                         <span class="ws-ping animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"></span>
@@ -163,6 +160,7 @@
                     </span>
                     <span class="ws-label">WS OFF</span>
                 </span>
+                <p id="serverIpBadge" class="server-badge text-xs font-mono font-bold">...</p>
             </div>
 
             <!-- Zoom control -->
@@ -178,25 +176,22 @@
                 </div>
             </div>
 
-            <!-- User + actions -->
-            <div class="flex items-center justify-between px-1">
-                <div class="flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-full bg-cyan-100 dark:bg-cyan-900/50 flex items-center justify-center text-cyan-700 dark:text-cyan-300 font-black text-sm">
-                        <i class="ph ph-user text-sm"></i>
-                    </div>
-                    <div>
-                        <p id="usuarioActual" class="text-xs font-bold text-slate-900 dark:text-white"></p>
-                        <button id="btnRol" onclick="toggleRol()"
-                            class="btn-rol text-[10px] text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors font-medium"></button>
-                    </div>
+            <!-- User row -->
+            <div class="sidebar-user-row">
+                <div class="sidebar-user-avatar">
+                    <i class="ph ph-user"></i>
                 </div>
-                <div class="flex items-center gap-1">
+                <div class="sidebar-user-info">
+                    <p id="usuarioActual" class="sidebar-user-name"></p>
+                    <p id="usuarioRol" class="sidebar-user-rol"></p>
+                </div>
+                <div class="flex items-center gap-0.5">
                     <button id="btnTema" onclick="toggleTema()" title="Cambiar tema"
-                        class="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition-colors">
+                        class="p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors">
                         <i id="iconTema" class="ph ph-sun text-base"></i>
                     </button>
                     <button onclick="logout()" title="Cerrar Sesión"
-                        class="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
+                        class="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-500/10 text-zinc-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
                         <i class="ph ph-sign-out text-base"></i>
                     </button>
                 </div>
@@ -205,7 +200,7 @@
     </aside>
 
     <!-- ══ ÁREA PRINCIPAL ══ -->
-    <div class="flex-1 flex flex-col" style="min-height:0;overflow:hidden">
+    <div class="app-main-area">
 
         <!-- Top Header — solo visible en móvil para hamburger -->
         <header class="top-header-mobile">
@@ -215,70 +210,97 @@
             <span id="pageTitle" class="top-header-title"></span>
         </header>
 
+        <!-- Blobs decorativos de fondo -->
+        <div class="app-bg-blob app-bg-blob-1"></div>
+        <div class="app-bg-blob app-bg-blob-2"></div>
+
         <!-- Contenido scrollable -->
-        <main class="flex-1 overflow-y-auto" style="padding:22px 28px 40px;min-height:0">
-            <div class="max-w-screen-2xl mx-auto">
+        <main class="app-scroll-main">
+            <div>
 
                 <!-- ══ TAB: MONITOREO ══ -->
-                <div id="tab-monitoreo" class="mon-view">
+                <div id="tab-monitoreo" class="mon-bento-view">
 
-                    <!-- Page header -->
-                    <div class="mon-ph">
-                        <div class="mon-ph-left">
-                            <div class="mon-ph-heading">
-                                Monitoreo en Vivo
-                                <span class="mon-live-chip">
-                                    <span class="mon-live-dot"></span> En Vivo
-                                </span>
+                    <!-- ── Fila superior: Hero + Alertas + Eventos ── -->
+                    <div class="mon-bento-top">
+
+                        <!-- Hero Card: Centro de Control -->
+                        <div class="bento-card mon-hero-card">
+                            <div class="mon-hero-glow"></div>
+                            <div class="mon-hero-body">
+                                <div class="mon-hero-left">
+                                    <div>
+                                        <h2 class="mon-hero-title">Centro de Control</h2>
+                                        <p class="mon-hero-sub">
+                                            <span class="mon-live-ping">
+                                                <span class="mon-live-ping-inner"></span>
+                                                <span class="mon-live-ping-dot"></span>
+                                            </span>
+                                            Sistema operando en tiempo real
+                                        </p>
+                                    </div>
+                                    <!-- KPI stats en la parte inferior del hero -->
+                                    <div id="seccionStats" class="mon-hero-stats">
+                                        <div class="mon-hero-kpi">
+                                            <p class="mon-hero-kpi-lbl">Equipos Online</p>
+                                            <p class="mon-hero-kpi-val"><span id="terminalesActivas">0</span><span class="mon-hero-kpi-total">/<span id="totalTerminales">0</span></span></p>
+                                        </div>
+                                        <div class="mon-hero-kpi">
+                                            <p class="mon-hero-kpi-lbl">Sesiones Hoy</p>
+                                            <p class="mon-hero-kpi-val"><span id="sesionesActivas">0</span><span class="mon-hero-kpi-note" id="monFechaHoy"></span></p>
+                                        </div>
+                                        <div class="mon-hero-kpi">
+                                            <p class="mon-hero-kpi-lbl">Alumnos</p>
+                                            <p class="mon-hero-kpi-val"><span id="totalAlumnos">0</span></p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mon-hero-right">
+                                    <button class="mon-btn-block-all" onclick="bloquearTodas()">
+                                        <i class="ph ph-lock"></i> Bloquear Sala
+                                    </button>
+                                </div>
                             </div>
-                            <div class="mon-ph-sub">PCs conectadas · actualizado en tiempo real</div>
                         </div>
-                        <button class="mon-btn-block-all" onclick="bloquearTodas()">
-                            <i class="ph ph-lock"></i> Bloquear Todas
-                        </button>
+
+                        <!-- Alertas Activas -->
+                        <div class="bento-card mon-alerts-card">
+                            <div class="bento-card-hdr">
+                                <div class="bento-card-ttl">
+                                    <i class="ph ph-shield-warning bento-icon-rose"></i>
+                                    Alertas Activas
+                                </div>
+                            </div>
+                            <div class="mon-alerts-list" id="monAlertasMini">
+                                <p class="mon-alerts-empty">Sin incidencias activas</p>
+                            </div>
+                        </div>
+
+                        <!-- Últimos Eventos -->
+                        <div class="bento-card mon-events-card">
+                            <div class="bento-card-hdr">
+                                <div class="bento-card-ttl">
+                                    <i class="ph ph-activity bento-icon-indigo"></i>
+                                    Últimos Eventos
+                                </div>
+                                <button class="bento-link-btn" onclick="switchTab('actividad')">Ver todo</button>
+                            </div>
+                            <div class="mon-events-timeline" id="monEventosMini">
+                                <p class="mon-alerts-empty">Sin eventos recientes</p>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- KPI CARDS -->
-                    <div id="seccionStats" class="mon-stats">
-                        <div class="mon-stat">
-                            <div class="mon-stat-ghost"><i class="ph ph-computer-tower"></i></div>
-                            <div class="mon-stat-ico"><i class="ph ph-computer-tower"></i></div>
-                            <div class="mon-stat-lbl">Total Equipos</div>
-                            <div class="mon-stat-val" id="totalTerminales">0</div>
-                            <div class="mon-stat-note">PCs conectadas</div>
-                        </div>
-                        <div class="mon-stat ok">
-                            <div class="mon-stat-ghost"><i class="ph ph-activity"></i></div>
-                            <div class="mon-stat-ico"><i class="ph ph-activity"></i></div>
-                            <div class="mon-stat-lbl">Sesiones Activas</div>
-                            <div class="mon-stat-val" id="terminalesActivas">0</div>
-                            <div class="mon-stat-note">En curso ahora</div>
-                        </div>
-                        <div class="mon-stat">
-                            <div class="mon-stat-ghost"><i class="ph ph-clock-counter-clockwise"></i></div>
-                            <div class="mon-stat-ico"><i class="ph ph-clock-counter-clockwise"></i></div>
-                            <div class="mon-stat-lbl">Sesiones Hoy</div>
-                            <div class="mon-stat-val" id="sesionesActivas">0</div>
-                            <div class="mon-stat-note" id="monFechaHoy"></div>
-                        </div>
-                        <div class="mon-stat wrn">
-                            <div class="mon-stat-ghost"><i class="ph ph-student"></i></div>
-                            <div class="mon-stat-ico"><i class="ph ph-student"></i></div>
-                            <div class="mon-stat-lbl">Alumnos Registrados</div>
-                            <div class="mon-stat-val" id="totalAlumnos">0</div>
-                            <div class="mon-stat-note">Total en el sistema</div>
-                        </div>
-                    </div>
-
-                    <!-- EQUIPOS -->
-                    <div class="mon-section-card" id="seccionEquipos">
-                        <div class="mon-section-head">
-                            <div class="mon-section-ttl">
-                                <i class="ph ph-computer-tower"></i> PCs conectadas
+                    <!-- ── Fila inferior: Grid de PCs ── -->
+                    <div class="bento-card mon-grid-card" id="seccionEquipos">
+                        <div class="bento-card-hdr">
+                            <div class="bento-card-ttl">
+                                <i class="ph ph-chart-network bento-icon-indigo"></i>
+                                Mapa de Nodos (PCs)
                             </div>
-                            <span class="mon-section-badge" id="badgeEquipos"></span>
+                            <span class="bento-badge" id="badgeEquipos"></span>
                         </div>
-                        <div class="mon-section-body">
+                        <div class="mon-grid-body">
                             <div id="terminalesGrid" class="terminales-grid"></div>
                         </div>
                     </div>
@@ -416,32 +438,32 @@
                 <div id="tab-basedatos" style="display:none">
 
                     <!-- Sub-pestañas estilo navegador -->
-                    <div class="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-800">
+                    <div class="flex gap-1 mb-5 border-b border-zinc-200 dark:border-zinc-800">
                         <button id="subtab-btn-estudiantes" onclick="switchSubtab('estudiantes')"
-                            class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-cyan-600 dark:text-cyan-400 -mb-px flex items-center gap-2 transition-colors">
+                            class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-student"></i> Estudiantes
                         </button>
                         <button id="subtab-btn-personal" onclick="switchSubtab('personal')"
-                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-identification-badge"></i> Personal Universitario
                         </button>
                     </div>
 
                     <!-- Panel: Estudiantes -->
                     <div id="subtab-estudiantes">
-                        <section id="seccionMaestro" class="section bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm transition-colors">
+                        <section id="seccionMaestro" class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors">
                             <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
-                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                                    <i class="ph ph-database text-cyan-600 dark:text-cyan-400"></i> Base de Datos de Usuarios del Centro de Cómputo
+                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                                    <i class="ph ph-database text-indigo-600 dark:text-indigo-400"></i> Base de Datos de Usuarios del Centro de Cómputo
                                 </h3>
                                 <div class="flex gap-2 flex-wrap items-center">
                                     <button onclick="abrirNuevoUsuario()" class="db-btn db-btn-new">
                                         <i class="ph ph-user-plus"></i> Nuevo Usuario
                                     </button>
-                                    <button onclick="exportarMaestroBackup()" class="db-btn db-btn-export">
+                                    <button id="btnExportarMaestro" onclick="exportarMaestroBackup()" class="db-btn db-btn-export">
                                         <i class="ph ph-file-xls"></i> Exportar Excel
                                     </button>
-                                    <label class="db-btn db-btn-import cursor-pointer">
+                                    <label id="btnImportarMaestro" class="db-btn db-btn-import cursor-pointer">
                                         <i class="ph ph-upload-simple"></i> Importar Excel
                                         <input id="inputMaestroExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="importarMaestro(this)">
                                     </label>
@@ -450,17 +472,17 @@
                             <div id="maestroResultado" style="display:none" class="maestro-resultado mb-4"></div>
                             <div class="flex gap-3 mb-4 items-center flex-wrap">
                                 <div class="relative flex-1 min-w-52">
-                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm"></i>
+                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
                                     <input id="maestroBuscar" type="text" placeholder="Buscar por nombre, DNI o código..."
-                                        class="input-filtro w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm rounded-lg pl-9 pr-4 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                                        class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                                         oninput="buscarMaestro()">
                                 </div>
-                                <span id="maestroTotal" class="text-xs text-slate-500 dark:text-slate-400"></span>
+                                <span id="maestroTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
                             </div>
-                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
                                 <table class="tabla w-full text-left text-sm">
                                     <thead>
-                                        <tr class="bg-slate-100 dark:bg-slate-950/50 text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                                        <tr class="bg-zinc-100 dark:bg-zinc-950/50 text-zinc-500 dark:text-zinc-400 text-xs uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-800">
                                             <th class="p-4 font-semibold" style="width:90px">DNI</th>
                                             <th class="p-4 font-semibold">Nombre Completo</th>
                                             <th class="p-4 font-semibold" style="width:110px">Código Univ.</th>
@@ -469,20 +491,20 @@
                                             <th class="p-4 font-semibold" style="width:100px">Acciones</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="maestroBody" class="divide-y divide-slate-100 dark:divide-slate-800/50"></tbody>
+                                    <tbody id="maestroBody" class="divide-y divide-zinc-100 dark:divide-zinc-800/50"></tbody>
                                 </table>
                             </div>
-                            <p id="sinMaestro" class="empty-msg text-center text-slate-400 dark:text-slate-600 py-8 text-sm" style="display:none">No hay registros en el maestro</p>
+                            <p id="sinMaestro" class="empty-msg text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm" style="display:none">No hay registros en el maestro</p>
                             <div id="maestroPaginacion" class="flex gap-1 justify-center mt-4 flex-wrap"></div>
                         </section>
                     </div>
 
                     <!-- Panel: Personal Universitario -->
-                    <div id="subtab-personal" style="display:none">
-                        <section class="section bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm transition-colors">
+                    <div id="subtab-personal" style="display:none" class="bd-solo-superadmin">
+                        <section class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors">
                             <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
-                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                                    <i class="ph ph-identification-badge text-cyan-600 dark:text-cyan-400"></i> Personal de la Universidad
+                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                                    <i class="ph ph-identification-badge text-indigo-600 dark:text-indigo-400"></i> Personal de la Universidad
                                 </h3>
                                 <div class="flex gap-2 flex-wrap items-center">
                                     <button onclick="abrirNuevoPersonal()" class="db-btn db-btn-new">
@@ -500,17 +522,17 @@
                             <div id="personalResultado" style="display:none" class="maestro-resultado mb-4"></div>
                             <div class="flex gap-3 mb-4 items-center flex-wrap">
                                 <div class="relative flex-1 min-w-52">
-                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm"></i>
+                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
                                     <input id="personalBuscar" type="text" placeholder="Buscar por nombre, DNI, cargo o área..."
-                                        class="input-filtro w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm rounded-lg pl-9 pr-4 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                                        class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                                         oninput="buscarPersonal()">
                                 </div>
-                                <span id="personalTotal" class="text-xs text-slate-500 dark:text-slate-400"></span>
+                                <span id="personalTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
                             </div>
-                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
                                 <table class="tabla w-full text-left text-sm">
                                     <thead>
-                                        <tr class="bg-slate-100 dark:bg-slate-950/50 text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                                        <tr class="bg-zinc-100 dark:bg-zinc-950/50 text-zinc-500 dark:text-zinc-400 text-xs uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-800">
                                             <th class="p-4 font-semibold" style="width:90px">DNI</th>
                                             <th class="p-4 font-semibold">Nombre Completo</th>
                                             <th class="p-4 font-semibold">Cargo</th>
@@ -520,10 +542,10 @@
                                             <th class="p-4 font-semibold" style="width:100px">Acciones</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="personalBody" class="divide-y divide-slate-100 dark:divide-slate-800/50"></tbody>
+                                    <tbody id="personalBody" class="divide-y divide-zinc-100 dark:divide-zinc-800/50"></tbody>
                                 </table>
                             </div>
-                            <p id="sinPersonal" class="empty-msg text-center text-slate-400 dark:text-slate-600 py-8 text-sm" style="display:none">No hay personal registrado</p>
+                            <p id="sinPersonal" class="empty-msg text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm" style="display:none">No hay personal registrado</p>
                             <div id="personalPaginacion" class="flex gap-1 justify-center mt-4 flex-wrap"></div>
                         </section>
                     </div>
@@ -534,18 +556,18 @@
                 <div id="tab-incidencias" style="display:none">
 
                     <!-- Sub-pestañas -->
-                    <div class="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-800">
+                    <div class="flex gap-1 mb-5 border-b border-zinc-200 dark:border-zinc-800">
                         <button id="subtab-btn-incidencias-inc" onclick="switchSubtabInc('inc')"
-                            class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 -mb-px flex items-center gap-2 transition-colors">
+                            class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-warning-circle"></i> Incidencias
                             <span id="incidencias-badge-sub" class="text-[10px] font-bold bg-amber-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none" style="display:none"></span>
                         </button>
                         <button id="subtab-btn-incidencias-bans" onclick="switchSubtabInc('bans')"
-                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-prohibit"></i> Usuarios Baneados
                         </button>
                         <button id="subtab-btn-incidencias-sospechas" onclick="switchSubtabInc('sospechas')"
-                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-eye"></i> Sospechas
                             <span id="sospechas-badge" class="text-[10px] font-bold bg-violet-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none" style="display:none"></span>
                         </button>
@@ -553,16 +575,16 @@
 
                     <!-- Panel: Incidencias -->
                     <div id="subtab-incidencias-inc">
-                        <section class="section bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-5 shadow-sm transition-colors">
+                        <section class="section bg-white dark:bg-zinc-900 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-5 shadow-sm transition-colors">
                             <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
                                 <div>
                                     <h3 class="text-base font-bold text-amber-600 dark:text-amber-400 flex items-center gap-2">
                                         <i class="ph ph-warning-circle text-lg"></i> Historial de Incidencias
                                     </h3>
-                                    <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">3 incidencias leves activas = habilita baneo directo · 1 incidencia grave = baneo inmediato recomendado</p>
+                                    <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">3 incidencias leves activas = habilita baneo directo · 1 incidencia grave = baneo inmediato recomendado</p>
                                 </div>
                                 <div class="flex gap-2 flex-wrap items-center">
-                                    <span id="incidenciasTotal" class="text-xs text-slate-500 dark:text-slate-400"></span>
+                                    <span id="incidenciasTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
                                     <button onclick="abrirNuevaIncidencia()" class="db-btn db-btn-new">
                                         <i class="ph ph-plus"></i> Registrar Incidencia
                                     </button>
@@ -579,9 +601,9 @@
 
                             <div class="flex gap-3 mb-4 items-center flex-wrap">
                                 <div class="relative flex-1 min-w-52">
-                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 text-sm"></i>
+                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
                                     <input id="incidenciasBuscar" type="text" placeholder="Buscar por nombre o DNI…"
-                                        class="input-filtro w-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm rounded-lg pl-9 pr-4 py-2 text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 transition-colors placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                                        class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-amber-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                                         oninput="filtrarIncidencias()">
                                 </div>
                                 <select id="incidenciasFiltroTipo" class="hist-select" onchange="filtrarIncidencias()">
@@ -589,9 +611,9 @@
                                     <option value="leve">Leve</option>
                                     <option value="grave">Grave</option>
                                 </select>
-                                <label class="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+                                <label class="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400 cursor-pointer select-none">
                                     <input type="checkbox" id="incidenciasSoloActivas" onchange="filtrarIncidencias()" checked
-                                        class="rounded border-slate-300 dark:border-slate-600 text-amber-500 focus:ring-amber-500">
+                                        class="rounded border-zinc-300 dark:border-zinc-600 text-amber-500 focus:ring-amber-500">
                                     Solo activas
                                 </label>
                             </div>
@@ -614,22 +636,22 @@
                                     <tbody id="incidenciasBody" class="divide-y divide-amber-50 dark:divide-amber-900/20"></tbody>
                                 </table>
                             </div>
-                            <p id="sinIncidencias" class="text-center text-slate-400 dark:text-slate-600 py-8 text-sm" style="display:none">No hay incidencias registradas</p>
+                            <p id="sinIncidencias" class="text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm" style="display:none">No hay incidencias registradas</p>
                         </section>
                     </div>
 
                     <!-- Panel: Sospechas del sistema -->
                     <div id="subtab-incidencias-sospechas" style="display:none">
-                        <section class="section bg-white dark:bg-slate-900 border border-violet-200 dark:border-violet-900/40 rounded-2xl p-5 shadow-sm transition-colors">
+                        <section class="section bg-white dark:bg-zinc-900 border border-violet-200 dark:border-violet-900/40 rounded-2xl p-5 shadow-sm transition-colors">
                             <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
                                 <div>
                                     <h3 class="text-base font-bold text-violet-600 dark:text-violet-400 flex items-center gap-2">
                                         <i class="ph ph-eye text-lg"></i> Sospechas detectadas por el sistema
                                     </h3>
-                                    <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Revisar y decidir si escalar a incidencia o descartar</p>
+                                    <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Revisar y decidir si escalar a incidencia o descartar</p>
                                 </div>
                                 <div class="flex gap-2 items-center flex-wrap">
-                                    <span id="sospechasTotal" class="text-xs text-slate-500 dark:text-slate-400"></span>
+                                    <span id="sospechasTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
                                     <select id="sospechasFiltroEstado" onchange="cargarSospechas()" class="hist-select text-xs">
                                         <option value="pendiente">Pendientes</option>
                                         <option value="">Todas</option>
@@ -663,18 +685,18 @@
                                     <tbody id="sospechasBody" class="divide-y divide-violet-50 dark:divide-violet-900/20"></tbody>
                                 </table>
                             </div>
-                            <p id="sinSospechas" class="text-center text-slate-400 dark:text-slate-600 py-8 text-sm" style="display:none">No hay sospechas en este estado</p>
+                            <p id="sinSospechas" class="text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm" style="display:none">No hay sospechas en este estado</p>
                         </section>
                     </div>
 
                     <!-- Panel: Usuarios Baneados -->
                     <div id="subtab-incidencias-bans" style="display:none">
-                        <section class="section bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/40 rounded-2xl p-5 shadow-sm transition-colors">
+                        <section class="section bg-white dark:bg-zinc-900 border border-rose-200 dark:border-rose-900/40 rounded-2xl p-5 shadow-sm transition-colors">
                             <div class="flex items-center justify-between mb-5">
                                 <h3 class="text-base font-bold text-rose-600 dark:text-rose-400 flex items-center gap-2">
                                     <i class="ph ph-prohibit text-lg"></i> Usuarios Baneados
                                 </h3>
-                                <span id="bansTotal" class="text-xs text-slate-500 dark:text-slate-400"></span>
+                                <span id="bansTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
                             </div>
                             <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-rose-100 dark:border-rose-900/30">
                                 <table class="tabla w-full text-left text-sm">
@@ -692,71 +714,77 @@
                                     <tbody id="bansBody" class="divide-y divide-rose-50 dark:divide-rose-900/20"></tbody>
                                 </table>
                             </div>
-                            <p id="sinBans" class="text-center text-slate-400 dark:text-slate-600 py-8 text-sm">No hay usuarios baneados actualmente</p>
+                            <p id="sinBans" class="text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm">No hay usuarios baneados actualmente</p>
                         </section>
                     </div>
 
                 </div>
 
                 <!-- ══ TAB: ACTIVIDAD ══ -->
-                <div id="tab-actividad" style="display:none">
+                <div id="tab-actividad" style="display:none" class="act-view">
 
-                    <!-- Filtros -->
-                    <div class="flex flex-wrap gap-3 mb-5">
-                        <input id="act-filtro-dni" type="text" maxlength="8" placeholder="DNI alumno"
-                            class="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800 w-36"
-                            oninput="cargarActividad()">
-                        <input id="act-filtro-terminal" type="text" placeholder="PC (ej: PC-01)"
-                            class="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800 w-36"
-                            oninput="cargarActividad()">
-                        <select id="act-filtro-nivel" onchange="cargarActividad()"
-                            class="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800">
-                            <option value="">Todos los niveles</option>
-                            <option value="sospechoso">⚠ Sospechoso</option>
-                            <option value="normal">Normal</option>
-                        </select>
-                        <input id="act-filtro-fecha" type="date"
-                            class="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800"
-                            onchange="cargarActividad()">
-                        <button onclick="actLimpiarFiltros()"
-                            class="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-                            <i class="ph ph-x"></i> Limpiar
-                        </button>
-                    </div>
+                    <div class="bento-card act-card">
 
-                    <!-- Tabla -->
-                    <div class="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                        <table class="w-full text-sm">
-                            <thead class="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 text-xs uppercase">
-                                <tr>
-                                    <th class="px-4 py-3 text-left">Fecha / Hora</th>
-                                    <th class="px-4 py-3 text-left">PC</th>
-                                    <th class="px-4 py-3 text-left">Alumno</th>
-                                    <th class="px-4 py-3 text-left">DNI</th>
-                                    <th class="px-4 py-3 text-left">Tipo</th>
-                                    <th class="px-4 py-3 text-left">Descripción</th>
-                                    <th class="px-4 py-3 text-left">Nivel</th>
-                                </tr>
-                            </thead>
-                            <tbody id="act-tabla-body">
-                                <tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">Cargando...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
+                        <!-- Cabecera -->
+                        <div class="act-card-hdr">
+                            <div>
+                                <h2 class="act-title">Flujo de Actividad</h2>
+                                <p class="act-subtitle">Registro de eventos del sistema y aplicaciones</p>
+                            </div>
+                            <!-- Filtro nivel: Todos / Sospechosos (estilo pill) -->
+                            <div class="act-level-tabs">
+                                <button class="act-lvl-btn act-lvl-active" onclick="actSetNivel('')" id="act-lvl-todos">Todos</button>
+                                <button class="act-lvl-btn" onclick="actSetNivel('sospechoso')" id="act-lvl-sospechosos">Sospechosos</button>
+                            </div>
+                        </div>
 
-                    <!-- Paginación -->
-                    <div class="flex items-center justify-between mt-4 text-sm text-slate-500">
-                        <span id="act-total-label">—</span>
-                        <div class="flex gap-2">
-                            <button id="act-btn-prev" onclick="actCambiarPagina(-1)"
-                                class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors">
-                                <i class="ph ph-caret-left"></i> Anterior
-                            </button>
-                            <button id="act-btn-next" onclick="actCambiarPagina(1)"
-                                class="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors">
-                                Siguiente <i class="ph ph-caret-right"></i>
+                        <!-- Filtros secundarios -->
+                        <div class="act-filters-row">
+                            <input id="act-filtro-dni" type="text" maxlength="8" placeholder="DNI alumno"
+                                class="act-filter-input" oninput="cargarActividad()">
+                            <input id="act-filtro-terminal" type="text" placeholder="PC (ej: PC-01)"
+                                class="act-filter-input" oninput="cargarActividad()">
+                            <select id="act-filtro-nivel" onchange="cargarActividad()" class="act-filter-input" style="display:none">
+                                <option value="">Todos los niveles</option>
+                                <option value="sospechoso">Sospechoso</option>
+                                <option value="normal">Normal</option>
+                            </select>
+                            <input id="act-filtro-fecha" type="date" class="act-filter-input" onchange="cargarActividad()">
+                            <button onclick="actLimpiarFiltros()" class="act-filter-clear">
+                                <i class="ph ph-x"></i> Limpiar
                             </button>
                         </div>
+
+                        <!-- Lista de eventos -->
+                        <div class="act-list-wrap">
+                            <table class="act-table">
+                                <thead class="act-thead">
+                                    <tr>
+                                        <th class="act-th act-th-time">Hora</th>
+                                        <th class="act-th act-th-ico"></th>
+                                        <th class="act-th act-th-pc">PC</th>
+                                        <th class="act-th act-th-alumno">Alumno</th>
+                                        <th class="act-th act-th-dni">DNI</th>
+                                        <th class="act-th act-th-desc">Evento</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="act-tabla-body"></tbody>
+                            </table>
+                        </div>
+
+                        <!-- Paginación -->
+                        <div class="act-pagination">
+                            <span id="act-total-label" class="act-pag-info">—</span>
+                            <div class="act-pag-btns">
+                                <button id="act-btn-prev" onclick="actCambiarPagina(-1)" class="act-pag-btn">
+                                    <i class="ph ph-caret-left"></i> Anterior
+                                </button>
+                                <button id="act-btn-next" onclick="actCambiarPagina(1)" class="act-pag-btn">
+                                    Siguiente <i class="ph ph-caret-right"></i>
+                                </button>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
 
@@ -764,25 +792,25 @@
                 <div id="tab-configuracion" style="display:none">
 
                     <!-- Sub-pestañas -->
-                    <div class="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-800">
+                    <div class="flex gap-1 mb-5 border-b border-zinc-200 dark:border-zinc-800">
                         <button id="subtab-btn-cfg-actividad" onclick="switchSubtabCfg('actividad')"
-                            class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-cyan-600 dark:text-cyan-400 -mb-px flex items-center gap-2 transition-colors">
+                            class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-terminal"></i> Actividad del Sistema
                         </button>
                         <button id="subtab-btn-cfg-credenciales" onclick="switchSubtabCfg('credenciales')"
-                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-key"></i> Credenciales
                         </button>
                         <button id="subtab-btn-cfg-aplicacion" onclick="switchSubtabCfg('aplicacion')"
-                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-paint-brush"></i> Aplicación
                         </button>
                         <button id="subtab-btn-cfg-actualizaciones" onclick="switchSubtabCfg('actualizaciones')"
-                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-arrow-circle-up"></i> Actualizaciones
                         </button>
                         <button id="subtab-btn-cfg-backdoor" onclick="switchSubtabCfg('backdoor')"
-                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 -mb-px flex items-center gap-2 transition-colors">
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-lock-key"></i> Backdoor
                         </button>
                     </div>
@@ -820,58 +848,45 @@
                     <div id="subtab-cfg-credenciales" style="display:none">
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:960px">
 
-                            <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
-                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
-                                    <i class="ph ph-user-circle text-cyan-500"></i> Contraseña del Admin
+                            <!-- Tarjeta Admin -->
+                            <section class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm">
+                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2 mb-1">
+                                    <i class="ph ph-user-circle text-indigo-500"></i> Usuario Admin
                                 </h3>
-                                <p class="text-xs text-slate-500 dark:text-slate-400 mb-5">Cambia la contraseña de la cuenta con acceso básico al panel.</p>
+                                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">Cuenta con acceso básico al panel.</p>
                                 <div class="flex flex-col gap-3">
                                     <div>
-                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Contraseña actual</label>
-                                        <input id="cfg-admin-actual" type="password" placeholder="••••••••"
-                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                        <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nuevo username <span class="text-zinc-400">(dejar vacío para no cambiar)</span></label>
+                                        <input id="cfg-admin-username" type="text" placeholder="Ej: admin"
+                                            class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
                                     </div>
                                     <div>
-                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Nueva contraseña <span class="text-slate-400">(mín. 6 caracteres)</span></label>
+                                        <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nueva contraseña <span class="text-zinc-400">(dejar vacío para no cambiar)</span></label>
                                         <input id="cfg-admin-nueva" type="password" placeholder="••••••••"
-                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
-                                    </div>
-                                    <div>
-                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Confirmar nueva contraseña</label>
-                                        <input id="cfg-admin-confirmar" type="password" placeholder="••••••••"
-                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                            class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
                                     </div>
                                     <p id="cfg-admin-error" class="text-rose-500 text-xs min-h-4"></p>
-                                    <button onclick="cambiarPasswordAdmin()" class="db-btn db-btn-new self-end">
-                                        <i class="ph ph-floppy-disk"></i> Guardar contraseña
+                                    <button onclick="guardarUsuario('admin')" class="db-btn db-btn-new self-end">
+                                        <i class="ph ph-floppy-disk"></i> Guardar
                                     </button>
                                 </div>
                             </section>
 
-                            <section class="bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-6 shadow-sm">
-                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
-                                    <i class="ph ph-shield-check text-amber-500"></i> Contraseña del Superadmin
+                            <!-- Tarjeta Superadmin -->
+                            <section class="bg-white dark:bg-zinc-900 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-6 shadow-sm">
+                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2 mb-1">
+                                    <i class="ph ph-shield-check text-amber-500"></i> Usuario Superadmin
                                 </h3>
-                                <p class="text-xs text-slate-500 dark:text-slate-400 mb-5">Clave requerida para desbloquear controles de equipos y acciones críticas.</p>
+                                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">Cuenta con acceso total al panel.</p>
                                 <div class="flex flex-col gap-3">
                                     <div>
-                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Contraseña actual del Superadmin</label>
-                                        <input id="cfg-n2-actual" type="password" placeholder="••••••••"
-                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500 transition-colors">
+                                        <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nueva contraseña <span class="text-zinc-400">(dejar vacío para no cambiar)</span></label>
+                                        <input id="cfg-superadmin-nueva" type="password" placeholder="••••••••"
+                                            class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-amber-200 dark:border-amber-800/50 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500 transition-colors">
                                     </div>
-                                    <div>
-                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Nueva contraseña <span class="text-slate-400">(mín. 4 caracteres)</span></label>
-                                        <input id="cfg-n2-nueva" type="password" placeholder="••••••••"
-                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500 transition-colors">
-                                    </div>
-                                    <div>
-                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Confirmar nueva contraseña</label>
-                                        <input id="cfg-n2-confirmar" type="password" placeholder="••••••••"
-                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500 transition-colors">
-                                    </div>
-                                    <p id="cfg-n2-error" class="text-rose-500 text-xs min-h-4"></p>
-                                    <button onclick="cambiarPasswordNivel2()" class="db-btn db-btn-export self-end" style="background:oklch(0.65 0.17 70);border-color:oklch(0.60 0.17 70)">
-                                        <i class="ph ph-floppy-disk"></i> Guardar contraseña
+                                    <p id="cfg-superadmin-error" class="text-rose-500 text-xs min-h-4"></p>
+                                    <button onclick="guardarUsuario('superadmin')" class="db-btn db-btn-export self-end" style="background:oklch(0.65 0.17 70);border-color:oklch(0.60 0.17 70)">
+                                        <i class="ph ph-floppy-disk"></i> Guardar
                                     </button>
                                 </div>
                             </section>
@@ -884,20 +899,20 @@
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:960px">
 
                             <!-- Logo de la aplicación -->
-                            <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
-                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
-                                    <i class="ph ph-image text-cyan-500"></i> Logo de la Aplicación
+                            <section class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm">
+                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2 mb-1">
+                                    <i class="ph ph-image text-indigo-500"></i> Logo de la Aplicación
                                 </h3>
-                                <p class="text-xs text-slate-500 dark:text-slate-400 mb-5">Aparece en el sidebar del panel y en la pantalla de login.</p>
+                                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">Aparece en el sidebar del panel y en la pantalla de login.</p>
 
                                 <!-- Preview actual -->
-                                <div class="flex items-center gap-4 mb-5 p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                                    <div id="cfg-logo-preview" class="w-12 h-12 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center overflow-hidden flex-shrink-0">
-                                        <i class="ph ph-books text-cyan-500 text-2xl"></i>
+                                <div class="flex items-center gap-4 mb-5 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
+                                    <div id="cfg-logo-preview" class="w-12 h-12 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 flex items-center justify-center overflow-hidden flex-shrink-0">
+                                        <i class="ph ph-books text-indigo-500 text-2xl"></i>
                                     </div>
                                     <div>
-                                        <p class="text-xs font-semibold text-slate-700 dark:text-slate-300">Logo actual</p>
-                                        <p id="cfg-logo-nombre" class="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Ícono predeterminado</p>
+                                        <p class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Logo actual</p>
+                                        <p id="cfg-logo-nombre" class="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">Ícono predeterminado</p>
                                     </div>
                                 </div>
 
@@ -905,7 +920,7 @@
                                     <i class="ph ph-upload-simple"></i> Subir imagen (PNG, JPG, SVG)
                                     <input id="inputLogo" type="file" accept=".png,.jpg,.jpeg,.svg,.webp" style="display:none" onchange="previsualizarLogo(this)">
                                 </label>
-                                <p class="text-xs text-slate-400 dark:text-slate-500 mt-2 text-center">Recomendado: 128×128 px o más · fondo transparente</p>
+                                <p class="text-xs text-zinc-400 dark:text-zinc-500 mt-2 text-center">Recomendado: 128×128 px o más · fondo transparente</p>
                                 <p id="cfg-logo-error" class="text-rose-500 text-xs min-h-4 mt-1"></p>
                                 <button onclick="guardarLogo()" id="btn-guardar-logo" class="db-btn db-btn-new w-full justify-center mt-3" style="display:none">
                                     <i class="ph ph-floppy-disk"></i> Aplicar logo
@@ -913,26 +928,26 @@
                             </section>
 
                             <!-- Textos del login -->
-                            <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
-                                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-1">
-                                    <i class="ph ph-text-aa text-cyan-500"></i> Textos del Login
+                            <section class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm">
+                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2 mb-1">
+                                    <i class="ph ph-text-aa text-indigo-500"></i> Textos del Login
                                 </h3>
-                                <p class="text-xs text-slate-500 dark:text-slate-400 mb-5">Personaliza el título y subtítulo que aparecen en la pantalla de inicio de sesión.</p>
+                                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">Personaliza el título y subtítulo que aparecen en la pantalla de inicio de sesión.</p>
                                 <div class="flex flex-col gap-3">
                                     <div>
-                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Título principal</label>
+                                        <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Título principal</label>
                                         <input id="cfg-login-titulo" type="text" placeholder="Control Biblioteca"
-                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                            class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
                                     </div>
                                     <div>
-                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Subtítulo</label>
+                                        <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Subtítulo</label>
                                         <input id="cfg-login-subtitulo" type="text" placeholder="UNASAM — PANEL DE ADMINISTRACIÓN"
-                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                            class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
                                     </div>
                                     <div>
-                                        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Pie de página</label>
+                                        <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Pie de página</label>
                                         <input id="cfg-login-footer" type="text" placeholder="© 2026 UNASAM — Dirección de Biblioteca Central"
-                                            class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+                                            class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
                                     </div>
                                     <p id="cfg-app-error" class="text-rose-500 text-xs min-h-4"></p>
                                     <button onclick="guardarTextosApp()" class="db-btn db-btn-new self-end">
@@ -945,17 +960,17 @@
 
                         <!-- Backup de base de datos -->
                         <div class="mt-5" style="max-width:960px">
-                            <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
-                                <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-2">
+                            <section class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm">
+                                <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
                                     <i class="ph ph-database text-base"></i> Copia de seguridad
                                 </h3>
-                                <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">
+                                <p class="text-xs text-zinc-400 dark:text-zinc-500 mb-4">
                                     Descarga un volcado SQL completo con todas las tablas: historial, alumnos, personal, usuarios, bans, terminales e incidencias.
                                 </p>
                                 <button onclick="descargarBackup()" id="btn-backup" class="db-btn db-btn-new flex items-center gap-2">
                                     <i class="ph ph-download-simple"></i> Descargar backup .sql
                                 </button>
-                                <p id="backup-status" class="text-xs text-slate-400 dark:text-slate-500 mt-2 min-h-4"></p>
+                                <p id="backup-status" class="text-xs text-zinc-400 dark:text-zinc-500 mt-2 min-h-4"></p>
                             </section>
                         </div>
 
@@ -964,16 +979,16 @@
                     <!-- Panel: Actualizaciones -->
                     <div id="subtab-cfg-actualizaciones" style="display:none">
                         <div class="max-w-xl">
-                            <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-2">
-                                <i class="ph ph-arrow-circle-up text-cyan-500"></i> Ruta de distribución del cliente
+                            <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
+                                <i class="ph ph-arrow-circle-up text-indigo-500"></i> Ruta de distribución del cliente
                             </h3>
-                            <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">
+                            <p class="text-xs text-zinc-400 dark:text-zinc-500 mb-4">
                                 Carpeta del servidor donde se encuentra el <code>ControlBiblioteca.Client.exe</code> y el <code>version.txt</code> para auto-actualización de las PCs.
                             </p>
                             <div class="flex gap-2 mb-3">
                                 <input id="cfg-ruta-distribucion" type="text"
                                     placeholder="C:\WinSysCache"
-                                    class="flex-1 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800 font-mono">
+                                    class="flex-1 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-zinc-800 font-mono">
                                 <button onclick="guardarRutaDistribucion()"
                                     class="db-btn db-btn-new flex items-center gap-2 whitespace-nowrap">
                                     <i class="ph ph-floppy-disk"></i> Guardar
@@ -981,24 +996,24 @@
                             </div>
                             <p id="cfg-ruta-status" class="text-xs min-h-4"></p>
 
-                            <div class="mt-6 p-4 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50/50 dark:bg-cyan-900/10">
-                                <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-2">
-                                    <i class="ph ph-upload-simple text-cyan-500"></i> Publicar nueva versión
+                            <div class="mt-6 p-4 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/10">
+                                <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
+                                    <i class="ph ph-upload-simple text-indigo-500"></i> Publicar nueva versión
                                 </h3>
-                                <p class="text-xs text-slate-400 dark:text-slate-500 mb-3">
+                                <p class="text-xs text-zinc-400 dark:text-zinc-500 mb-3">
                                     Subí el <code>ControlBiblioteca.Client.exe</code> y la versión nueva. El servidor lo escribe atómicamente en la ruta de distribución y los kioskos lo aplican al próximo reinicio.
                                 </p>
 
                                 <div class="space-y-2">
                                     <div>
-                                        <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Versión nueva (ej: 4.1)</label>
+                                        <label class="text-xs text-zinc-500 dark:text-zinc-400 block mb-1">Versión nueva (ej: 4.1)</label>
                                         <input id="cfg-publicar-version" type="text" placeholder="4.1"
-                                            class="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-800 font-mono">
+                                            class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-zinc-800 font-mono">
                                     </div>
                                     <div>
-                                        <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Archivo .exe del cliente</label>
+                                        <label class="text-xs text-zinc-500 dark:text-zinc-400 block mb-1">Archivo .exe del cliente</label>
                                         <input id="cfg-publicar-archivo" type="file" accept=".exe"
-                                            class="w-full text-xs file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-cyan-500 file:text-white file:cursor-pointer hover:file:bg-cyan-600 text-slate-500 dark:text-slate-400">
+                                            class="w-full text-xs file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-500 file:text-white file:cursor-pointer hover:file:bg-indigo-600 text-zinc-500 dark:text-zinc-400">
                                     </div>
                                     <div class="flex items-center gap-3 pt-1">
                                         <button id="cfg-publicar-btn" onclick="publicarCliente()"
@@ -1006,8 +1021,8 @@
                                             <i class="ph ph-cloud-arrow-up"></i> Publicar
                                         </button>
                                         <div id="cfg-publicar-progress" class="flex-1 hidden">
-                                            <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
-                                                <div id="cfg-publicar-bar" class="bg-cyan-500 h-full transition-all" style="width:0%"></div>
+                                            <div class="w-full bg-zinc-200 dark:bg-zinc-700 rounded-full h-2 overflow-hidden">
+                                                <div id="cfg-publicar-bar" class="bg-indigo-500 h-full transition-all" style="width:0%"></div>
                                             </div>
                                         </div>
                                     </div>
@@ -1020,32 +1035,32 @@
                     <!-- Panel: Backdoor -->
                     <div id="subtab-cfg-backdoor" style="display:none">
                         <div class="max-w-xl">
-                            <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-2">
-                                <i class="ph ph-keyboard text-cyan-500"></i> Atajo de Mantenimiento
+                            <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
+                                <i class="ph ph-keyboard text-indigo-500"></i> Atajo de Mantenimiento
                             </h3>
-                            <p class="text-xs text-slate-400 dark:text-slate-500 mb-4">
+                            <p class="text-xs text-zinc-400 dark:text-zinc-500 mb-4">
                                 Configura la combinación de teclas y el PIN requerido para desbloquear la terminal de forma silenciosa.
                             </p>
                             
-                            <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm mb-5">
+                            <div class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm mb-5">
                                 <div class="flex flex-col gap-4">
                                     <div>
-                                        <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2">Modificadores (puedes seleccionar varios)</label>
+                                        <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">Modificadores (puedes seleccionar varios)</label>
                                         <div class="flex gap-4">
-                                            <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
-                                                <input type="checkbox" id="cfg-backdoor-ctrl" class="rounded border-slate-300 dark:border-slate-600 text-cyan-500 focus:ring-cyan-500"> Ctrl
+                                            <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                                                <input type="checkbox" id="cfg-backdoor-ctrl" class="rounded border-zinc-300 dark:border-zinc-600 text-indigo-500 focus:ring-indigo-500"> Ctrl
                                             </label>
-                                            <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
-                                                <input type="checkbox" id="cfg-backdoor-alt" class="rounded border-slate-300 dark:border-slate-600 text-cyan-500 focus:ring-cyan-500"> Alt
+                                            <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                                                <input type="checkbox" id="cfg-backdoor-alt" class="rounded border-zinc-300 dark:border-zinc-600 text-indigo-500 focus:ring-indigo-500"> Alt
                                             </label>
-                                            <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
-                                                <input type="checkbox" id="cfg-backdoor-shift" class="rounded border-slate-300 dark:border-slate-600 text-cyan-500 focus:ring-cyan-500"> Shift
+                                            <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                                                <input type="checkbox" id="cfg-backdoor-shift" class="rounded border-zinc-300 dark:border-zinc-600 text-indigo-500 focus:ring-indigo-500"> Shift
                                             </label>
                                         </div>
                                     </div>
                                     <div>
-                                        <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2">Tecla Principal</label>
-                                        <select id="cfg-backdoor-key" class="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white">
+                                        <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">Tecla Principal</label>
+                                        <select id="cfg-backdoor-key" class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
                                             <!-- Teclas F1-F24 -->
                                             <option value="112">F1</option>
                                             <option value="113">F2</option>
@@ -1065,9 +1080,9 @@
                                         </select>
                                     </div>
                                     <div>
-                                        <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2">PIN de Desbloqueo</label>
+                                        <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">PIN de Desbloqueo</label>
                                         <input id="cfg-backdoor-pin" type="text" placeholder="Ej: UNASAM2025"
-                                            class="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white">
+                                            class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
                                     </div>
                                 </div>
                                 <div class="mt-5 text-right">
@@ -1085,42 +1100,44 @@
             </div>
         </main>
     </div>
-</div>
+
+    </div><!-- /app-window -->
+</div><!-- /dashboard -->
 
 <!-- NOTIFICACIÓN -->
 <div id="notificacion" class="notificacion"></div>
 
 <!-- MODALES (sin cambios) -->
 <div id="modal-advertencia" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
-    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-        <h3 id="modal-titulo" class="text-base font-bold text-slate-900 dark:text-white mb-3">Advertencia</h3>
-        <p id="modal-mensaje" class="text-sm text-slate-500 dark:text-slate-400 mb-5">¿Estás seguro?</p>
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 id="modal-titulo" class="text-base font-bold text-zinc-900 dark:text-white mb-3">Advertencia</h3>
+        <p id="modal-mensaje" class="text-sm text-zinc-500 dark:text-zinc-400 mb-5">¿Estás seguro?</p>
         <div class="modal-buttons flex gap-3 justify-end">
-            <button id="btn-modal-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-modal-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
             <button id="btn-modal-confirmar" class="btn-confirmar-rojo text-xs bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Confirmar</button>
         </div>
     </div>
 </div>
 
 <div id="modal-bloqueo" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
-    <div class="modal-content modal-bloqueo-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-        <h3 class="modal-bloqueo-titulo text-base font-bold text-slate-900 dark:text-white mb-3">Confirmar Bloqueo</h3>
-        <p id="modal-bloqueo-mensaje" class="modal-bloqueo-msg text-sm text-slate-500 dark:text-slate-400 mb-5"></p>
+    <div class="modal-content modal-bloqueo-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 class="modal-bloqueo-titulo text-base font-bold text-zinc-900 dark:text-white mb-3">Confirmar Bloqueo</h3>
+        <p id="modal-bloqueo-mensaje" class="modal-bloqueo-msg text-sm text-zinc-500 dark:text-zinc-400 mb-5"></p>
         <div class="modal-buttons flex gap-3 justify-end">
-            <button id="btn-bloqueo-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-bloqueo-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
             <button id="btn-bloqueo-confirmar" class="btn-confirmar-rojo text-xs bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Confirmar Bloqueo</button>
         </div>
     </div>
 </div>
 
 <div id="modal-desbloqueo" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
-    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-lock-open text-emerald-500"></i> Desbloquear Terminal</h3>
-        <p id="modal-desbloqueo-nombre" class="modal-desbloqueo-sub text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">DNI del alumno</label>
-        <input id="modal-dni" type="text" placeholder="8 dígitos" maxlength="8" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Actividad a realizar</label>
-        <select id="modal-actividad" class="modal-select w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-lock-open text-emerald-500"></i> Desbloquear Terminal</h3>
+        <p id="modal-desbloqueo-nombre" class="modal-desbloqueo-sub text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">DNI del alumno</label>
+        <input id="modal-dni" type="text" placeholder="8 dígitos" maxlength="8" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Actividad a realizar</label>
+        <select id="modal-actividad" class="modal-select w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors">
             <option value="">-- Seleccione una actividad --</option>
             <option value="Investigación">Investigación</option>
             <option value="Lectura de libros digitales">Lectura de libros digitales</option>
@@ -1131,54 +1148,54 @@
             <option value="Otros">Otros (Especificar)</option>
         </select>
         <div id="modal-otros-panel" style="display:none" class="mb-3">
-            <input id="modal-otros-texto" type="text" placeholder="Especifique la actividad..." class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500 transition-colors">
+            <input id="modal-otros-texto" type="text" placeholder="Especifique la actividad..." class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
         </div>
         <p id="modal-desbloqueo-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
         <div class="modal-buttons flex gap-3 justify-end">
-            <button id="btn-desbloqueo-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-desbloqueo-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
             <button id="btn-desbloqueo-confirmar" class="btn-confirmar text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Desbloquear</button>
         </div>
     </div>
 </div>
 
 <div id="modal-nuevo-usuario" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
-    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-user-plus text-cyan-500"></i> Nuevo Usuario</h3>
-        <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Registra manualmente un alumno, docente, egresado u otro usuario del centro de cómputo.</p>
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">DNI <span class="text-rose-500">*</span></label>
-        <input id="nuevo-dni" type="text" maxlength="8" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="8 dígitos numéricos">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Nombre Completo <span class="text-rose-500">*</span></label>
-        <input id="nuevo-nombre" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="Apellidos y Nombres">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Código Universitario</label>
-        <input id="nuevo-codigo" type="text" maxlength="30" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: 191.2503.026">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Facultad</label>
-        <input id="nuevo-facultad" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: FDCCPP">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Escuela</label>
-        <input id="nuevo-escuela" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: INGENIERÍA DE SISTEMAS">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-user-plus text-indigo-500"></i> Nuevo Usuario</h3>
+        <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Registra manualmente un alumno, docente, egresado u otro usuario del centro de cómputo.</p>
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">DNI <span class="text-rose-500">*</span></label>
+        <input id="nuevo-dni" type="text" maxlength="8" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="8 dígitos numéricos">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nombre Completo <span class="text-rose-500">*</span></label>
+        <input id="nuevo-nombre" type="text" maxlength="200" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="Apellidos y Nombres">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Código Universitario</label>
+        <input id="nuevo-codigo" type="text" maxlength="30" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="ej: 191.2503.026">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Facultad</label>
+        <input id="nuevo-facultad" type="text" maxlength="200" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="ej: FDCCPP">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Escuela</label>
+        <input id="nuevo-escuela" type="text" maxlength="200" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="ej: INGENIERÍA DE SISTEMAS">
         <p id="nuevo-usuario-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
         <div class="modal-buttons flex gap-3 justify-end">
-            <button id="btn-nuevo-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
-            <button id="btn-nuevo-guardar" class="btn-confirmar text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Registrar</button>
+            <button id="btn-nuevo-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-nuevo-guardar" class="btn-confirmar text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Registrar</button>
         </div>
     </div>
 </div>
 
 <div id="modal-maestro" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
-    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-pencil text-amber-500"></i> Editar Alumno</h3>
-        <p id="modal-maestro-dni" class="text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Nombre Completo</label>
-        <input id="maestro-edit-nombre" type="text" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="Apellidos Nombres">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Código Universitario</label>
-        <input id="maestro-edit-codigo" type="text" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: 161.2502.614">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Facultad</label>
-        <input id="maestro-edit-facultad" type="text" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Escuela</label>
-        <input id="maestro-edit-escuela" type="text" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-pencil text-amber-500"></i> Editar Alumno</h3>
+        <p id="modal-maestro-dni" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nombre Completo</label>
+        <input id="maestro-edit-nombre" type="text" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="Apellidos Nombres">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Código Universitario</label>
+        <input id="maestro-edit-codigo" type="text" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="ej: 161.2502.614">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Facultad</label>
+        <input id="maestro-edit-facultad" type="text" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Escuela</label>
+        <input id="maestro-edit-escuela" type="text" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors">
         <p id="modal-maestro-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
         <div class="modal-buttons flex gap-3 justify-end">
-            <button id="btn-maestro-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
-            <button id="btn-maestro-guardar" class="btn-confirmar text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Guardar</button>
+            <button id="btn-maestro-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-maestro-guardar" class="btn-confirmar text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Guardar</button>
         </div>
     </div>
 </div>
@@ -1186,63 +1203,63 @@
 
 <!-- MODAL NUEVO PERSONAL -->
 <div id="modal-nuevo-personal" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
-    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-identification-badge text-cyan-500"></i> Nuevo Personal</h3>
-        <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Registra un docente, administrativo u otro trabajador de la universidad.</p>
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">DNI <span class="text-rose-500">*</span></label>
-        <input id="np-dni" type="text" maxlength="8" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="8 dígitos">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Nombre Completo <span class="text-rose-500">*</span></label>
-        <input id="np-nombre" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="Apellidos y Nombres">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Cargo</label>
-        <input id="np-cargo" type="text" maxlength="150" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: Docente, Administrativo">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Área / Dependencia</label>
-        <input id="np-area" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: Biblioteca, FDCCPP">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Correo</label>
-        <input id="np-correo" type="text" maxlength="150" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="usuario@unasam.edu.pe">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Teléfono</label>
-        <input id="np-telefono" type="text" maxlength="20" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors" placeholder="ej: 943 000 000">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-identification-badge text-indigo-500"></i> Nuevo Personal</h3>
+        <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Registra un docente, administrativo u otro trabajador de la universidad.</p>
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">DNI <span class="text-rose-500">*</span></label>
+        <input id="np-dni" type="text" maxlength="8" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="8 dígitos">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nombre Completo <span class="text-rose-500">*</span></label>
+        <input id="np-nombre" type="text" maxlength="200" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="Apellidos y Nombres">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Cargo</label>
+        <input id="np-cargo" type="text" maxlength="150" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="ej: Docente, Administrativo">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Área / Dependencia</label>
+        <input id="np-area" type="text" maxlength="200" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="ej: Biblioteca, FDCCPP">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Correo</label>
+        <input id="np-correo" type="text" maxlength="150" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="usuario@unasam.edu.pe">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Teléfono</label>
+        <input id="np-telefono" type="text" maxlength="20" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="ej: 943 000 000">
         <p id="np-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
         <div class="modal-buttons flex gap-3 justify-end">
-            <button id="btn-np-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
-            <button id="btn-np-guardar" class="btn-confirmar text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Registrar</button>
+            <button id="btn-np-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-np-guardar" class="btn-confirmar text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Registrar</button>
         </div>
     </div>
 </div>
 
 <!-- MODAL EDITAR PERSONAL -->
 <div id="modal-editar-personal" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
-    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-pencil text-amber-500"></i> Editar Personal</h3>
-        <p id="ep-dni-label" class="text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Nombre Completo</label>
-        <input id="ep-nombre" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Cargo</label>
-        <input id="ep-cargo" type="text" maxlength="150" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Área / Dependencia</label>
-        <input id="ep-area" type="text" maxlength="200" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Correo</label>
-        <input id="ep-correo" type="text" maxlength="150" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Teléfono</label>
-        <input id="ep-telefono" type="text" maxlength="20" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-cyan-500 transition-colors">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-pencil text-amber-500"></i> Editar Personal</h3>
+        <p id="ep-dni-label" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nombre Completo</label>
+        <input id="ep-nombre" type="text" maxlength="200" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Cargo</label>
+        <input id="ep-cargo" type="text" maxlength="150" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Área / Dependencia</label>
+        <input id="ep-area" type="text" maxlength="200" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Correo</label>
+        <input id="ep-correo" type="text" maxlength="150" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Teléfono</label>
+        <input id="ep-telefono" type="text" maxlength="20" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors">
         <p id="ep-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
         <div class="modal-buttons flex gap-3 justify-end">
-            <button id="btn-ep-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
-            <button id="btn-ep-guardar" class="btn-confirmar text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Guardar</button>
+            <button id="btn-ep-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-ep-guardar" class="btn-confirmar text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Guardar</button>
         </div>
     </div>
 </div>
 
 <div id="modal-ban" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
-    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-prohibit text-rose-500"></i> Banear Usuario</h3>
-        <p id="modal-ban-nombre" class="text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Duración del ban (días)</label>
-        <input id="ban-dias" type="number" min="1" max="365" value="7" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-rose-500 transition-colors">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Motivo <span class="text-rose-500">*</span></label>
-        <input id="ban-motivo" type="text" maxlength="300" placeholder="ej: Conducta inapropiada, uso indebido del equipo..." class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-rose-500 transition-colors">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-prohibit text-rose-500"></i> Banear Usuario</h3>
+        <p id="modal-ban-nombre" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Duración del ban (días)</label>
+        <input id="ban-dias" type="number" min="1" max="365" value="7" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-rose-500 transition-colors">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Motivo <span class="text-rose-500">*</span></label>
+        <input id="ban-motivo" type="text" maxlength="300" placeholder="ej: Conducta inapropiada, uso indebido del equipo..." class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-rose-500 transition-colors">
         <p id="modal-ban-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
         <div class="modal-buttons flex gap-3 justify-end">
-            <button id="btn-ban-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-ban-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
             <button id="btn-ban-confirmar" class="btn-confirmar-rojo text-xs bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Banear</button>
         </div>
     </div>
@@ -1250,46 +1267,33 @@
 
 <!-- MODAL REGISTRAR INCIDENCIA -->
 <div id="modal-incidencia" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
-    <div class="modal-content bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-warning-circle text-amber-500"></i> Registrar Incidencia</h3>
-        <p id="modal-incidencia-nombre" class="text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">DNI del Alumno <span class="text-rose-500">*</span></label>
-        <input id="inc-dni" type="text" maxlength="8" placeholder="8 dígitos" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Tipo de Incidencia <span class="text-rose-500">*</span></label>
-        <select id="inc-tipo" class="modal-select w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-amber-200 dark:border-amber-800/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-warning-circle text-amber-500"></i> Registrar Incidencia</h3>
+        <p id="modal-incidencia-nombre" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">DNI del Alumno <span class="text-rose-500">*</span></label>
+        <input id="inc-dni" type="text" maxlength="8" placeholder="8 dígitos" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Tipo de Incidencia <span class="text-rose-500">*</span></label>
+        <select id="inc-tipo" class="modal-select w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
             <option value="leve">Leve — advertencia verbal / comportamiento</option>
             <option value="grave">Grave — daño a equipos / conducta seria</option>
         </select>
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Motivo <span class="text-rose-500">*</span></label>
-        <input id="inc-motivo" type="text" maxlength="200" placeholder="ej: Uso de redes sociales en hora no permitida" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Descripción (opcional)</label>
-        <textarea id="inc-descripcion" rows="3" maxlength="600" placeholder="Detalle adicional de lo ocurrido…" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors resize-none"></textarea>
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Motivo <span class="text-rose-500">*</span></label>
+        <input id="inc-motivo" type="text" maxlength="200" placeholder="ej: Uso de redes sociales en hora no permitida" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Descripción (opcional)</label>
+        <textarea id="inc-descripcion" rows="3" maxlength="600" placeholder="Detalle adicional de lo ocurrido…" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors resize-none"></textarea>
         <div id="inc-advertencia-ban" style="display:none" class="mb-3 p-3 rounded-lg border border-rose-200 dark:border-rose-700/60 bg-rose-50 dark:bg-rose-950/30 text-xs text-rose-700 dark:text-rose-400">
             <i class="ph ph-warning"></i> Este alumno ya tiene <strong id="inc-contador"></strong> incidencias activas. Al registrar esta, podrás banearlo directamente.
         </div>
         <p id="modal-incidencia-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
         <div class="modal-buttons flex gap-3 justify-end">
-            <button id="btn-inc-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-inc-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
             <button id="btn-inc-guardar" class="btn-confirmar text-xs bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Registrar</button>
         </div>
     </div>
 </div>
 
-<div id="modal-nivel2" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
-    <div class="modal-content bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-        <h3 class="text-base font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-shield-check text-cyan-500"></i> Acceso de Administrador</h3>
-        <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Ingresa la contraseña de nivel 2 para habilitar los controles de equipos.</p>
-        <label class="modal-field-label block text-xs text-slate-500 dark:text-slate-400 mb-1">Contraseña de Nivel 2</label>
-        <input id="modal-nivel2-pass" type="password" placeholder="••••••••" class="modal-input w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-2 focus:outline-none focus:border-cyan-500 transition-colors" autocomplete="off">
-        <p id="modal-nivel2-error" class="text-rose-500 text-xs min-h-4 mb-3"></p>
-        <div class="modal-buttons flex gap-3 justify-end">
-            <button id="btn-nivel2-cancelar" class="btn-cancelar text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
-            <button id="btn-nivel2-confirmar" class="btn-confirmar text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Desbloquear</button>
-        </div>
-    </div>
-</div>
 
-<script src="static/js/app.js"></script>
+<script src="static/js/app.js?v=9"></script>
 <script>
 // Tema
 (function() {
@@ -1366,15 +1370,15 @@ function switchSubtab(sub) {
         const active = s === sub;
         panel.style.display = active ? '' : 'none';
         btn.classList.toggle('active', active);
-        btn.classList.toggle('text-cyan-600',        active);
-        btn.classList.toggle('dark:text-cyan-400',   active);
+        btn.classList.toggle('text-indigo-600',        active);
+        btn.classList.toggle('dark:text-indigo-400',   active);
         btn.classList.toggle('font-semibold',        active);
         btn.classList.toggle('bg-white',             active);
-        btn.classList.toggle('dark:bg-slate-900',    active);
-        btn.classList.toggle('border-slate-200',     active);
-        btn.classList.toggle('dark:border-slate-700',active);
-        btn.classList.toggle('text-slate-500',       !active);
-        btn.classList.toggle('dark:text-slate-400',  !active);
+        btn.classList.toggle('dark:bg-zinc-900',    active);
+        btn.classList.toggle('border-zinc-200',     active);
+        btn.classList.toggle('dark:border-zinc-700',active);
+        btn.classList.toggle('text-zinc-500',       !active);
+        btn.classList.toggle('dark:text-zinc-400',  !active);
         btn.classList.toggle('font-medium',          !active);
         btn.classList.toggle('border-transparent',   !active);
     });
@@ -1396,11 +1400,11 @@ function switchSubtabInc(sub) {
         btn.classList.toggle(colorActivoDark,         active);
         btn.classList.toggle('font-semibold',         active);
         btn.classList.toggle('bg-white',              active);
-        btn.classList.toggle('dark:bg-slate-900',     active);
-        btn.classList.toggle('border-slate-200',      active);
-        btn.classList.toggle('dark:border-slate-700', active);
-        btn.classList.toggle('text-slate-500',        !active);
-        btn.classList.toggle('dark:text-slate-400',   !active);
+        btn.classList.toggle('dark:bg-zinc-900',     active);
+        btn.classList.toggle('border-zinc-200',      active);
+        btn.classList.toggle('dark:border-zinc-700', active);
+        btn.classList.toggle('text-zinc-500',        !active);
+        btn.classList.toggle('dark:text-zinc-400',   !active);
         btn.classList.toggle('font-medium',           !active);
         btn.classList.toggle('border-transparent',    !active);
     });
@@ -1417,15 +1421,15 @@ function switchSubtabCfg(sub) {
         const active = s === sub;
         panel.style.display = active ? '' : 'none';
         btn.classList.toggle('active',                active);
-        btn.classList.toggle('text-cyan-600',         active);
-        btn.classList.toggle('dark:text-cyan-400',    active);
+        btn.classList.toggle('text-indigo-600',         active);
+        btn.classList.toggle('dark:text-indigo-400',    active);
         btn.classList.toggle('font-semibold',         active);
         btn.classList.toggle('bg-white',              active);
-        btn.classList.toggle('dark:bg-slate-900',     active);
-        btn.classList.toggle('border-slate-200',      active);
-        btn.classList.toggle('dark:border-slate-700', active);
-        btn.classList.toggle('text-slate-500',        !active);
-        btn.classList.toggle('dark:text-slate-400',   !active);
+        btn.classList.toggle('dark:bg-zinc-900',     active);
+        btn.classList.toggle('border-zinc-200',      active);
+        btn.classList.toggle('dark:border-zinc-700', active);
+        btn.classList.toggle('text-zinc-500',        !active);
+        btn.classList.toggle('dark:text-zinc-400',   !active);
         btn.classList.toggle('font-medium',           !active);
         btn.classList.toggle('border-transparent',    !active);
     });
@@ -1451,8 +1455,8 @@ function switchTab(tab) {
         const isActive = t === tab;
         tabEl.style.display = isActive ? '' : 'none';
         navEl.classList.toggle('nav-item-active', isActive);
-        navEl.classList.toggle('text-slate-600', !isActive);
-        navEl.classList.toggle('dark:text-slate-400', !isActive);
+        navEl.classList.toggle('text-zinc-600', !isActive);
+        navEl.classList.toggle('dark:text-zinc-400', !isActive);
         navEl.classList.toggle('border-transparent', !isActive);
     });
 
@@ -1464,7 +1468,7 @@ function switchTab(tab) {
     if (tab === 'historial')     aplicarFiltros();
     if (tab === 'basedatos')     switchSubtab('estudiantes');
     if (tab === 'incidencias')   switchSubtabInc('inc');
-    if (tab === 'configuracion') switchSubtabCfg('actividad');
+    if (tab === 'configuracion') switchSubtabCfg((_rolServidor === 'superadmin' && _rol === 'admin') ? 'actividad' : 'backdoor');
     if (tab === 'actividad')     cargarActividad();
 }
 </script>

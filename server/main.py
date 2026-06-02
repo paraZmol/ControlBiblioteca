@@ -255,17 +255,35 @@ async def lifespan(_app: FastAPI):
     logger.info("Base de datos inicializada")
     await _limpiar_sesiones_arranque()
 
-    # Crear usuario admin si no existe
+    # Garantizar usuarios por defecto con username correcto según rol
     async with async_session() as db:
-        result = await db.execute(select(Usuario).where(Usuario.username == "admin"))
-        if not result.scalar_one_or_none():
-            admin = Usuario(
+        # Superadmin: si existe con username 'admin', renombrarlo a 'superadmin'
+        res_sa = await db.execute(select(Usuario).where(Usuario.rol == "superadmin"))
+        usuario_sa = res_sa.scalar_one_or_none()
+        if usuario_sa:
+            if usuario_sa.username != "superadmin":
+                usuario_sa.username = "superadmin"
+                await db.commit()
+                logger.info(f"Usuario superadmin renombrado a 'superadmin'")
+        else:
+            db.add(Usuario(
+                username="superadmin",
+                hashed_password=hashear_password("admin123"),
+                nombre_completo="Super Administrador",
+                rol="superadmin"
+            ))
+            await db.commit()
+            logger.info("Usuario superadmin creado (superadmin/admin123)")
+
+        # Admin: crear si no existe con rol 'admin'
+        res_a = await db.execute(select(Usuario).where(Usuario.rol == "admin"))
+        if not res_a.scalar_one_or_none():
+            db.add(Usuario(
                 username="admin",
                 hashed_password=hashear_password("admin123"),
                 nombre_completo="Administrador",
-                rol="superadmin"
-            )
-            db.add(admin)
+                rol="admin"
+            ))
             await db.commit()
             logger.info("Usuario admin creado (admin/admin123)")
 
@@ -337,57 +355,51 @@ async def nivel2_hash(
     return {"hash": hashlib.sha256(raw.encode()).hexdigest()}
 
 
-class _CambiarPasswordAdmin(_BaseModel):
-    password_actual: str
-    password_nueva: str
-
-class _CambiarNivel2(_BaseModel):
-    password_actual_nivel2: str   # en claro — se verifica contra el hash guardado
-    password_nueva: str
+class _ActualizarUsuario(_BaseModel):
+    rol_objetivo: str        # 'admin' | 'superadmin'
+    nuevo_username: str = ""
+    nueva_password: str = ""
 
 
-@app.put("/api/config/password-admin")
-async def cambiar_password_admin(
-    datos: _CambiarPasswordAdmin,
-    admin: Usuario = Depends(obtener_usuario_actual),
+@app.put("/api/config/usuario")
+async def actualizar_usuario(
+    datos: _ActualizarUsuario,
+    superadmin: Usuario = Depends(obtener_usuario_actual),
     db: AsyncSession = Depends(get_db),
 ):
-    """Cambia la contraseña del usuario admin autenticado."""
-    if admin.rol != "superadmin":
-        raise HTTPException(status_code=403, detail="Solo superadmin puede cambiar contraseñas")
-    from auth_service import verificar_password
-    if not verificar_password(datos.password_actual, admin.hashed_password):
-        raise HTTPException(status_code=400, detail="La contraseña actual es incorrecta")
-    if len(datos.password_nueva) < 6:
-        raise HTTPException(status_code=422, detail="La nueva contraseña debe tener al menos 6 caracteres")
-    res = await db.execute(select(Usuario).where(Usuario.username == admin.username))
+    """Solo superadmin puede editar usuarios. Admin: username+password. Superadmin: solo password."""
+    if superadmin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo superadmin puede editar usuarios")
+    if datos.rol_objetivo not in ("admin", "superadmin"):
+        raise HTTPException(status_code=400, detail="rol_objetivo inválido")
+
+    res = await db.execute(select(Usuario).where(Usuario.rol == datos.rol_objetivo))
     usuario = res.scalar_one_or_none()
-    usuario.hashed_password = hashear_password(datos.password_nueva)
-    await db.commit()
-    return {"mensaje": "Contraseña actualizada correctamente"}
+    if not usuario:
+        raise HTTPException(status_code=404, detail=f"No se encontró usuario con rol '{datos.rol_objetivo}'")
 
+    # Cambio de username solo para admin
+    if datos.nuevo_username:
+        if datos.rol_objetivo == "superadmin":
+            raise HTTPException(status_code=400, detail="No se puede cambiar el username del superadmin")
+        if len(datos.nuevo_username) < 3:
+            raise HTTPException(status_code=422, detail="El username debe tener al menos 3 caracteres")
+        existe = await db.execute(select(Usuario).where(Usuario.username == datos.nuevo_username))
+        if existe.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Ese username ya está en uso")
+        usuario.username = datos.nuevo_username
 
-@app.put("/api/config/password-nivel2")
-async def cambiar_password_nivel2(
-    datos: _CambiarNivel2,
-    admin: Usuario = Depends(obtener_usuario_actual),
-    db: AsyncSession = Depends(get_db),
-):
-    """Cambia la contraseña de Nivel 2 (verificando la actual)."""
-    if admin.rol != "superadmin":
-        raise HTTPException(status_code=403, detail="Solo administradores pueden cambiar la contraseña de Nivel 2")
-    from sqlalchemy import text as _text
-    res = await db.execute(_text("SELECT valor FROM ajustes_sistema WHERE clave='pass_nivel2_hash'"))
-    row = res.fetchone()
-    hash_actual = row[0] if row else hashlib.sha256(os.getenv("PASS_NIVEL2", "").encode()).hexdigest()
-    if hashlib.sha256(datos.password_actual_nivel2.encode()).hexdigest() != hash_actual:
-        raise HTTPException(status_code=400, detail="La contraseña de Nivel 2 actual es incorrecta")
-    if len(datos.password_nueva) < 4:
-        raise HTTPException(status_code=422, detail="La nueva contraseña debe tener al menos 4 caracteres")
-    nuevo_hash = hashlib.sha256(datos.password_nueva.encode()).hexdigest()
-    await db.execute(_text("INSERT INTO ajustes_sistema (clave, valor) VALUES ('pass_nivel2_hash', :h) ON DUPLICATE KEY UPDATE valor=:h"), {"h": nuevo_hash})
+    # Cambio de contraseña para ambos roles
+    if datos.nueva_password:
+        if len(datos.nueva_password) < 6:
+            raise HTTPException(status_code=422, detail="La contraseña debe tener al menos 6 caracteres")
+        usuario.hashed_password = hashear_password(datos.nueva_password)
+
+    if not datos.nuevo_username and not datos.nueva_password:
+        raise HTTPException(status_code=400, detail="Nada que actualizar")
+
     await db.commit()
-    return {"mensaje": "Contraseña de Nivel 2 actualizada correctamente"}
+    return {"mensaje": "Usuario actualizado correctamente"}
 
 
 class _ConfiguracionKioscoReq(_BaseModel):

@@ -28,361 +28,73 @@ let _pendingUnlockModal = null; // referencia al modal de desbloqueo abierto
 
 
 
-// ── Sistema de Roles (Doble Factor) ──────────────────────────────
-
-// 'asistente' = solo historial | 'admin' = vista completa (requiere clave nivel 2)
-
-// Por seguridad: SIEMPRE inicia en asistente, NO se persiste entre sesiones/recargas
-
-let _rol = 'asistente';
+// ── Sistema de Roles ──────────────────────────────────────────────
+// 'admin' = funciones básicas | 'superadmin' = acceso total
+// El rol viene del JWT tras login
 
 let _rolServidor = 'admin'; // 'superadmin' | 'admin' — viene del JWT tras login
-
-let _hashNivel2 = null; // se obtiene del servidor tras autenticarse (SHA-256)
 
 
 
 function _aplicarRol() {
 
-    const esAsistente = _rol === 'asistente';
+    const esSuperAdmin = _rolServidor === 'superadmin';
 
-
-
-    // Estadísticas y equipos: siempre visibles para todos
-
+    // Estadísticas, equipos y consola: visibles para todos
     const stats = document.getElementById('seccionStats');
-
     if (stats) stats.style.display = 'grid';
 
-
-
     const equipos = document.getElementById('seccionEquipos');
-
     if (equipos) equipos.style.display = '';
 
+    const footerMonitoreo = document.getElementById('footer-monitoreo');
+    if (footerMonitoreo) footerMonitoreo.style.display = '';
 
-
-    // Botones globales: Asistente solo ve "Bloquear Todas"; Admin ve los 3
-
+    // Botones de control global y acciones: visibles para todos
     const btnFinalizar = document.querySelector('.btn-finalizar');
-
     const btnLimpiar   = document.querySelector('.btn-limpiar');
-
-    if (btnFinalizar) btnFinalizar.style.display = esAsistente ? 'none' : '';
-
-    if (btnLimpiar)   btnLimpiar.style.display   = esAsistente ? 'none' : '';
-
-
-
-    // Botón importar Historial: solo Admin
+    if (btnFinalizar) btnFinalizar.style.display = '';
+    if (btnLimpiar)   btnLimpiar.style.display   = '';
 
     const btnImportar = document.getElementById('btnImportarExcel');
-
-    if (btnImportar) btnImportar.style.display = esAsistente ? 'none' : 'inline-block';
-
-
-
-    // Tabs exclusivos de superadmin — admin normal no los ve aunque esté en Vista Admin
-    const esSuperAdmin = _rolServidor === 'superadmin';
-    const tabsSuperAdmin = ['nav-basedatos', 'nav-configuracion'];
-    tabsSuperAdmin.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.style.display = (esAsistente || !esSuperAdmin) ? 'none' : '';
-    });
-
-    // Si baja a asistente o es admin (no superadmin) y está en tab restringido → monitoreo
-    if (typeof switchTab === 'function') {
-        const tabsRestringidos = ['basedatos', 'configuracion'];
-        const tabActivo = tabsRestringidos.find(t => {
-            const el = document.getElementById('tab-' + t);
-            return el && el.style.display !== 'none';
-        });
-        if (tabActivo && (esAsistente || !esSuperAdmin)) switchTab('monitoreo');
-    }
+    if (btnImportar) btnImportar.style.display = 'inline-block';
 
     const btnMaestro = document.getElementById('btnMaestro');
-    if (btnMaestro) btnMaestro.style.display = esAsistente ? 'none' : '';
+    if (btnMaestro) btnMaestro.style.display = '';
 
+    // Base de datos: visible para todos (admin con funciones limitadas)
+    const navBD = document.getElementById('nav-basedatos');
+    if (navBD) navBD.style.display = '';
 
+    // BD — botones y secciones solo para superadmin
+    ['btnExportarMaestro', 'btnImportarMaestro', 'subtab-btn-personal'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = esSuperAdmin ? '' : 'none';
+    });
+    document.querySelectorAll('.bd-solo-superadmin').forEach(el => {
+        el.style.display = esSuperAdmin ? '' : 'none';
+    });
 
-    // Botón Limpiar BD Alumnos: solo Admin Nivel 2
+    // Configuración: visible para todos, pero sub-tabs avanzados solo superadmin
+    const navCfg = document.getElementById('nav-configuracion');
+    if (navCfg) navCfg.style.display = '';
 
+    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones'].forEach(s => {
+        const btn = document.getElementById('subtab-btn-cfg-' + s);
+        if (btn) btn.style.display = esSuperAdmin ? '' : 'none';
+    });
 
-    // Si baja a asistente, ocultar la sección si estaba abierta
-
-    if (esAsistente) {
-
-        const secMaestro = document.getElementById('seccionMaestro');
-
-        if (secMaestro) secMaestro.style.display = 'none';
-
-    }
-
-
-
-    // Consolas de logs: solo visibles en Vista Admin
-
-    const footerMonitoreo = document.getElementById('footer-monitoreo');
-
-    if (footerMonitoreo) footerMonitoreo.style.display = esAsistente ? 'none' : '';
-
-
-
-    const btn = document.getElementById('btnRol');
-
-    if (btn) btn.textContent = esAsistente ? 'Vista Admin' : 'Vista Asistente';
-
-}
-
-
-
-function toggleRol() {
-
-    if (_rol === 'asistente') {
-
-        // Elevar a admin: pedir contraseña de nivel 2
-
-        _abrirModalNivel2();
-
-    } else {
-
-        // Bajar a asistente: directo, sin contraseña
-
-        _rol = 'asistente';
-
-        _aplicarRol();
-
-    }
-
-}
-
-
-
-function _abrirModalNivel2(onExito) {
-
-    const modal = document.getElementById('modal-nivel2');
-
-    const passInput = document.getElementById('modal-nivel2-pass');
-
-    const errorEl = document.getElementById('modal-nivel2-error');
-
-    const btnConfirmar = document.getElementById('btn-nivel2-confirmar');
-
-    const btnCancelar = document.getElementById('btn-nivel2-cancelar');
-
-
-
-    passInput.value = '';
-
-    errorEl.textContent = '';
-
-    modal.style.display = 'flex';
-
-    setTimeout(() => passInput.focus(), 50);
-
-
-
-    const confirmar = () => {
-
-        if (!_hashNivel2) {
-
-            errorEl.textContent = 'Configuración de seguridad no disponible.';
-
-            return;
-
+    if (typeof switchTab === 'function') {
+        const tabActualBD = document.getElementById('tab-basedatos');
+        const tabActualCfg = document.getElementById('tab-configuracion');
+        if (tabActualCfg && tabActualCfg.style.display !== 'none' && !esSuperAdmin) {
+            if (typeof switchSubtabCfg === 'function') switchSubtabCfg('backdoor');
         }
-
-        _sha256(passInput.value).then(hash => {
-
-            if (hash === _hashNivel2) {
-
-                _rol = 'admin';
-
-                _aplicarRol();
-
-                modal.style.display = 'none';
-
-                passInput.removeEventListener('keydown', onKey);
-
-                if (typeof onExito === 'function') onExito();
-
-            } else {
-
-                errorEl.textContent = 'Acceso Denegado. Contraseña incorrecta.';
-
-                passInput.value = '';
-
-                passInput.focus();
-
-            }
-
-        });
-
-    };
-
-    const cancelar = () => {
-
-        modal.style.display = 'none';
-
-        passInput.removeEventListener('keydown', onKey);
-
-    };
-
-    const onKey = (e) => { if (e.key === 'Enter') confirmar(); if (e.key === 'Escape') cancelar(); };
-
-
-
-    // Limpiar listeners previos clonando los botones
-
-    const newConfirmar = btnConfirmar.cloneNode(true);
-
-    const newCancelar  = btnCancelar.cloneNode(true);
-
-    btnConfirmar.parentNode.replaceChild(newConfirmar, btnConfirmar);
-
-    btnCancelar.parentNode.replaceChild(newCancelar, btnCancelar);
-
-    newConfirmar.addEventListener('click', confirmar);
-
-    newCancelar.addEventListener('click', cancelar);
-
-    passInput.addEventListener('keydown', onKey);
-
-}
-
-
-
-function _initRol() {
-
-    // Siempre inicia en asistente por seguridad (no leer localStorage)
-
-    _rol = 'asistente';
-
-    _aplicarRol();
-
-}
-
-
-
-// ── Seguridad: SHA-256 + carga de hash nivel2 ─────────────────────
-
-// Implementación pura JS — funciona en HTTP sin contexto seguro
-
-function _sha256(texto) {
-
-    function rightRotate(v, a) { return (v >>> a) | (v << (32 - a)); }
-
-    const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-
-               0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-
-               0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-
-               0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-
-               0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-
-               0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-
-               0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-
-               0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
-
-    let h = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
-
-    const bytes = new TextEncoder().encode(texto);
-
-    const l = bytes.length;
-
-    const bits = l * 8;
-
-    let msg = new Uint8Array(Math.ceil((l + 9) / 64) * 64);
-
-    msg.set(bytes);
-
-    msg[l] = 0x80;
-
-    new DataView(msg.buffer).setUint32(msg.length - 4, bits, false);
-
-    for (let i = 0; i < msg.length; i += 64) {
-
-        const w = new Array(64);
-
-        for (let j = 0; j < 16; j++) w[j] = new DataView(msg.buffer, i).getUint32(j * 4, false);
-
-        for (let j = 16; j < 64; j++) {
-
-            const s0 = rightRotate(w[j-15],7) ^ rightRotate(w[j-15],18) ^ (w[j-15] >>> 3);
-
-            const s1 = rightRotate(w[j-2],17) ^ rightRotate(w[j-2],19)  ^ (w[j-2] >>> 10);
-
-            w[j] = (w[j-16] + s0 + w[j-7] + s1) | 0;
-
-        }
-
-        let [a,b,c,d,e,f,g,hh] = h;
-
-        for (let j = 0; j < 64; j++) {
-
-            const S1   = rightRotate(e,6) ^ rightRotate(e,11) ^ rightRotate(e,25);
-
-            const ch   = (e & f) ^ (~e & g);
-
-            const t1   = (hh + S1 + ch + K[j] + w[j]) | 0;
-
-            const S0   = rightRotate(a,2) ^ rightRotate(a,13) ^ rightRotate(a,22);
-
-            const maj  = (a & b) ^ (a & c) ^ (b & c);
-
-            const t2   = (S0 + maj) | 0;
-
-            hh=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
-
-        }
-
-        h = [h[0]+a,h[1]+b,h[2]+c,h[3]+d,h[4]+e,h[5]+f,h[6]+g,h[7]+hh].map(v => v|0);
-
     }
-
-    return Promise.resolve(h.map(v => (v >>> 0).toString(16).padStart(8,'0')).join(''));
-
 }
 
 
 
-async function _cargarHashNivel2() {
-
-    try {
-
-        const res = await fetch(`${API_BASE}/config/nivel2-hash`, {
-
-            headers: { Authorization: `Bearer ${token}` },
-
-            cache: 'no-store'
-
-        });
-
-        if (res.ok) {
-
-            const d = await res.json();
-
-            _hashNivel2 = d.hash;
-
-            addLog('activity', 'Configuración de seguridad Nivel 2 cargada');
-
-        } else {
-
-            addLog('error', 'No se pudo cargar configuración Nivel 2 del servidor');
-
-        }
-
-    } catch (e) {
-
-        addLog('error', `Error cargando hash nivel2: ${e.message}`);
-
-    }
-
-}
 
 
 
@@ -600,6 +312,8 @@ async function login() {
         } catch(e) { _rolServidor = 'admin'; }
 
         document.getElementById('usuarioActual').textContent = username;
+        const rolEl = document.getElementById('usuarioRol');
+        if (rolEl) rolEl.textContent = _rolServidor === 'superadmin' ? 'Super Admin' : 'Admin';
 
         document.getElementById('loginPanel').style.display  = 'none';
 
@@ -613,9 +327,7 @@ async function login() {
 
 
 
-        _initRol(); // siempre inicia en Vista Asistente
-
-        await _cargarHashNivel2(); // carga hash seguro desde el servidor
+        _aplicarRol(); // aplica visibilidad según rol del JWT
 
         _aplicarConfigApp(); // aplica logo y textos personalizados si existen
         _poblarAnios();      // popula selector de año en historial
@@ -642,8 +354,10 @@ async function login() {
         setInterval(cargarDashboard, 15000);
 
         _cargarResumenIncidencias();
+        _cargarEventosMini();
 
         setInterval(_cargarResumenIncidencias, 60000);
+        setInterval(_cargarEventosMini, 30000);
 
     } catch (e) {
 
@@ -713,9 +427,7 @@ function logout() {
 
     document.body.classList.add('login-screen');
 
-    _rol = 'asistente';
-
-    _hashNivel2 = null;
+    _rolServidor = 'admin';
 
     setWsStatus(false);
 
@@ -1191,8 +903,9 @@ function conectarWebSocket() {
             if (tabActivo && tabActivo.style.display !== 'none') {
                 cargarActividad(false);
             }
-            // Actualizar badge siempre
+            // Actualizar badge y mini-panel siempre
             _actActualizarBadge();
+            _cargarEventosMini();
 
         } else if (data.tipo === 'sospecha') {
 
@@ -1749,13 +1462,7 @@ function renderTerminales(terminales, sesiones = []) {
 
 
 
-    // Ocultar terminal virtual "IMPORTADO" para nivel 1 (asistente)
-    // Solo mostrar PCs conectadas (ocultar offline)
-
-    const lista = terminales.filter(t =>
-        t.estado !== 'offline' &&
-        (_rol === 'asistente' ? t.nombre !== 'IMPORTADO' : true)
-    );
+    const lista = terminales.filter(t => t.estado !== 'offline');
 
 
 
@@ -1821,44 +1528,27 @@ function renderTerminales(terminales, sesiones = []) {
 
 
 
+        const dotClass = t.estado === 'activo' ? 'tc-dot-ok' : t.estado === 'bloqueado' ? 'tc-dot-wrn' : 'tc-dot-off';
+        const alumnoHtml = sesion && sesion.activa
+            ? `<div class="tc-alumno-pill"><span class="tc-alumno-name">${escapeHtml(sesion.alumno_nombre)}</span></div>`
+            : t.estado === 'bloqueado'
+                ? `<p class="tc-alumno-empty">PC Bloqueada por Admin</p>`
+                : `<p class="tc-alumno-empty">Sin usuario asignado</p>`;
+
         return `
-
             <div class="terminal-card ${t.estado}">
-
                 <div class="tc-header">
-
-                    <div class="terminal-nombre">${escapeHtml(t.nombre || t.ip)}</div>
-
+                    <div class="tc-name-row">
+                        <span class="tc-status-dot ${dotClass}"></span>
+                        <div>
+                            <div class="terminal-nombre">${escapeHtml(t.nombre || t.ip)}</div>
+                            <div class="terminal-ip">${escapeHtml(t.ip)}</div>
+                        </div>
+                    </div>
                     <div class="terminal-estado estado-${t.estado}">${estadoLabel(t.estado)}</div>
-
                 </div>
-
-                <div class="tc-info">
-
-                    <div class="terminal-ip"><strong>IP:</strong> ${escapeHtml(t.ip)}</div>
-
-                    <div class="tc-alumno ${sesion && sesion.activa ? 'tc-alumno-activo' : ''}">${
-
-                        sesion && sesion.activa
-
-                            ? escapeHtml(sesion.alumno_nombre)
-
-                            : t.estado === 'bloqueado'
-
-                                ? '<span class="text-warning">PC Bloqueada por Admin</span>'
-
-                                : 'Disponible'
-
-                    }</div>
-
-                </div>
-
-                <div class="tc-acciones">
-
-                    ${botonesPrimarios}
-
-                </div>
-
+                <div class="tc-user-area">${alumnoHtml}</div>
+                <div class="tc-acciones">${botonesPrimarios}</div>
             </div>`;
 
     }).join('');
@@ -2293,6 +1983,7 @@ async function cargarMaestro() {
 
 function renderMaestro(data) {
 
+    const esSuperAdmin = _rolServidor === 'superadmin';
     const body   = document.getElementById('maestroBody');
 
     const empty  = document.getElementById('sinMaestro');
@@ -2334,12 +2025,12 @@ function renderMaestro(data) {
             <td style="font-size:12px">${esc(a.escuela  || '—')}</td>
             <td>
                 <div style="display:flex;gap:4px;align-items:center">
-                    <button title="Editar" class="tbl-btn tbl-btn-edit"
-                        onclick="abrirEditarMaestro('${esc(a.dni)}','${esc(a.nombre)}','${esc(a.codigo||'')}','${esc(a.facultad||'')}','${esc(a.escuela||'')}')"><i class="ph ph-pencil-simple"></i></button>
+                    ${esSuperAdmin ? `<button title="Editar" class="tbl-btn tbl-btn-edit"
+                        onclick="abrirEditarMaestro('${esc(a.dni)}','${esc(a.nombre)}','${esc(a.codigo||'')}','${esc(a.facultad||'')}','${esc(a.escuela||'')}')"><i class="ph ph-pencil-simple"></i></button>` : ''}
                     <button title="Registrar incidencia" class="tbl-btn tbl-btn-warn"
                         onclick="abrirNuevaIncidencia('${esc(a.dni)}')"><i class="ph ph-warning-circle"></i></button>
-                    <button title="Banear" class="tbl-btn tbl-btn-ban"
-                        onclick="abrirBanearUsuario('${esc(a.dni)}','${esc(a.nombre)}')"><i class="ph ph-prohibit"></i></button>
+                    ${esSuperAdmin ? `<button title="Banear" class="tbl-btn tbl-btn-ban"
+                        onclick="abrirBanearUsuario('${esc(a.dni)}','${esc(a.nombre)}')"><i class="ph ph-prohibit"></i></button>` : ''}
                 </div>
             </td>
         </tr>`).join('');
@@ -3113,9 +2804,57 @@ async function _cargarResumenIncidencias() {
             if (total > 0) { b.textContent = total; b.style.display = ''; }
             else b.style.display = 'none';
         });
+
+        // Poblar mini-panel de alertas en el hero del tab Monitoreo
+        _renderMonAlertasMini(data);
     } catch (e) {
         // silencioso
     }
+}
+
+function _renderMonAlertasMini(data) {
+    const el = document.getElementById('monAlertasMini');
+    if (!el) return;
+    const activas = data.filter(r => r.total > 0).slice(0, 4);
+    if (!activas.length) {
+        el.innerHTML = '<p class="mon-alerts-empty">Sin incidencias activas</p>';
+        return;
+    }
+    el.innerHTML = activas.map(r => {
+        const grave = r.total >= 3;
+        return `<div class="mon-alert-item">
+            <div class="mon-alert-ico ${grave ? 'grave' : 'leve'}">
+                <i class="ph ph-${grave ? 'warning' : 'warning-circle'}"></i>
+            </div>
+            <div style="min-width:0">
+                <div class="mon-alert-name">${escapeHtml(r.nombre)}</div>
+                <div class="mon-alert-desc">${r.total} incidencia${r.total !== 1 ? 's' : ''}</div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function _cargarEventosMini() {
+    try {
+        const res = await fetch(`${API_BASE}/admin/actividad?limit=4&offset=0`, { headers: authHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const items = data.items || [];
+        const el = document.getElementById('monEventosMini');
+        if (!el) return;
+        if (!items.length) {
+            el.innerHTML = '<p class="mon-alerts-empty">Sin eventos recientes</p>';
+            return;
+        }
+        el.innerHTML = items.map(r => {
+            const hora = r.fecha_hora ? new Date(r.fecha_hora).toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '—';
+            const isCrit = r.nivel === 'sospechoso';
+            return `<div class="mon-event-item${isCrit ? ' critical' : ''}">
+                <div class="mon-event-time">${hora} · ${escapeHtml(r.nombre_terminal || '—')}</div>
+                <div class="mon-event-desc">${escapeHtml(r.descripcion || r.tipo || '—')}</div>
+            </div>`;
+        }).join('');
+    } catch(e) { /* silencioso */ }
 }
 
 function _renderIncidencias(items) {
@@ -3273,62 +3012,42 @@ function abrirBanDesdeIncidencia(dni, nombre) {
     setTimeout(() => { switchSubtabInc('bans'); abrirBanearUsuario(dni, nombre); }, 300);
 }
 
-// ── Configuración — cambio de contraseñas ────────────────────────────
+// ── Configuración — gestión de usuarios ──────────────────────────
 
-async function cambiarPasswordAdmin() {
-    const actual     = document.getElementById('cfg-admin-actual').value;
-    const nueva      = document.getElementById('cfg-admin-nueva').value;
-    const confirmar  = document.getElementById('cfg-admin-confirmar').value;
-    const errEl      = document.getElementById('cfg-admin-error');
+async function guardarUsuario(rol) {
+    const esSuperadmin = rol === 'superadmin';
+    const username = esSuperadmin ? '' : (document.getElementById('cfg-admin-username')?.value.trim() || '');
+    const password = document.getElementById(esSuperadmin ? 'cfg-superadmin-nueva' : 'cfg-admin-nueva')?.value || '';
+    const errEl    = document.getElementById(esSuperadmin ? 'cfg-superadmin-error' : 'cfg-admin-error');
+
     errEl.textContent = '';
-    if (!actual || !nueva || !confirmar) { errEl.textContent = 'Completa todos los campos'; return; }
-    if (nueva !== confirmar)             { errEl.textContent = 'Las contraseñas nuevas no coinciden'; return; }
-    if (nueva.length < 6)               { errEl.textContent = 'Mínimo 6 caracteres'; return; }
-    try {
-        const res  = await fetch(`${API_BASE}/config/password-admin`, {
-            method: 'PUT',
-            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password_actual: actual, password_nueva: nueva }),
-        });
-        const data = await res.json();
-        if (res.ok) {
-            mostrarNotificacion(data.mensaje, 'ok');
-            document.getElementById('cfg-admin-actual').value    = '';
-            document.getElementById('cfg-admin-nueva').value     = '';
-            document.getElementById('cfg-admin-confirmar').value = '';
-        } else {
-            errEl.textContent = data.detail || 'Error al cambiar contraseña';
-        }
-    } catch (e) {
-        errEl.textContent = 'Error de conexión';
+
+    if (!username && !password) {
+        errEl.textContent = 'Ingresa al menos un campo para actualizar';
+        return;
     }
-}
+    if (username && username.length < 3) {
+        errEl.textContent = 'El username debe tener al menos 3 caracteres';
+        return;
+    }
+    if (password && password.length < 6) {
+        errEl.textContent = 'La contraseña debe tener al menos 6 caracteres';
+        return;
+    }
 
-async function cambiarPasswordNivel2() {
-    const actual    = document.getElementById('cfg-n2-actual').value;
-    const nueva     = document.getElementById('cfg-n2-nueva').value;
-    const confirmar = document.getElementById('cfg-n2-confirmar').value;
-    const errEl     = document.getElementById('cfg-n2-error');
-    errEl.textContent = '';
-    if (!actual || !nueva || !confirmar) { errEl.textContent = 'Completa todos los campos'; return; }
-    if (nueva !== confirmar)             { errEl.textContent = 'Las contraseñas nuevas no coinciden'; return; }
-    if (nueva.length < 4)               { errEl.textContent = 'Mínimo 4 caracteres'; return; }
     try {
-        const res  = await fetch(`${API_BASE}/config/password-nivel2`, {
+        const res  = await fetch(`${API_BASE}/config/usuario`, {
             method: 'PUT',
             headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password_actual_nivel2: actual, password_nueva: nueva }),
+            body: JSON.stringify({ rol_objetivo: rol, nuevo_username: username, nueva_password: password }),
         });
         const data = await res.json();
         if (res.ok) {
             mostrarNotificacion(data.mensaje, 'ok');
-            document.getElementById('cfg-n2-actual').value    = '';
-            document.getElementById('cfg-n2-nueva').value     = '';
-            document.getElementById('cfg-n2-confirmar').value = '';
-            // Recargar el hash en memoria para que tome efecto inmediato
-            await _cargarHashNivel2();
+            if (!esSuperadmin) document.getElementById('cfg-admin-username').value = '';
+            document.getElementById(esSuperadmin ? 'cfg-superadmin-nueva' : 'cfg-admin-nueva').value = '';
         } else {
-            errEl.textContent = data.detail || 'Error al cambiar contraseña';
+            errEl.textContent = data.detail || 'Error al guardar';
         }
     } catch (e) {
         errEl.textContent = 'Error de conexión';
@@ -3674,7 +3393,7 @@ async function cargarActividad(resetPagina = true) {
     if (fecha)    params.set('fecha',    fecha);
 
     const tbody = document.getElementById('act-tabla-body');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">Cargando...</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="act-empty-msg">Cargando…</td></tr>';
 
     try {
         const res  = await fetch(`${API_BASE}/admin/actividad?${params}`, { headers: authHeaders() });
@@ -3694,36 +3413,52 @@ function _actRenderTabla(items) {
     if (!tbody) return;
 
     if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-slate-400 dark:text-slate-500">Sin registros para los filtros aplicados</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="6" class="act-empty-msg">Sin registros para los filtros aplicados</td></tr>`;
         return;
     }
 
-    tbody.innerHTML = items.map(r => {
-        const fecha    = r.fecha_hora ? new Date(r.fecha_hora).toLocaleString('es-PE') : '—';
-        const nivelCls = r.nivel === 'sospechoso'
-            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-            : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300';
-        const nivelTxt = r.nivel === 'sospechoso' ? '⚠ Sospechoso' : 'Normal';
-        const tipoCls  = { proceso:'ph-cpu', archivo:'ph-file', comando:'ph-terminal-window', navegador:'ph-globe' }[r.tipo] || 'ph-activity';
+    const tipoIcono = { proceso:'ph-cpu', archivo:'ph-file', comando:'ph-terminal-window', navegador:'ph-globe' };
 
-        return `<tr class="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${r.nivel === 'sospechoso' ? 'bg-red-50/40 dark:bg-red-900/10' : ''}">
-            <td class="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">${fecha}</td>
-            <td class="px-4 py-3 font-mono text-xs text-cyan-600 dark:text-cyan-400">${r.nombre_terminal || '—'}</td>
-            <td class="px-4 py-3 text-sm">${r.nombre_alumno || '—'}</td>
-            <td class="px-4 py-3 font-mono text-xs text-slate-500">${r.dni_alumno || '—'}</td>
-            <td class="px-4 py-3 text-xs"><span class="inline-flex items-center gap-1"><i class="ph ${tipoCls}"></i> ${r.tipo || '—'}</span></td>
-            <td class="px-4 py-3 text-sm max-w-xs">
-                <div>${r.descripcion || '—'}</div>
-                ${r.detalle ? `<div class="text-xs text-slate-400 mt-0.5 truncate" title="${r.detalle}">${r.detalle}</div>` : ''}
+    tbody.innerHTML = items.map(r => {
+        const hora     = r.fecha_hora ? new Date(r.fecha_hora).toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '—';
+        const isCrit   = r.nivel === 'sospechoso';
+        const iconCls  = tipoIcono[(r.tipo||'').toLowerCase()] || 'ph-activity';
+        const tipoBadge = r.tipo ? `<span class="act-tipo-badge">${escapeHtml(r.tipo)}</span>` : '';
+        const descCls  = isCrit ? 'act-desc-crit' : 'act-desc';
+        const detalle  = r.detalle ? `<div class="act-detalle" title="${escapeHtml(r.detalle)}">${escapeHtml(r.detalle)}</div>` : '';
+        const rowCls   = isCrit ? 'act-row act-row-crit' : 'act-row';
+
+        return `<tr class="${rowCls}">
+            <td class="act-cell-time">${hora}</td>
+            <td class="act-cell-ico">
+                <div class="act-ico-wrap ${isCrit ? 'act-ico-crit' : 'act-ico-normal'}">
+                    <i class="ph ${iconCls}"></i>
+                </div>
             </td>
-            <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded-full font-medium ${nivelCls}">${nivelTxt}</span></td>
+            <td class="act-cell-pc">${escapeHtml(r.nombre_terminal || '—')}</td>
+            <td class="act-cell-alumno">${escapeHtml(r.nombre_alumno || '—')}</td>
+            <td class="act-cell-dni">${escapeHtml(r.dni_alumno || '—')}</td>
+            <td class="act-cell-desc">
+                ${tipoBadge}
+                <div class="${descCls}">${escapeHtml(r.descripcion || '—')}</div>
+                ${detalle}
+            </td>
         </tr>`;
     }).join('');
 }
 
+function actSetNivel(valor) {
+    const sel = document.getElementById('act-filtro-nivel');
+    if (sel) sel.value = valor;
+    document.getElementById('act-lvl-todos').classList.toggle('act-lvl-active', valor === '');
+    document.getElementById('act-lvl-sospechosos').classList.toggle('act-lvl-active', valor === 'sospechoso');
+    _actOffset = 0;
+    cargarActividad();
+}
+
 function _actRenderError() {
     const tbody = document.getElementById('act-tabla-body');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-red-400">Error al cargar datos</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="act-empty-msg" style="color:var(--err)">Error al cargar datos</td></tr>';
 }
 
 function _actActualizarPaginacion() {
