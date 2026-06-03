@@ -85,7 +85,21 @@
       "Bash(.venv/Scripts/python.exe -c \"import ast; [ast.parse\\(open\\(f,encoding='utf-8'\\).read\\(\\)\\) for f in ['main.py','models.py','api/endpoints.py']]; print\\('Python OK — los 3 archivos'\\)\")",
       "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
       "Bash(.venv/Scripts/python.exe -c \"import openpyxl; print\\('openpyxl OK', openpyxl.__version__\\)\")",
-      "Bash(echo \"version.txt publicada: $\\(cat /c/WinSysCache/version.txt\\)\"; echo \"exe modificado: $\\(stat -c '%y' /c/WinSysCache/ControlBiblioteca.Client.exe 2>/dev/null | cut -d'.' -f1\\)\")"
+      "Bash(echo \"version.txt publicada: $\\(cat /c/WinSysCache/version.txt\\)\"; echo \"exe modificado: $\\(stat -c '%y' /c/WinSysCache/ControlBiblioteca.Client.exe 2>/dev/null | cut -d'.' -f1\\)\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\nunes\\\\StudioProjects\\\\control\" -Recurse -File -Include \"*.py\")",
+      "Bash(Select-Object -First 20)",
+      "Bash(grep -n \"ws://\\\\|wss://\\\\|WebSocket\\\\|new WebSocket\" \"c:\\\\Users\\\\nunes\\\\StudioProjects\\\\control\\\\admin\\\\static\\\\js\\\\app.js\")",
+      "Bash(.venv/Scripts/python.exe -c \"from dotenv import load_dotenv; import os; load_dotenv\\(\\); print\\('SECRET_KEY activa:', os.getenv\\('SECRET_KEY'\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import secrets; print\\(secrets.token_hex\\(32\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from dotenv import load_dotenv; load_dotenv\\(\\); import auth_service; print\\('auth_service OK — SECRET_KEY len:', len\\(auth_service.SECRET_KEY\\), '| empieza con:', auth_service.SECRET_KEY[:8] + '...'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import os; os.environ['SECRET_KEY']=''; import auth_service\")",
+      "Bash(.venv/Scripts/python.exe -c \"import os; os.environ['SECRET_KEY']='dev_secret_key_local'; import auth_service\")",
+      "Bash(git rm *)",
+      "Bash(git check-ignore *)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); print\\('Sintaxis main.py OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('Sintaxis endpoints.py OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from dotenv import load_dotenv; load_dotenv\\(\\); import api.endpoints; print\\('api.endpoints importa OK — sin referencias rotas'\\)\")"
     ],
     "additionalDirectories": [
       "\\tmp",

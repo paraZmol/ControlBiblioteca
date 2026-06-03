@@ -52,6 +52,9 @@ _IP_LOCAL = obtener_ip_local()
 # ── API SGA UNASAM ───────────────────────────────────────────────────
 _SGA_BASE = os.getenv("SGA_API_URL", "https://sga.unasam.edu.pe/integracion/api/biblioteca/matriculados")
 _SGA_TIMEOUT = float(os.getenv("SGA_TIMEOUT_SECONDS", "6"))
+# Verificación SSL al consultar el SGA. True por defecto (seguro). Solo se
+# desactiva si SGA_SSL_VERIFY es explícitamente "false"/"0"/"no" en .env.
+_SGA_VERIFY_SSL = os.getenv("SGA_SSL_VERIFY", "true").strip().lower() not in ("false", "0", "no")
 
 
 # ── Funciones helper para get_or_create ────────────────────────────────
@@ -101,7 +104,11 @@ async def consultar_sga(dni: str) -> Optional[dict]:
     url = f"{_SGA_BASE}/{dni}"
     logger.info(f"[SGA] GET {url}")
     try:
-        async with httpx.AsyncClient(timeout=_SGA_TIMEOUT, verify=False) as client:
+        # Verificación SSL ACTIVA por defecto (evita MITM que altere datos del
+        # alumno). El certificado del SGA UNASAM es válido. Solo en caso de un
+        # problema puntual de certificado se puede desactivar con
+        # SGA_SSL_VERIFY=false en .env — NO recomendado en producción.
+        async with httpx.AsyncClient(timeout=_SGA_TIMEOUT, verify=_SGA_VERIFY_SSL) as client:
             resp = await client.get(url)
 
         logger.info(f"[SGA] HTTP {resp.status_code} para DNI={dni}")
