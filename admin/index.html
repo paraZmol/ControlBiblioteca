@@ -14,7 +14,7 @@
         }
     </script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link rel="stylesheet" href="static/css/style.css?v=16">
+    <link rel="stylesheet" href="static/css/style.css?v=23">
     <style>
         ::-webkit-scrollbar { width:6px; height:6px; }
         .dark ::-webkit-scrollbar-track { background:transparent; }
@@ -408,26 +408,18 @@
                         </div>
                     </div>
 
-                    <!-- Table card -->
-                    <div class="hist-table-card">
-                        <div class="hist-table-scroll">
-                            <table id="tablaSesiones" class="hist-tbl">
-                                <thead>
-                                    <tr>
-                                        <th class="th-sortable" onclick="ordenarPor('pc')" data-col="pc">PC <span class="sort-arrow"></span></th>
-                                        <th class="th-sortable" onclick="ordenarPor('estudiante')" data-col="estudiante">Estudiante <span class="sort-arrow"></span></th>
-                                        <th class="th-sortable" onclick="ordenarPor('dni')" data-col="dni">DNI <span class="sort-arrow"></span></th>
-                                        <th>Facultad</th>
-                                        <th class="th-sortable" onclick="ordenarPor('actividad')" data-col="actividad">Actividad <span class="sort-arrow"></span></th>
-                                        <th>Inicio</th>
-                                        <th>Salida</th>
-                                        <th class="th-sortable" onclick="ordenarPor('fecha')" data-col="fecha">Fecha <i class="ph ph-caret-down" style="font-size:10px;vertical-align:-1px;color:var(--a)"></i></th>
-                                        <th>Estado</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="sesionesBody"></tbody>
-                            </table>
-                        </div>
+                    <!-- Sort bar -->
+                    <div class="hist-sortbar">
+                        <span class="hist-sortbar-lbl">Ordenar por:</span>
+                        <button class="hist-sort-btn" onclick="ordenarPor('fecha')" data-col="fecha">Fecha <span class="sort-arrow"></span></button>
+                        <button class="hist-sort-btn" onclick="ordenarPor('estudiante')" data-col="estudiante">Estudiante <span class="sort-arrow"></span></button>
+                        <button class="hist-sort-btn" onclick="ordenarPor('pc')" data-col="pc">PC <span class="sort-arrow"></span></button>
+                        <button class="hist-sort-btn" onclick="ordenarPor('actividad')" data-col="actividad">Actividad <span class="sort-arrow"></span></button>
+                    </div>
+
+                    <!-- Session cards list -->
+                    <div class="hist-cards-wrap">
+                        <div id="sesionesBody" class="hist-cards-list"></div>
                         <p id="sinSesiones" class="empty-msg" style="display:none">No hay sesiones registradas</p>
                         <div id="paginacionSesiones" class="hist-tbl-foot"></div>
                     </div>
@@ -753,6 +745,12 @@
                             <button onclick="actLimpiarFiltros()" class="act-filter-clear">
                                 <i class="ph ph-x"></i> Limpiar
                             </button>
+                            <button id="act-toggle-ignorados" onclick="actToggleIgnorados()" class="act-filter-clear" title="Mostrar/ocultar procesos ignorados en esta vista">
+                                <i class="ph ph-eye-slash"></i> Ver ignorados
+                            </button>
+                            <button onclick="abrirProcesosIgnorados()" class="act-filter-clear" title="Administrar lista de procesos ignorados">
+                                <i class="ph ph-list-bullets"></i> Lista
+                            </button>
                         </div>
 
                         <!-- Lista de eventos -->
@@ -1034,7 +1032,89 @@
 
                     <!-- Panel: Backdoor -->
                     <div id="subtab-cfg-backdoor" style="display:none">
+
+                            <!-- ── Mensajes Programados ── -->
+                            <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
+                                <i class="ph ph-bell-ringing text-indigo-500"></i> Mensajes Programados
+                            </h3>
+                            <p class="text-xs text-zinc-400 dark:text-zinc-500 mb-4">
+                                Envía notificaciones a todas las PCs a la hora que configures. El mensaje de cierre se repite todos los días; los mensajes extra se envían una sola vez.
+                            </p>
+
+                            <!-- Fila de dos tarjetas lado a lado -->
+                            <div class="grid grid-cols-2 gap-4 mb-6">
+
+                                <!-- Tarjeta cierre diario -->
+                                <div class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+                                    <div class="flex items-center gap-2">
+                                        <i class="ph ph-door-open text-amber-500"></i>
+                                        <span class="text-sm font-bold text-zinc-700 dark:text-zinc-200">Cierre Diario</span>
+                                        <span class="text-xs text-zinc-400 dark:text-zinc-500 ml-auto">Diario</span>
+                                    </div>
+                                    <div class="flex gap-3 items-end">
+                                        <div class="flex-1">
+                                            <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-1">Hora de envío</label>
+                                            <input id="msg-cierre-hora" type="time" value="18:50"
+                                                class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                                        </div>
+                                        <label class="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300 cursor-pointer pb-2">
+                                            <input id="msg-cierre-activo" type="checkbox" checked class="rounded border-zinc-300 dark:border-zinc-600 text-indigo-500 focus:ring-indigo-500">
+                                            Activo
+                                        </label>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-1">Mensaje</label>
+                                        <input id="msg-cierre-texto" type="text" placeholder="Ej: La biblioteca cierra en 10 minutos"
+                                            class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                                    </div>
+                                    <div class="flex items-center justify-between mt-auto">
+                                        <p id="msg-cierre-status" class="text-xs text-zinc-400 min-h-4"></p>
+                                        <button onclick="guardarMensajeCierre()" class="db-btn db-btn-new inline-flex items-center gap-2 text-sm">
+                                            <i class="ph ph-floppy-disk"></i> Guardar
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Tarjeta mensajes extra -->
+                                <div class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+                                    <div class="flex items-center gap-2">
+                                        <i class="ph ph-chat-dots text-indigo-500"></i>
+                                        <span class="text-sm font-bold text-zinc-700 dark:text-zinc-200">Mensajes Extra</span>
+                                        <span class="text-xs text-zinc-400 dark:text-zinc-500 ml-auto">Un solo envío</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-1">Fecha</label>
+                                            <input id="msg-extra-fecha" type="date"
+                                                class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-1">Hora de envío</label>
+                                            <input id="msg-extra-hora" type="time"
+                                                class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-1">Mensaje</label>
+                                        <input id="msg-extra-texto" type="text" placeholder="Ej: No habrá luz de 3pm a 4pm"
+                                            class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                                    </div>
+                                    <div class="flex items-center justify-between">
+                                        <p id="msg-extra-status" class="text-xs text-zinc-400 min-h-4"></p>
+                                        <button onclick="agregarMensajeExtra()" class="db-btn db-btn-new inline-flex items-center gap-2 text-sm">
+                                            <i class="ph ph-plus"></i> Agregar
+                                        </button>
+                                    </div>
+                                    <!-- Lista de mensajes extra pendientes -->
+                                    <div id="msg-extra-lista" class="flex flex-col gap-2">
+                                        <p class="text-xs text-zinc-400 dark:text-zinc-500 text-center py-2">Cargando...</p>
+                                    </div>
+                                </div>
+
+                            </div><!-- fin grid mensajes -->
+
                         <div class="max-w-xl">
+                            <!-- ── Atajo de Mantenimiento ── -->
                             <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
                                 <i class="ph ph-keyboard text-indigo-500"></i> Atajo de Mantenimiento
                             </h3>
@@ -1115,6 +1195,20 @@
         <div class="modal-buttons flex gap-3 justify-end">
             <button id="btn-modal-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
             <button id="btn-modal-confirmar" class="btn-confirmar-rojo text-xs bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Confirmar</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-procesos-ignorados" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+        <div class="flex items-center justify-between mb-1">
+            <h3 class="text-base font-bold text-zinc-900 dark:text-white">Procesos ignorados</h3>
+            <button onclick="cerrarProcesosIgnorados()" class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"><i class="ph ph-x"></i></button>
+        </div>
+        <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Estos ejecutables no se registran en el flujo de actividad. Quitar uno hace que vuelva a registrarse.</p>
+        <div id="procesos-ignorados-lista" class="proc-ign-wrap"></div>
+        <div class="flex justify-end mt-5">
+            <button onclick="cerrarProcesosIgnorados()" class="text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cerrar</button>
         </div>
     </div>
 </div>
@@ -1293,7 +1387,7 @@
 </div>
 
 
-<script src="static/js/app.js?v=9"></script>
+<script src="static/js/app.js?v=17"></script>
 <script>
 // Tema
 (function() {
@@ -1435,7 +1529,10 @@ function switchSubtabCfg(sub) {
     });
     if (sub === 'aplicacion'      && typeof _cargarCamposConfigApp === 'function') _cargarCamposConfigApp();
     if (sub === 'actualizaciones' && typeof cargarRutaDistribucion === 'function') cargarRutaDistribucion();
-    if (sub === 'backdoor'        && typeof cargarConfigBackdoor === 'function') cargarConfigBackdoor();
+    if (sub === 'backdoor') {
+        if (typeof cargarConfigBackdoor === 'function') cargarConfigBackdoor();
+        if (typeof cargarMensajes       === 'function') cargarMensajes();
+    }
 }
 
 function switchTab(tab) {
@@ -1468,7 +1565,7 @@ function switchTab(tab) {
     if (tab === 'historial')     aplicarFiltros();
     if (tab === 'basedatos')     switchSubtab('estudiantes');
     if (tab === 'incidencias')   switchSubtabInc('inc');
-    if (tab === 'configuracion') switchSubtabCfg((_rolServidor === 'superadmin' && _rol === 'admin') ? 'actividad' : 'backdoor');
+    if (tab === 'configuracion') switchSubtabCfg(_rolServidor === 'superadmin' ? 'actividad' : 'backdoor');
     if (tab === 'actividad')     cargarActividad();
 }
 </script>

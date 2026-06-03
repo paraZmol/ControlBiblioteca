@@ -674,6 +674,26 @@ html.dark .btn-card-apagar {
     color: #18181b;
 }
 
+/* Eliminar terminal fantasma — solo superadmin, solo en tarjetas offline */
+.btn-card-eliminar-terminal {
+    flex: 1; border-radius: 12px;
+    padding: 9px 10px;
+    font: 600 12px/1 var(--font);
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    border: 1px dashed #fca5a5;
+    background: #fff1f2; color: #dc2626;
+    transition: background .15s, color .15s, border-color .15s, transform .12s;
+    cursor: pointer;
+}
+html.dark .btn-card-eliminar-terminal {
+    background: oklch(0.18 0.05 20 / 0.4);
+    border-color: oklch(0.4 0.12 20 / 0.5);
+    color: oklch(0.70 0.20 20);
+}
+.btn-card-eliminar-terminal:hover {
+    background: #fee2e2; border-color: #f87171; transform: translateY(-1px);
+}
+
 /* ══════════════════════════════════════════════
    TABLES
 ══════════════════════════════════════════════ */
@@ -1556,45 +1576,127 @@ html.dark .af-input { color-scheme: dark; }
 .btn-act.violet { background: oklch(0.58 0.18 290); color: #fff; border-color: oklch(0.53 0.18 290); }
 .btn-act.danger { background: oklch(0.56 0.20 20);  color: #fff; border-color: oklch(0.51 0.20 20);  }
 
-/* Table card */
-.hist-table-card {
+/* Sort bar */
+.hist-sortbar {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.hist-sortbar-lbl {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--t3); margin-right: 4px;
+}
+.hist-sort-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 6px 12px; border-radius: var(--r-sm);
+    background: var(--sur); border: 1px solid var(--bdr);
+    font: 600 12px/1 var(--font); color: var(--t2);
+    cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+    white-space: nowrap;
+}
+.hist-sort-btn:hover { color: var(--t1); border-color: var(--bdr2); }
+.hist-sort-btn[data-active] {
+    background: var(--a-dim); border-color: var(--a-bdr); color: var(--a);
+}
+
+/* Cards wrap */
+.hist-cards-wrap {
     background: var(--sur);
     border: 1px solid var(--bdr);
     border-radius: var(--r);
     box-shadow: var(--sha);
     overflow: hidden;
 }
-.hist-table-scroll { overflow-x: auto; }
+.hist-cards-list { display: flex; flex-direction: column; }
 
-/* Table */
-.hist-tbl { width: 100%; border-collapse: collapse; min-width: 1000px; }
-.hist-tbl thead th {
-    text-align: left;
-    font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
-    color: var(--t3);
-    padding: 13px 18px;
-    background: var(--sur2);
+/* Session card row */
+.hc-row {
+    display: flex; align-items: stretch; gap: 0;
+    padding: 16px 20px;
     border-bottom: 1px solid var(--bdr);
-    white-space: nowrap;
-    position: sticky; top: 0; z-index: 1;
+    transition: background .12s;
+    gap: 16px;
 }
-.hist-tbl thead th.th-sortable { cursor: pointer; user-select: none; }
-.hist-tbl thead th.th-sortable:hover { color: var(--t1); }
-.hist-tbl tbody td {
-    padding: 13px 18px;
-    font-size: 13px; color: var(--t1);
-    border-bottom: 1px solid var(--bdr);
-    vertical-align: middle;
-}
-.hist-tbl tbody tr { transition: background .12s; }
-.hist-tbl tbody tr:hover { background: var(--sur2); }
-.hist-tbl tbody tr:last-child td { border-bottom: none; }
+.hc-row:last-child { border-bottom: none; }
+.hc-row:hover { background: var(--sur2); }
+.hc-row--active { background: oklch(0.97 0.01 200 / 0.4); }
+html.dark .hc-row--active { background: oklch(0.25 0.04 200 / 0.25); }
 
-/* Table footer / pagination */
+/* Left zone — date + PC */
+.hc-left {
+    display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
+    gap: 7px; min-width: 120px; flex-shrink: 0;
+    padding-right: 20px;
+    border-right: 1px solid var(--bdr);
+}
+.hc-date {
+    font-size: 11.5px; color: var(--t3); font-weight: 500;
+    display: flex; align-items: center; gap: 5px;
+}
+.hc-date i { font-size: 12px; }
+.hc-pc {
+    display: inline-flex; align-items: center;
+    padding: 4px 9px; border-radius: 7px;
+    background: var(--a-dim); border: 1px solid var(--a-bdr);
+    color: var(--a); font: 700 11px/1 var(--mono);
+    letter-spacing: .04em; text-transform: uppercase;
+}
+
+/* Center zone — student info */
+.hc-center {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; justify-content: center; gap: 6px;
+    padding: 0 4px;
+}
+.hc-name {
+    font-size: 14px; font-weight: 700; color: var(--t1);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hc-meta {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    font-size: 12.5px; color: var(--t2);
+}
+.hc-dni {
+    font: 500 11.5px/1 var(--mono);
+    background: var(--sur2); border: 1px solid var(--bdr);
+    border-radius: 5px; padding: 2px 6px; color: var(--t2);
+}
+.hc-sep { color: var(--t3); font-size: 12px; }
+.hc-activity { color: var(--t1); font-weight: 500; }
+
+/* Right zone — duration + time + status */
+.hc-right {
+    display: flex; flex-direction: column; align-items: flex-end; justify-content: center;
+    gap: 5px; min-width: 130px; flex-shrink: 0;
+    padding-left: 20px;
+    border-left: 1px solid var(--bdr);
+}
+.hc-duration {
+    font-size: 14px; font-weight: 700; color: var(--t1);
+}
+.hc-duration.live { color: var(--ok); }
+.hc-time-range {
+    font: 500 11.5px/1 var(--mono); color: var(--t3);
+}
+.hc-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font: 700 9.5px/1 var(--font); letter-spacing: .09em; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 6px;
+}
+.hc-badge.live {
+    background: var(--ok-dim); border: 1px solid var(--ok-bdr); color: var(--ok);
+}
+.hc-badge.live .dot {
+    width: 5px; height: 5px; border-radius: 50%; background: currentColor;
+    animation: pulse 2.5s ease-in-out infinite;
+}
+.hc-badge.closed {
+    background: var(--sur2); border: 1px solid var(--bdr); color: var(--t3);
+}
+
+/* Pagination footer */
 .hist-tbl-foot {
     display: flex; align-items: center; justify-content: space-between;
     flex-wrap: wrap; gap: 10px;
-    padding: 12px 18px;
+    padding: 14px 20px;
     border-top: 1px solid var(--bdr);
     background: var(--sur);
 }
@@ -2032,3 +2134,52 @@ html.dark .act-row-crit:hover { background: oklch(0.16 0.03 20 / 0.45); }
 }
 .act-pag-btn:hover:not(:disabled) { background: var(--sur3); color: var(--t1); }
 .act-pag-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+/* ── Botón "Ignorar" en eventos de actividad ── */
+.act-btn-ignorar {
+    margin-top: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 7px;
+    border: 1px dashed var(--bord, #d4d4d8);
+    background: transparent;
+    color: var(--t2, #71717a);
+    cursor: pointer;
+    transition: all .15s;
+}
+.act-btn-ignorar:hover {
+    background: rgba(113,113,122,.1);
+    color: var(--t1, #18181b);
+    border-style: solid;
+}
+
+/* ── Panel de procesos ignorados ── */
+.proc-ign-wrap { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.proc-ign-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    background: var(--sur2, #f4f4f5);
+    border: 1px solid var(--bord, #e4e4e7);
+}
+.proc-ign-exe { font-family: monospace; font-size: 12px; color: var(--t1, #18181b); flex: 1; }
+.proc-ign-meta { font-size: 11px; color: var(--t2, #a1a1aa); }
+.proc-ign-quitar {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; padding: 4px 10px; border-radius: 7px;
+    border: 1px solid #f43f5e; background: transparent; color: #f43f5e;
+    cursor: pointer; transition: all .15s;
+}
+.proc-ign-quitar:hover { background: #f43f5e; color: #fff; }
+
+/* Toggle "Ver ignorados" activo */
+.act-toggle-on {
+    background: var(--acc, #6366f1) !important;
+    color: #fff !important;
+    border-color: var(--acc, #6366f1) !important;
+}

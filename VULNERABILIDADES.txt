@@ -1,316 +1,567 @@
 ANÁLISIS DE VULNERABILIDADES — Control Biblioteca UNASAM
-Fecha: 2026-05-14
+Actualizado: 2026-06-02
 =========================================================
 
+Clasificación por urgencia:
+  [NECESARIO]  → Riesgo real e inmediato. Resolver antes de producción.
+  [MEDIO]      → Riesgo moderado. Resolver en la siguiente iteración.
+  [BAJO]       → Riesgo menor o mitigado por contexto. Resolver cuando sea posible.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. [CRÍTICO] WebSocket /ws/admin sin autenticación
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ESTADO: CONFIRMADO EN PRUEBA REAL (14/05/2026)
+
+═══════════════════════════════════════════════════════════
+  CATEGORÍA A — NECESARIO (resolver antes de producción)
+═══════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────
+A-1. [NECESARIO] WebSocket /ws/admin sin autenticación
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/main.py — endpoint /ws/admin
 
 Descripción:
   Cualquier dispositivo en la misma red puede conectarse al WebSocket
   de administración sin usuario ni contraseña.
 
-Prueba realizada desde navegador sin login:
+Prueba confirmada (14/05/2026):
   const ws = new WebSocket('ws://localhost:8000/ws/admin');
-  Resultado: "CONECTADO sin autenticacion"
-  Mensaje recibido: {"tipo":"status_update","terminales":[],"total":0}
+  Resultado: conectado sin login. Recibe estado de terminales en tiempo real.
 
-Impacto lectura (confirmado):
-  - Ver estado de todas las terminales en tiempo real
-  - Ver nombres de alumnos usando las PCs en ese momento
-  - Ver IPs de todos los equipos del laboratorio
-
-Impacto escritura (pendiente de confirmar en red real):
-  - Posiblemente bloquear terminales sin autenticación:
-    ws.send(JSON.stringify({tipo:"bloquear_terminal", ip:"X.X.X.X"}))
-  - Probar cuando haya terminales conectadas en la biblioteca
-
-Contexto del riesgo:
-  - Desde internet: NO es alcanzable (servidor en red local)
-  - Desde la red WiFi de la biblioteca: SÍ es alcanzable
-  - Un alumno con celular conectado al WiFi del laboratorio
-    podría ejecutar esto y ver/manipular el sistema
+Impacto:
+  - Ver estado, IPs y nombres de alumnos usando las PCs
+  - Posiblemente bloquear/desbloquear terminales sin autenticación
+  - Alcanzable desde el WiFi del laboratorio por cualquier alumno con celular
 
 Cómo arreglarlo:
-  - El cliente envía el JWT token al conectarse
-  - El servidor valida el token antes de aceptar la conexión
+  - Validar JWT token al conectarse al WebSocket
   - Si no hay token válido → cerrar conexión inmediatamente
-
-Archivo afectado: server/main.py — endpoint /ws/admin
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-2. [MEDIO] Exportar Excel/PDF sin verificar rol admin
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ESTADO: CORREGIDO (14/05/2026)
-
-Endpoints afectados:
-  GET /api/admin/exportar-excel
-  GET /api/admin/exportar-pdf
-
-Descripción:
-  Estos endpoints requieren token JWT (login) pero NO verifican
-  que el usuario tenga rol "admin". Un usuario con rol "encargado"
-  puede descargar todo el historial de sesiones.
-
-Impacto:
-  - Exportar toda la base de datos de sesiones
-  - Obtener nombres, DNIs y actividades de todos los alumnos
-
-Cómo arreglarlo:
-  Agregar en ambos endpoints:
-    if admin.rol != "admin":
-        raise HTTPException(status_code=403, detail="Sin permisos")
-
-Archivo afectado: server/api/endpoints.py
+  NOTA: Ya existe la validación en el código (mayo 2026), verificar que esté activa.
 
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-3. [MEDIO] Hash de contraseña Nivel 2 accesible a cualquier rol
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ESTADO: CORREGIDO (14/05/2026)
-
-Endpoint afectado:
-  GET /api/config/nivel2-hash
-
-Descripción:
-  Devuelve el hash SHA-256 de la contraseña de Nivel 2.
-  Cualquier usuario autenticado (incluso "encargado") puede
-  obtenerlo y luego intentar crackearlo offline con herramientas
-  como hashcat o una tabla de palabras comunes.
-
-Nota importante:
-  SHA-256 directo (sin sal) es más fácil de crackear que bcrypt.
-  Si la contraseña es corta o común, puede obtenerse en segundos.
-
-Impacto:
-  - Obtener la contraseña de Nivel 2
-  - Usarla para desbloquear controles críticos del sistema
-
-Cómo arreglarlo:
-  - Agregar verificación de rol admin en el endpoint
-  - Considerar migrar de SHA-256 a bcrypt para el hash de Nivel 2
-
-Archivo afectado: server/main.py
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-4. [BAJO] Endpoints públicos del kiosco — enumeración de datos
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ESTADO: DISEÑO INTENCIONAL, riesgo menor
-
-Endpoints afectados:
-  POST /api/alumnos/validar
-  POST /api/sesiones/iniciar
-  POST /api/sesiones/{id}/cerrar
-  GET  /api/admin/bans/check/{dni}
-
-Descripción:
-  Son públicos por diseño — los usan las PCs del laboratorio
-  que no tienen usuario/contraseña de admin. Sin embargo,
-  permiten a cualquiera en la red:
-  - Verificar si un DNI existe en la base de datos
-  - Verificar si un alumno está baneado
-  - Potencialmente iniciar sesiones falsas
-
-Cómo mitigar (sin romper el kiosco):
-  - Rate limiting: máximo N intentos por IP por minuto
-  - Whitelist de IPs: solo las PCs del laboratorio pueden llamar estos endpoints
-
-Archivo afectado: server/api/endpoints.py
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-5. [MEDIO] PC queda desbloqueada al perder conexión con servidor
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ESTADO: CORREGIDO (22/05/2026)
-
-Descripción:
-  Si durante una sesión activa la PC pierde conexión con el servidor
-  (red caída, servidor apagado, cable desconectado), el cliente WPF
-  seguía mostrando la pantalla desbloqueada al alumno indefinidamente.
-  El servidor cerraba la sesión en BD pero el cliente no lo sabía,
-  quedando en estado inconsistente: PC desbloqueada sin sesión válida.
-
-Impacto:
-  - El alumno continúa usando la PC sin sesión registrada
-  - No hay registro de actividad durante ese período
-  - Si otro alumno se sienta puede usar la PC sin identificarse
-
-Cómo se corrigió:
-  - Al detectar desconexión con sesión activa, se muestra ventana
-    flotante en esquina superior derecha con cuenta regresiva de 3 min
-  - El alumno puede guardar su trabajo durante ese tiempo
-  - Si reconecta antes de 3 min → ventana desaparece, sesión continúa
-  - Si no reconecta en 3 min → PC se bloquea automáticamente
-  - Al bloquearse sin conexión → al reconectar el alumno debe
-    identificarse nuevamente
-
-Archivos afectados:
-  client/UI/MainWindow.xaml.cs — lógica de gracia y bloqueo
-  client/UI/VentanaDesconexion.xaml — ventana flotante
-  client/UI/VentanaDesconexion.xaml.cs — timer y posicionamiento
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-6. [MEDIO] Mensajes WebSocket de actividad sin validación de sesión activa
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+──────────────────────────────────────────────────────────
+A-2. [NECESARIO] SECRET_KEY de JWT débil o ausente en producción
+──────────────────────────────────────────────────────────
 ESTADO: PENDIENTE
+Archivo: server/auth_service.py
 
 Descripción:
-  El nuevo endpoint WebSocket que procesa mensajes tipo "actividad"
-  busca la sesión activa en BD para obtener el alumno. Sin embargo,
-  un cliente malicioso en la red podría conectarse al WebSocket de
-  terminal y enviar mensajes de actividad falsos si conoce el nombre
-  de una terminal.
+  SECRET_KEY usa fallback si no está en .env:
+    SECRET_KEY = os.getenv("SECRET_KEY", "clave-secreta-cambiar-en-produccion")
+  Con la clave por defecto cualquiera puede firmar tokens JWT válidos.
 
 Impacto:
-  - Inyectar logs de actividad falsos asociados a un alumno
-  - Generar sospechas falsas contra alumnos inocentes
-
-Cómo arreglarlo:
-  - Validar que el mensaje viene del WebSocket correcto (terminal registrada)
-  - Relacionado con vulnerabilidad #1 (WebSocket sin auth)
-  - Al resolver #1 (JWT en WebSocket), este queda mitigado también
-
-Archivo afectado: server/main.py — handler tipo "actividad"
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-7. [CRÍTICO] SECRET_KEY de JWT débil o ausente en producción
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ESTADO: PENDIENTE
-
-Descripción:
-  auth_service.py usa SECRET_KEY con fallback débil:
-  SECRET_KEY = os.getenv("SECRET_KEY", "clave-secreta-cambiar-en-produccion")
-  Si no se configura la variable de entorno, cualquiera puede firmar
-  tokens JWT válidos con la clave por defecto.
-
-Impacto:
-  - Forjar tokens de admin sin conocer la contraseña
+  - Forjar tokens de superadmin sin conocer contraseña
   - Acceso total al sistema
 
 Cómo arreglarlo:
-  - Eliminar el fallback, lanzar RuntimeError si no está configurada
-  - Generar con: openssl rand -hex 32
+  - Eliminar el fallback y lanzar RuntimeError si no está configurada
+  - Generar clave segura: openssl rand -hex 32
+  - Guardarla en .env (nunca en el código)
 
-Archivo afectado: server/auth_service.py
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-8. [ALTO] Raw SQL con parámetros sin sanitizar en estadísticas
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+──────────────────────────────────────────────────────────
+A-3. [NECESARIO] Verificación SSL deshabilitada en llamada a API externa
+──────────────────────────────────────────────────────────
 ESTADO: PENDIENTE
+Archivo: server/main.py — línea ~104
 
 Descripción:
-  Los endpoints de estadísticas (grafico, distribucion, heatmap) construyen
-  SQL dinámico concatenando variables como agrupacion, metrica, label_format
-  directamente en el query sin parametrizar.
+  La consulta al SGA UNASAM usa verify=False:
+    async with httpx.AsyncClient(timeout=_SGA_TIMEOUT, verify=False)
+  Permite ataques MITM que intercepten y alteren datos de alumnos.
 
 Impacto:
-  - Inyección SQL si un admin manipula los parámetros de la URL
-  - Exposición o corrupción de la base de datos
+  - Un atacante en la red puede suplantar la API del SGA
+  - Inyectar datos de alumnos falsos
 
 Cómo arreglarlo:
-  - Usar whitelist de valores permitidos para cada parámetro
+  - Instalar el certificado del SGA correctamente
+  - Usar verify=True o pasar el path del certificado: verify="/ruta/cert.pem"
+
+
+──────────────────────────────────────────────────────────
+A-4. [NECESARIO] SQL dinámico con parámetros sin sanitizar en estadísticas
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/api/endpoints.py — funciones estadisticas_grafico,
+         estadisticas_distribucion, estadisticas_heatmap
+
+Descripción:
+  Variables como agrupacion, metrica, label_format, fecha_inicio y fecha_fin
+  se concatenan directamente en strings SQL con f-strings sin parametrizar.
+  Aunque hay validación parcial, no es suficiente para prevenir inyección.
+
+Impacto:
+  - Inyección SQL si un admin (o atacante con token) manipula la URL
+  - Exposición o corrupción de la base de datos completa
+
+Cómo arreglarlo:
+  - Usar whitelist estricta de valores permitidos (comparar contra lista fija)
   - Nunca concatenar input del usuario directamente en SQL
 
-Archivo afectado: server/api/endpoints.py — estadisticas_grafico,
-                  estadisticas_distribucion, estadisticas_heatmap
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-9. [ALTO] Verificación de contraseña Nivel 2 en el cliente
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+──────────────────────────────────────────────────────────
+A-5. [NECESARIO] Credenciales por defecto hardcodeadas y registradas en log
+──────────────────────────────────────────────────────────
 ESTADO: PENDIENTE
+Archivo: server/main.py — startup lifespan (~línea 330-355)
 
 Descripción:
-  El hash SHA-256 de la contraseña Nivel 2 se envía al cliente y la
-  comparación se hace en JavaScript del navegador. Un atacante puede
-  capturar el hash desde las herramientas de desarrollo y crackearlo
-  offline con rainbow tables (SHA-256 sin sal es muy vulnerable).
+  Al arrancar, si no existen usuarios, el servidor crea:
+    superadmin / admin123
+    admin / admin123
+  Y los registra en los logs del servidor visibles a cualquiera con acceso
+  al terminal. El PIN del kiosco también tiene valor por defecto "UNASAM2025".
 
 Impacto:
-  - Obtener contraseña de superadmin offline sin límite de intentos
-  - Acceso a funciones críticas (limpiar BD, gestionar usuarios)
+  - Si el admin no cambia las contraseñas, el sistema queda expuesto
+  - Los logs revelan las credenciales en texto plano
 
 Cómo arreglarlo:
-  - Mover la verificación al servidor: POST /api/auth/nivel2-verify
-  - El servidor compara con bcrypt, no SHA-256
-  - El cliente solo recibe "ok" o "error"
-
-Archivos afectados: server/main.py, admin/static/js/app.js
+  - Forzar cambio de contraseña en el primer inicio de sesión
+  - No registrar contraseñas en los logs (ni cifradas ni en claro)
+  - Exigir que las contraseñas iniciales vengan del .env
 
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-10. [ALTO] Credenciales de BD expuestas en línea de comando (mysqldump)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+──────────────────────────────────────────────────────────
+A-6. [NECESARIO] Credenciales de BD expuestas en línea de comando (mysqldump)
+──────────────────────────────────────────────────────────
 ESTADO: PENDIENTE
+Archivo: server/api/endpoints.py — función backup_sql
 
 Descripción:
-  El endpoint /admin/backup-sql ejecuta mysqldump con usuario y contraseña
-  directamente en la línea de comando (--password=xxx), lo que las expone
-  en la lista de procesos del sistema (ps aux, tasklist).
+  mysqldump se ejecuta con --password=xxx directamente en la línea de comando,
+  lo que expone las credenciales en la lista de procesos del sistema (ps, tasklist).
 
 Impacto:
-  - Credenciales de BD visibles para cualquier usuario del sistema
-  - Aparecen en logs del sistema operativo
+  - Credenciales de base de datos visibles para otros procesos/usuarios del sistema
+  - Quedan registradas en logs del sistema operativo
 
 Cómo arreglarlo:
-  - Usar archivo de opciones MySQL (~/.my.cnf) con permisos 600
-  - O usar variable de entorno MYSQL_PWD (aunque también tiene riesgos)
-
-Archivo afectado: server/api/endpoints.py — backup_sql
+  - Usar archivo ~/.my.cnf con permisos 600 (solo lectura del propietario)
+  - O pasar la contraseña por stdin en lugar de argumento de línea de comando
 
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-11. [MEDIO] Sin rate limiting en WebSocket de terminal
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+──────────────────────────────────────────────────────────
+A-7. [NECESARIO] Endpoint de backup SQL accesible a cualquier admin (no solo superadmin)
+──────────────────────────────────────────────────────────
 ESTADO: PENDIENTE
+Archivo: server/api/endpoints.py — función backup_sql
 
 Descripción:
-  El WebSocket de terminal acepta intentos de login sin límite de velocidad
-  a nivel de conexión. Aunque hay bloqueo por intentos fallidos en la terminal,
-  un atacante puede abrir múltiples conexiones WebSocket y probar DNIs en paralelo.
+  El endpoint /admin/backup-sql requiere login pero no verifica que sea superadmin.
+  Un usuario con rol 'admin' (nivel básico) puede exportar toda la base de datos.
 
 Impacto:
-  - Enumeración masiva de DNIs válidos
-  - Posible bypass del bloqueo por terminal abriendo nuevas conexiones
+  - Exportar todos los datos de alumnos, sesiones e incidencias
+  - Violación de privacidad y cumplimiento normativo
+
+Cómo arreglarlo:
+  - Agregar: if admin.rol != "superadmin": raise HTTPException(403)
+
+
+──────────────────────────────────────────────────────────
+A-8. [NECESARIO] Token JWT pasado como parámetro en la URL del WebSocket
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (parcialmente mitigado por red local)
+Archivo: admin/static/js/app.js — conexión wsAdmin
+
+Descripción:
+  El token JWT se pasa como query param en la URL:
+    ws://host/ws/admin?token=eyJ...
+  Queda registrado en logs del servidor, proxies y historial del navegador.
+
+Impacto:
+  - Token expuesto en cualquier proxy, load balancer o log de acceso
+  - Permite robo de sesión si alguien accede a los logs
+
+Cómo arreglarlo:
+  - Enviar el token en el primer mensaje WebSocket (tipo "auth") en lugar de la URL
+  - El servidor rechaza mensajes hasta recibir el auth inicial
+
+
+═══════════════════════════════════════════════════════════
+  CATEGORÍA B — MEDIO (resolver en la siguiente iteración)
+═══════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────
+B-1. [MEDIO] Verificación de contraseña Nivel 2 se hace en el cliente
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (feature removida, pero hash SHA-256 aún existe en código)
+Archivo: server/main.py, admin/static/js/app.js
+
+Descripción:
+  El hash SHA-256 de la contraseña se enviaba al cliente para compararlo
+  en JavaScript. SHA-256 sin sal es vulnerable a rainbow tables.
+  Aunque el modal fue eliminado, el endpoint /api/config/nivel2-hash
+  aún existe y devuelve el hash.
+
+Impacto:
+  - Si el endpoint es alcanzado, el hash puede crackearse offline en segundos
+    con contraseñas comunes usando herramientas como hashcat
+
+Cómo arreglarlo:
+  - Eliminar el endpoint /api/config/nivel2-hash o restringirlo a superadmin
+  - Si se reutiliza, mover la verificación al servidor con bcrypt
+
+
+──────────────────────────────────────────────────────────
+B-2. [MEDIO] Mensajes de actividad WebSocket sin validar origen
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (se resuelve al corregir A-1)
+Archivo: server/main.py — handler tipo "actividad"
+
+Descripción:
+  Un cliente malicioso en la red puede conectarse al WebSocket de terminal
+  y enviar mensajes de actividad falsos asociados a alumnos reales.
+
+Impacto:
+  - Inyectar logs de actividad falsos y generar sospechas falsas
+  - Contaminar el historial de actividad del sistema
+
+Cómo arreglarlo:
+  - Al resolver A-1 (auth en WebSocket), este queda mitigado
+  - Validar adicionalmente que la terminal esté registrada en BD al conectar
+
+
+──────────────────────────────────────────────────────────
+B-3. [MEDIO] Sin rate limiting en WebSocket de terminal (enumeración de DNIs)
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/main.py — handler login_request
+
+Descripción:
+  Hay bloqueo por intentos fallidos por terminal, pero un atacante puede
+  abrir múltiples conexiones WebSocket simultáneas desde distintas IPs
+  y probar DNIs en paralelo sin límite de velocidad global.
+
+Impacto:
+  - Enumeración masiva de DNIs válidos en la base de datos
+  - Bypass del bloqueo por terminal
 
 Cómo arreglarlo:
   - Rate limiting por IP: máximo N login_request por minuto por IP
-  - Cerrar conexión WebSocket tras X intentos fallidos consecutivos
-
-Archivo afectado: server/main.py — handler login_request
+  - Cerrar la conexión WebSocket tras X intentos fallidos
 
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RESUMEN ACTUALIZADO (22/05/2026)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+──────────────────────────────────────────────────────────
+B-4. [MEDIO] Sin encabezados de seguridad HTTP en el panel admin
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/main.py (respuesta HTTP general)
 
-  Crítico (pendiente)        : 2  — WebSocket admin sin auth (#1), JWT débil (#7)
-  Alto    (pendiente)        : 3  — Raw SQL (#8), Nivel2 en cliente (#9), mysqldump (#10)
-  Medio   (CORREGIDO)        : 3  — Export/hash Nivel2 (#2,#3) + PC desconectada (#5) ✓
-  Medio   (pendiente)        : 2  — Logs actividad falsos (#6), Rate limiting WS (#11)
-  Bajo    (mitigar opcional) : 1  — Endpoints públicos kiosco (#4)
+Descripción:
+  Las respuestas del servidor no incluyen:
+    - Content-Security-Policy (CSP)
+    - X-Frame-Options
+    - X-Content-Type-Options
+    - Strict-Transport-Security (HSTS)
 
-  Total vulnerabilidades     : 11
-  Corregidas                 :  3
-  Pendientes                 :  8
+Impacto:
+  - Clickjacking (X-Frame-Options ausente)
+  - MIME sniffing (X-Content-Type-Options ausente)
+  - Sin HSTS no se fuerza HTTPS aunque esté disponible
 
-ORDEN DE PRIORIDAD PARA RESOLVER:
-  1. #7  — JWT SECRET_KEY (fácil, 5 minutos)
-  2. #1  — WebSocket admin sin auth (moderado)
-  3. #9  — Nivel2 verificación en cliente (moderado)
-  4. #8  — Raw SQL en estadísticas (moderado)
-  5. #10 — mysqldump con credenciales (fácil)
-  6. #11 — Rate limiting WebSocket (moderado)
-  6. #6  — Logs actividad falsos (resuelto al arreglar #1)
-  7. #4  — Endpoints públicos kiosco (bajo riesgo en red local)
+Cómo arreglarlo:
+  - Agregar middleware en FastAPI que inyecte estos headers en todas las respuestas
+  - Mínimo: X-Frame-Options: DENY y X-Content-Type-Options: nosniff
 
-PENDIENTE DE PRUEBA EN RED REAL:
-  - Confirmar escritura via ws/admin sin auth (#1)
-  - Confirmar inyección de actividad falsa (#6)
+
+──────────────────────────────────────────────────────────
+B-5. [MEDIO] Mensajes de error verbosos exponen detalles del sistema
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/api/endpoints.py — backup_sql (~línea 748) e import Excel (~línea 1347)
+
+Descripción:
+  Varios endpoints devuelven la excepción interna completa al cliente:
+    detail=f"mysqldump falló: {stderr.decode()[:300]}"
+    detail=f"Archivo Excel inválido: {e}"
+
+Impacto:
+  - Revela estructura interna del sistema, comandos usados y rutas
+  - Información útil para un atacante que busca explotar el sistema
+
+Cómo arreglarlo:
+  - Registrar el error completo solo en logs del servidor
+  - Devolver al cliente solo un mensaje genérico: "Error al procesar. Ver logs."
+
+
+──────────────────────────────────────────────────────────
+B-6. [MEDIO] Sin CSRF protection en operaciones críticas
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (mitigado parcialmente porque el JWT no está en cookies)
+Archivo: admin/static/js/app.js, server/api/endpoints.py
+
+Descripción:
+  Las peticiones POST/PUT/DELETE usan el JWT en el header Authorization,
+  lo que previene CSRF básico. Sin embargo, no hay token CSRF explícito.
+  Si algún endpoint en el futuro usa cookies para auth, queda vulnerable.
+
+Impacto:
+  - Bajo riesgo con la implementación actual (JWT en header)
+  - Riesgo alto si se migra a cookies sin protección CSRF
+
+Cómo arreglarlo:
+  - Mantener el JWT en memoria/header (no en cookies) como está actualmente
+  - Documentar este requisito para no romperlo en futuras versiones
+
+
+──────────────────────────────────────────────────────────
+B-7. [MEDIO] Token JWT con expiración larga (8 horas) sin revocación
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/auth_service.py — ACCESS_TOKEN_EXPIRE_MINUTES = 480
+
+Descripción:
+  Los tokens duran 8 horas y no hay mecanismo de revocación.
+  Si un token es robado, el atacante tiene acceso durante toda la sesión.
+  Al hacer logout, el token sigue siendo válido técnicamente.
+
+Impacto:
+  - Token robado permite acceso por hasta 8 horas sin posibilidad de bloquearlo
+
+Cómo arreglarlo:
+  - Reducir expiración a 2-4 horas
+  - Implementar blacklist de tokens en BD (tabla token_revocado)
+  - O usar refresh tokens de corta vida
+
+
+──────────────────────────────────────────────────────────
+B-8. [MEDIO] PII de alumnos registrada en logs del servidor
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/main.py — múltiples líneas de logger.info()
+
+Descripción:
+  Nombres completos y DNIs de alumnos se registran en los logs del servidor
+  en texto plano. Estos logs pueden ser accedidos por cualquier persona con
+  acceso al servidor.
+
+Impacto:
+  - Exposición de datos personales (riesgo de cumplimiento normativo)
+  - Si los logs se comparten o filtran, viola privacidad de los alumnos
+
+Cómo arreglarlo:
+  - Enmascarar DNI en logs: mostrar solo últimos 4 dígitos (****1234)
+  - Enmascarar nombres: mostrar solo iniciales (J.C.P.)
+  - Separar logs de auditoría (con PII) de logs operativos
+
+
+──────────────────────────────────────────────────────────
+B-9. [MEDIO] Contraseñas sin requisitos de complejidad
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/main.py — endpoint PUT /api/config/usuario (~línea 460)
+
+Descripción:
+  Solo se valida longitud mínima de 6 caracteres.
+  No se exigen mayúsculas, números ni caracteres especiales.
+  La contraseña por defecto "admin123" cumple este requisito.
+
+Impacto:
+  - Contraseñas débiles fáciles de adivinar o atacar por fuerza bruta
+
+Cómo arreglarlo:
+  - Exigir mínimo 8 caracteres, al menos 1 mayúscula y 1 número
+  - Agregar validación tanto en backend como en el formulario del admin
+
+
+──────────────────────────────────────────────────────────
+B-10. [MEDIO] PC queda desbloqueada al perder conexión con servidor
+──────────────────────────────────────────────────────────
+ESTADO: CORREGIDO (22/05/2026)
+Archivos: client/UI/MainWindow.xaml.cs, client/UI/VentanaDesconexion.xaml
+
+Descripción (resuelta):
+  Al detectar desconexión con sesión activa, se muestra ventana flotante
+  con cuenta regresiva de 3 minutos. Si no reconecta, la PC se bloquea.
+
+
+──────────────────────────────────────────────────────────
+B-11. [MEDIO] Exportar Excel/PDF sin verificar rol superadmin
+──────────────────────────────────────────────────────────
+ESTADO: CORREGIDO (14/05/2026)
+Archivo: server/api/endpoints.py
+
+Descripción (resuelta):
+  Se agregó verificación de rol en los endpoints de exportación.
+
+
+══════════════════════════════════════════════════════════
+  CATEGORÍA C — BAJO (mitigar cuando sea posible)
+══════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────
+C-1. [BAJO] Endpoints públicos del kiosco permiten enumeración de datos
+──────────────────────────────────────────────────────────
+ESTADO: DISEÑO INTENCIONAL, riesgo menor
+Archivo: server/api/endpoints.py
+
+Descripción:
+  Los endpoints del kiosco (validar alumno, iniciar/cerrar sesión, check ban)
+  son públicos por diseño. Permiten verificar si un DNI existe en la BD.
+
+Impacto (bajo en red local):
+  - Desde internet: NO alcanzable (servidor en red local)
+  - Desde el WiFi de la biblioteca: posible enumeración de DNIs
+
+Cómo mitigar (sin romper el kiosco):
+  - Rate limiting: máx N intentos por IP por minuto
+  - Whitelist de IPs de las PCs del laboratorio
+
+
+──────────────────────────────────────────────────────────
+C-2. [BAJO] IP del servidor expuesta en endpoint /api/server-info
+──────────────────────────────────────────────────────────
+ESTADO: DISEÑO INTENCIONAL
+Archivo: server/main.py — endpoint /api/server-info
+
+Descripción:
+  Devuelve la IP local del servidor sin autenticación. Necesario para que
+  los clientes descubran el servidor, pero es información útil para atacantes.
+
+Impacto:
+  - Facilita mapeo de la infraestructura de red
+
+Cómo mitigar:
+  - Requerir autenticación para el endpoint
+  - O usar broadcast UDP local para descubrimiento en lugar de HTTP
+
+
+──────────────────────────────────────────────────────────
+C-3. [BAJO] Sin límite de tamaño en la importación de Excel
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/api/endpoints.py — endpoint de importación Excel
+
+Descripción:
+  El endpoint que importa alumnos desde Excel no tiene límite de tamaño
+  de archivo. Un archivo muy grande puede agotar memoria y disco.
+
+Impacto:
+  - Denegación de servicio por agotamiento de recursos del servidor
+
+Cómo arreglarlo:
+  - Agregar validación: if file.size > MAX_SIZE: raise HTTPException(413)
+  - Configurar limite en uvicorn/nginx (max_request_body_size)
+
+
+──────────────────────────────────────────────────────────
+C-4. [BAJO] Timeout de 60s en WebSocket puede acumular conexiones zombie
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/main.py — WebSocket terminal, timeout=60.0
+
+Descripción:
+  Las terminales que cierran la conexión abruptamente (corte de luz, etc.)
+  ocupan recursos durante 60 segundos antes de ser detectadas.
+  Con muchas terminales conectadas y fallos frecuentes puede haber acumulación.
+
+Impacto:
+  - Uso innecesario de memoria y conexiones de BD
+  - En escenarios de muchas PCs podría degradar el rendimiento
+
+Cómo mitigar:
+  - Mantener el heartbeat cada 3s (ya implementado en el cliente)
+  - Reducir timeout a 15-20s para detectar desconexiones más rápido
+
+
+──────────────────────────────────────────────────────────
+C-5. [BAJO] Hash SHA-256 para nivel 2 sin sal (legado)
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (feature removida pero endpoint aún existe)
+Archivo: server/main.py — /api/config/nivel2-hash
+
+Descripción:
+  El endpoint legado devuelve SHA-256 sin sal. SHA-256 sin sal es
+  completamente vulnerable a rainbow tables con contraseñas comunes.
+
+Impacto bajo porque:
+  - El modal de nivel 2 fue eliminado de la interfaz
+  - El endpoint requiere autenticación de superadmin
+
+Cómo arreglarlo:
+  - Eliminar el endpoint completamente ya que la feature fue removida
+
+
+──────────────────────────────────────────────────────────
+C-6. [BAJO] Sin auditoría de cambios de configuración
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/main.py, server/api/endpoints.py
+
+Descripción:
+  Los cambios de credenciales, configuración de backdoor y mensajes
+  programados no quedan registrados con la identidad de quien los realizó.
+
+Impacto:
+  - Sin trazabilidad de quién cambió qué y cuándo
+  - Dificultad para detectar cambios no autorizados
+
+Cómo arreglarlo:
+  - Agregar log con username al realizar cambios importantes:
+    logger.warning(f"[AUDIT] {admin.username} cambió contraseña de {datos.rol_objetivo}")
+
+
+──────────────────────────────────────────────────────────
+C-7. [BAJO] Datos de alumnos en memoria sin cifrar durante sesión del cliente
+──────────────────────────────────────────────────────────
+ESTADO: DISEÑO INTENCIONAL, riesgo muy bajo en contexto
+Archivo: client/UI/MainWindow.xaml.cs
+
+Descripción:
+  Los datos del alumno (nombre, apellidos, código) se almacenan en variables
+  de memoria del proceso WPF durante la sesión activa, sin cifrar.
+
+Impacto (muy bajo):
+  - En teoría, accesible por un proceso con privilegios en la misma PC
+  - En la práctica, la PC está en modo kiosco con acceso restringido
+
+Cómo mitigar:
+  - Limpiar variables al bloquear la PC (ya parcialmente implementado)
+  - Usar SecureString para datos sensibles si se requiere mayor seguridad
+
+
+──────────────────────────────────────────────────────────
+C-8. [BAJO] Comunicación sin HTTPS/WSS (red local)
+──────────────────────────────────────────────────────────
+ESTADO: DISEÑO INTENCIONAL para red local
+Archivo: admin/static/js/app.js, client/Services/WebSocketService.cs
+
+Descripción:
+  Todo el tráfico usa HTTP/WS sin cifrar. En red local esto tiene
+  impacto reducido, pero cualquiera en la red puede capturar tráfico.
+
+Impacto:
+  - Tokens JWT y datos de alumnos visibles en la red local
+  - Un alumno con Wireshark en el WiFi puede capturar sesiones
+
+Cómo arreglarlo (a largo plazo):
+  - Configurar certificado TLS autofirmado en el servidor
+  - Cambiar a HTTPS/WSS en producción
+
+
+═══════════════════════════════════════════════════════════
+  RESUMEN EJECUTIVO — 2026-06-02
+═══════════════════════════════════════════════════════════
+
+  NECESARIO  (pendiente)  : 7  — A-1 a A-8 (excepto corregidos)
+  MEDIO      (pendiente)  : 9  — B-1 a B-9
+  MEDIO      (CORREGIDO)  : 2  — B-10 (PC desconectada), B-11 (exportar)
+  BAJO       (pendiente)  : 8  — C-1 a C-8
+
+  Total identificadas     : 26
+  Corregidas              :  3  (B-10, B-11 + WS admin auth parcial)
+  Pendientes              : 23
+
+PRIORIDAD DE RESOLUCIÓN RECOMENDADA:
+  1. A-2 — SECRET_KEY segura en .env              (5 minutos, máximo impacto)
+  2. A-1 — Auth en WebSocket admin                (moderado, ya existe en código)
+  3. A-3 — Habilitar verificación SSL (SGA)       (5 minutos)
+  4. A-7 — Backup solo para superadmin            (5 minutos)
+  5. A-5 — No loguear contraseñas por defecto     (fácil)
+  6. A-6 — mysqldump sin credenciales en CLI       (moderado)
+  7. A-4 — Whitelist en SQL dinámico              (moderado, mucho impacto)
+  8. A-8 — Token JWT fuera de URL WebSocket       (moderado)
+  9. B-1 a B-9 — Mejoras de hardening en orden    (siguiente iteración)
+ 10. C-1 a C-8 — Mitigaciones de bajo riesgo      (cuando sea posible)

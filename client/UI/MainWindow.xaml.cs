@@ -82,7 +82,7 @@ namespace ControlBiblioteca.Client.UI
 
             _wsService = new Services.WebSocketService(wsUrl);
             _activityMonitor = new Services.ActivityMonitor(_wsService);
-            _wsService.InitialGreeting     = JsonSerializer.Serialize(new { tipo = "hello", hostname });
+            _wsService.InitialGreeting     = () => JsonSerializer.Serialize(new { tipo = "hello", hostname, desbloqueado = _desbloqueado });
             _wsService.OnMensajeRecibido  += ProcesarMensajeServidor;
             _wsService.OnConexionCambiada += conectado =>
             {
@@ -637,6 +637,16 @@ namespace ControlBiblioteca.Client.UI
                         }
                         break;
 
+                    case "mensaje_broadcast":
+                        try
+                        {
+                            string txtMsg = root.TryGetProperty("mensaje", out var mp) ? mp.GetString() ?? "" : "";
+                            if (!string.IsNullOrWhiteSpace(txtMsg))
+                                Dispatcher.Invoke(() => MostrarToastMensaje(txtMsg));
+                        }
+                        catch (Exception ex) { LogDebug($"ERROR mensaje_broadcast: {ex}"); }
+                        break;
+
                     case "remote_command":
                         try
                         {
@@ -868,10 +878,87 @@ namespace ControlBiblioteca.Client.UI
             FocoDNI();
         }
 
+        // ── Toast de mensaje programado ───────────────────────────────
+
+        private System.Windows.Threading.DispatcherTimer? _toastTimer;
+
+        private void MostrarToastMensaje(string texto)
+        {
+            var toast = new Window
+            {
+                WindowStyle       = WindowStyle.None,
+                AllowsTransparency = true,
+                Background        = System.Windows.Media.Brushes.Transparent,
+                Topmost           = true,
+                ShowInTaskbar     = false,
+                ResizeMode        = ResizeMode.NoResize,
+                SizeToContent     = SizeToContent.WidthAndHeight,
+            };
+
+            // Posición: esquina superior derecha, bajada al 35% de la pantalla
+            double screenW = SystemParameters.PrimaryScreenWidth;
+            double screenH = SystemParameters.PrimaryScreenHeight;
+
+            var border = new System.Windows.Controls.Border
+            {
+                Background    = new System.Windows.Media.SolidColorBrush(
+                                    System.Windows.Media.Color.FromArgb(230, 30, 30, 46)),
+                BorderBrush   = new System.Windows.Media.SolidColorBrush(
+                                    System.Windows.Media.Color.FromArgb(180, 99, 102, 241)),
+                BorderThickness = new Thickness(1),
+                CornerRadius  = new CornerRadius(14),
+                Padding       = new Thickness(20, 14, 20, 14),
+                MaxWidth      = 380,
+            };
+
+            var panel = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+            panel.Children.Add(new System.Windows.Controls.TextBlock
+            {
+                Text       = "🔔  ",
+                FontSize   = 18,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            panel.Children.Add(new System.Windows.Controls.TextBlock
+            {
+                Text         = texto,
+                Foreground   = System.Windows.Media.Brushes.White,
+                FontSize     = 14,
+                FontWeight   = FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth     = 300,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+
+            border.Child  = panel;
+            toast.Content = border;
+
+            toast.Loaded += (_, _) =>
+            {
+                toast.Left = screenW - toast.ActualWidth - 24;
+                toast.Top  = screenH * 0.32;
+            };
+
+            toast.Show();
+            LogDebug($"[Toast] {texto}");
+
+            _toastTimer?.Stop();
+            _toastTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(15)
+            };
+            _toastTimer.Tick += (_, _) =>
+            {
+                _toastTimer.Stop();
+                toast.Close();
+            };
+            _toastTimer.Start();
+        }
+
         protected override void OnClosed(EventArgs e)
         {
             _loginCts?.Cancel();
             _loginCts?.Dispose();
+            _toastTimer?.Stop();
             _wsService.Desconectar();
             base.OnClosed(e);
         }
