@@ -34,10 +34,10 @@ namespace ControlBiblioteca.Client.Services
         }
 
         /// <summary>
-        /// Mensaje JSON que se envía automáticamente tras cada conexión exitosa.
-        /// Usado para enviar el hello con hostname.
+        /// Función que devuelve el mensaje JSON a enviar tras cada conexión exitosa.
+        /// Se evalúa en cada reconexión para capturar el estado actual del cliente.
         /// </summary>
-        public string? InitialGreeting { get; set; }
+        public Func<string>? InitialGreeting { get; set; }
 
         /// <summary>
         /// Conectar al servidor WebSocket con reconexión automática.
@@ -60,8 +60,8 @@ namespace ControlBiblioteca.Client.Services
                     espera = RECONEXION_MIN; // resetear backoff al conectar
 
                     // Enviar saludo inicial con hostname si está configurado
-                    if (!string.IsNullOrEmpty(InitialGreeting))
-                        await EnviarAsync(InitialGreeting);
+                    if (InitialGreeting != null)
+                        await EnviarAsync(InitialGreeting());
 
                     _ = Task.Run(HeartbeatLoopAsync, _cts.Token);
                     await EscucharAsync();

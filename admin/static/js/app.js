@@ -110,7 +110,7 @@ let _fechaInicio = '';
 
 let _fechaFin    = '';
 
-const _SESIONES_LIMIT = 10;
+const _SESIONES_LIMIT = 15;
 
 let _sesionesOffset  = 0;
 
@@ -660,23 +660,21 @@ function ordenarPor(col) {
 
 function _actualizarFlechas() {
 
-    document.querySelectorAll('.th-sortable').forEach(th => {
+    document.querySelectorAll('.hist-sort-btn, .th-sortable').forEach(btn => {
 
-        const arrow = th.querySelector('.sort-arrow');
+        const arrow = btn.querySelector('.sort-arrow');
 
-        if (!arrow) return;
+        if (btn.dataset.col === _sortBy) {
 
-        if (th.dataset.col === _sortBy) {
+            if (arrow) arrow.textContent = _sortDir === 'asc' ? ' ▲' : ' ▼';
 
-            arrow.textContent = _sortDir === 'asc' ? ' ▲' : ' ▼';
-
-            th.style.color = '#1d4ed8';
+            btn.dataset.active = '1';
 
         } else {
 
-            arrow.textContent = '';
+            if (arrow) arrow.textContent = '';
 
-            th.style.color = '';
+            delete btn.dataset.active;
 
         }
 
@@ -947,13 +945,13 @@ function conectarWebSocket() {
 
         } else {
 
-            addLog('error', `WebSocket: demasiados intentos. Reintentos pausados. Puedes recargar la página manualmente.`);
-
-            return;
+            // Seguir reintentando cada 60s indefinidamente hasta que el servidor vuelva
+            _reconnectDelay = 60000;
+            addLog('error', `WebSocket: sin conexión. Reintentando cada 60s...`);
 
         }
 
-        
+
 
         _reconnectTimer = setTimeout(conectarWebSocket, _reconnectDelay);
 
@@ -1393,9 +1391,22 @@ async function ejecutarCierre(sesionId, motivo, silent) {
 
         if (res.ok) {
 
-            addLog('activity', `Sesión #${sesionId} cerrada OK`);
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+
+            if (data.ya_cerrada) {
+                addLog('activity', `Sesión #${sesionId} ya estaba cerrada`);
+            } else {
+                addLog('activity', `Sesión #${sesionId} cerrada OK`);
+            }
 
             if (!silent) cargarDashboard();
+
+        } else if (res.status === 404) {
+
+            // La sesión no existe (ej. fantasma cancelada) — no es un fallo real
+            // para el flujo de apagado; la PC igual recibirá el shutdown.
+            addLog('activity', `Sesión #${sesionId} no encontrada (probablemente ya finalizada)`);
 
         } else {
 
@@ -1421,7 +1432,7 @@ async function apagarPc(ip, sesionId = null, nombrePc = null, nombreAlumno = nul
 
     mostrarConfirmacion(`¿Confirmas el apagado de [${pcLabel}]?${alumnoLine}`, async () => {
 
-        addLog('activity', `⏻ Botón APAGAR PC: ${ip}`);
+        addLog('activity', `Botón APAGAR PC: ${ip}`);
 
         if (sesionId) {
 
@@ -1498,9 +1509,14 @@ function renderTerminales(terminales, sesiones = []) {
 
         } else if (!online) {
 
+            const btnEliminar = _rolServidor === 'superadmin'
+                ? `<button class="btn-card-eliminar-terminal" onclick="eliminarTerminalFantasma(${t.id}, '${pcNombre}')"><i class="ph ph-trash"></i> Eliminar</button>`
+                : '';
+
             botonesPrimarios = `
 
-                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')">⏻ Apagar PC</button>
+                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"<i class="ph ph-power"></i> Apagar PC</button>
+                ${btnEliminar}
 
             `;
 
@@ -1510,7 +1526,7 @@ function renderTerminales(terminales, sesiones = []) {
 
                 <button class="btn-card-desbloquear" onclick="mostrarModalDesbloqueo('${esc(t.ip)}', '${pcNombre}')"><i class="ph ph-lock-open"></i> Desbloquear</button>
 
-                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')">⏻ Apagar PC</button>
+                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"<i class="ph ph-power"></i> Apagar PC</button>
 
             `;
 
@@ -1520,7 +1536,7 @@ function renderTerminales(terminales, sesiones = []) {
 
                 <button class="btn-card-bloquear" onclick="bloquearTerminal('${esc(t.ip)}', '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-lock"></i> Bloquear</button>
 
-                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')">⏻ Apagar PC</button>
+                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"<i class="ph ph-power"></i> Apagar PC</button>
 
             `;
 
@@ -1579,8 +1595,6 @@ function renderSesiones(sesiones) {
 
     sinSesiones.style.display = 'none';
 
-    // Log de verificación de identidad del alumno
-
     sesiones.filter(s => s.activa).forEach(s =>
 
         addLog('activity', `[ID] ${s.alumno_nombre} | Código: ${s.alumno_codigo} | DNI: ${s.alumno_dni || s.dni || '—'}`)
@@ -1589,53 +1603,50 @@ function renderSesiones(sesiones) {
 
     body.innerHTML = sesiones.map(s => {
 
-        const inicio  = new Date(s.inicio).toLocaleTimeString('es-PE');
+        const inicio = new Date(s.inicio).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 
-        const salida  = s.hora_salida_fmt
-
+        const salidaRaw = s.hora_salida_fmt
             ? s.hora_salida_fmt
+            : (s.hora_salida ? new Date(s.hora_salida).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : null);
 
-            : (s.hora_salida
+        const duracionStr = s.activa
+            ? `<span class="hc-duration live">En curso</span>`
+            : `<span class="hc-duration">${esc(s.duracion_fmt || '—')}</span>`;
 
-                ? new Date(s.hora_salida).toLocaleTimeString('es-PE')
-
-                : '<span class="status-pill live"><span class="dot"></span>En curso</span>');
-
-        const fecha   = s.fecha_uso
-
-            ? new Date(s.fecha_uso + 'T00:00:00').toLocaleDateString('es-PE')
-
-            : new Date(s.inicio).toLocaleDateString('es-PE');
+        const horaRango = salidaRaw
+            ? `<span class="hc-time-range">${inicio} – ${salidaRaw}</span>`
+            : `<span class="hc-time-range">${inicio} – Actualidad</span>`;
 
         const estadoBadge = s.activa
+            ? `<span class="hc-badge live"><span class="dot"></span>ACTIVA</span>`
+            : `<span class="hc-badge closed">COMPLETADA</span>`;
 
-            ? '<span class="status-pill live"><span class="dot"></span>Activa</span>'
-
-            : '<span class="status-pill closed"><span class="dot"></span>Cerrada</span>';
+        const fecha = s.fecha_uso
+            ? new Date(s.fecha_uso + 'T00:00:00').toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+            : new Date(s.inicio).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
         return `
-
-        <tr>
-
-            <td><span class="cell-pc">${esc(s.terminal_nombre || '—')}</span></td>
-
-            <td>${esc(s.alumno_nombre)}</td>
-
-            <td><code>${esc(s.alumno_dni || s.dni || '—')}</code></td>
-
-            <td style="font-size:12px">${esc(s.facultad || '—')}</td>
-
-            <td style="font-size:12px">${esc(s.razon_uso || '—')}</td>
-
-            <td><span class="cell-time">${inicio}</span></td>
-
-            <td><span class="cell-time-out">${salida}</span></td>
-
-            <td><span class="cell-time">${fecha}</span></td>
-
-            <td>${estadoBadge}</td>
-
-        </tr>`;
+        <div class="hc-row${s.activa ? ' hc-row--active' : ''}">
+            <div class="hc-left">
+                <span class="hc-date"><i class="ph ph-calendar-blank"></i> ${fecha}</span>
+                <span class="hc-pc">${esc(s.terminal_nombre || '—')}</span>
+            </div>
+            <div class="hc-center">
+                <span class="hc-name">${esc(s.alumno_nombre)}</span>
+                <div class="hc-meta">
+                    <code class="hc-dni">${esc(s.alumno_dni || s.dni || '—')}</code>
+                    <span class="hc-sep">•</span>
+                    <span>${esc(s.facultad || '—')}</span>
+                    <span class="hc-sep">•</span>
+                    <span class="hc-activity">${esc(s.razon_uso || '—')}</span>
+                </div>
+            </div>
+            <div class="hc-right">
+                ${duracionStr}
+                ${horaRango}
+                ${estadoBadge}
+            </div>
+        </div>`;
 
     }).join('');
 
@@ -3336,7 +3347,7 @@ function _handleSospecha(msg) {
         badge.style.display = '';
     }
     addLog('warn', msg.mensaje || 'Nueva sospecha detectada');
-    mostrarNotificacion('⚠ Nueva sospecha detectada — revisa la pestaña Sospechas', 'warning');
+    mostrarNotificacion('Nueva sospecha detectada — revisa la pestaña Sospechas', 'warning');
 }
 
 // ── historial: filtro mes/año ────────────────────────────────────────
@@ -3377,6 +3388,7 @@ function _poblarAnios() {
 let _actOffset   = 0;
 const _ACT_LIMIT = 50;
 let _actTotal    = 0;
+let _actVerIgnorados = false;   // mostrar también procesos ocultados
 
 async function cargarActividad(resetPagina = true) {
     if (resetPagina) _actOffset = 0;
@@ -3391,6 +3403,7 @@ async function cargarActividad(resetPagina = true) {
     if (terminal) params.set('terminal', terminal);
     if (nivel)    params.set('nivel',    nivel);
     if (fecha)    params.set('fecha',    fecha);
+    if (_actVerIgnorados) params.set('incluir_ignorados', 'true');
 
     const tbody = document.getElementById('act-tabla-body');
     if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="act-empty-msg">Cargando…</td></tr>';
@@ -3428,6 +3441,15 @@ function _actRenderTabla(items) {
         const detalle  = r.detalle ? `<div class="act-detalle" title="${escapeHtml(r.detalle)}">${escapeHtml(r.detalle)}</div>` : '';
         const rowCls   = isCrit ? 'act-row act-row-crit' : 'act-row';
 
+        // Botón "Ignorar": solo en eventos normales con proceso_exe conocido.
+        // Marca ese ejecutable como ruido para que no se vuelva a registrar.
+        const btnIgnorar = (!isCrit && r.proceso_exe)
+            ? `<button class="act-btn-ignorar" title="No registrar más este proceso"
+                 onclick="ignorarProceso('${escapeHtml(r.proceso_exe)}')">
+                 <i class="ph ph-eye-slash"></i> Ignorar
+               </button>`
+            : '';
+
         return `<tr class="${rowCls}">
             <td class="act-cell-time">${hora}</td>
             <td class="act-cell-ico">
@@ -3442,6 +3464,7 @@ function _actRenderTabla(items) {
                 ${tipoBadge}
                 <div class="${descCls}">${escapeHtml(r.descripcion || '—')}</div>
                 ${detalle}
+                ${btnIgnorar}
             </td>
         </tr>`;
     }).join('');
@@ -3484,12 +3507,89 @@ function actLimpiarFiltros() {
     });
     const nivel = document.getElementById('act-filtro-nivel');
     if (nivel) nivel.value = '';
+    _actVerIgnorados = false;          // volver a vista limpia
+    _actSyncToggleIgnorados();
     _actOffset = 0;
     cargarActividad();
 }
 
+// ── Procesos ignorados ──────────────────────────────────────────────
+
+async function ignorarProceso(nombreExe) {
+    if (!nombreExe) return;
+    if (!confirm(`¿Dejar de registrar el proceso "${nombreExe}"?\n\nNo aparecerá más en el flujo de actividad de ninguna PC. Podrás revertirlo desde "Procesos ignorados".`)) return;
+    try {
+        const res = await fetch(`${API_BASE}/admin/procesos-ignorados`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nombre_exe: nombreExe }),
+        });
+        if (res.ok) {
+            addLog('activity', `Proceso "${nombreExe}" agregado a ignorados`);
+            cargarActividad(false);
+        } else {
+            addLog('error', `No se pudo ignorar "${nombreExe}": HTTP ${res.status}`);
+        }
+    } catch (e) {
+        addLog('error', `Error de red al ignorar proceso: ${e.message}`);
+    }
+}
+
+async function abrirProcesosIgnorados() {
+    const cont = document.getElementById('procesos-ignorados-lista');
+    const modal = document.getElementById('modal-procesos-ignorados');
+    if (!modal || !cont) return;
+    modal.style.display = 'flex';
+    cont.innerHTML = '<p class="empty-msg">Cargando…</p>';
+    try {
+        const res = await fetch(`${API_BASE}/admin/procesos-ignorados`, { headers: authHeaders() });
+        const data = await res.json();
+        const items = data.items || [];
+        if (!items.length) {
+            cont.innerHTML = '<p class="empty-msg">No hay procesos ignorados</p>';
+            return;
+        }
+        cont.innerHTML = items.map(p => `
+            <div class="proc-ign-row">
+                <code class="proc-ign-exe">${escapeHtml(p.nombre_exe)}</code>
+                <span class="proc-ign-meta">${escapeHtml(p.agregado_por || '—')}</span>
+                <button class="proc-ign-quitar" onclick="quitarProcesoIgnorado(${p.id}, '${escapeHtml(p.nombre_exe)}')">
+                    <i class="ph ph-trash"></i> Quitar
+                </button>
+            </div>`).join('');
+    } catch (e) {
+        cont.innerHTML = '<p class="empty-msg" style="color:var(--err)">Error al cargar</p>';
+    }
+}
+
+function cerrarProcesosIgnorados() {
+    const modal = document.getElementById('modal-procesos-ignorados');
+    if (modal) modal.style.display = 'none';
+}
+
+async function quitarProcesoIgnorado(id, nombre) {
+    if (!confirm(`¿Quitar "${nombre}" de ignorados? Volverá a registrarse.`)) return;
+    try {
+        const res = await fetch(`${API_BASE}/admin/procesos-ignorados/${id}`, {
+            method: 'DELETE', headers: authHeaders(),
+        });
+        if (res.ok) {
+            addLog('activity', `Proceso "${nombre}" quitado de ignorados`);
+            abrirProcesosIgnorados();
+        } else {
+            addLog('error', `No se pudo quitar: HTTP ${res.status}`);
+        }
+    } catch (e) {
+        addLog('error', `Error de red: ${e.message}`);
+    }
+}
+
 function actVerDesdeSospecha(pc, dni, fecha) {
     switchTab('actividad');
+    // Al investigar una sospecha, mostrar TODO el contexto del alumno,
+    // incluidos los procesos normalmente ocultados.
+    _actVerIgnorados = true;
+    _actSyncToggleIgnorados();
     setTimeout(() => {
         const filtroDni      = document.getElementById('act-filtro-dni');
         const filtroTerminal = document.getElementById('act-filtro-terminal');
@@ -3504,6 +3604,23 @@ function actVerDesdeSospecha(pc, dni, fecha) {
         }
         cargarActividad();
     }, 150);
+}
+
+// Alterna entre vista limpia (ignorados ocultos) y vista completa.
+function actToggleIgnorados() {
+    _actVerIgnorados = !_actVerIgnorados;
+    _actSyncToggleIgnorados();
+    _actOffset = 0;
+    cargarActividad();
+}
+
+function _actSyncToggleIgnorados() {
+    const btn = document.getElementById('act-toggle-ignorados');
+    if (!btn) return;
+    btn.classList.toggle('act-toggle-on', _actVerIgnorados);
+    btn.innerHTML = _actVerIgnorados
+        ? '<i class="ph ph-eye"></i> Viendo todo'
+        : '<i class="ph ph-eye-slash"></i> Ver ignorados';
 }
 
 async function _actActualizarBadge() {
@@ -3710,4 +3827,137 @@ async function guardarConfigBackdoor() {
     } catch (e) {
         setStatus('Error de conexión.', 'text-red-500');
     }
+}
+
+
+// ── Mensajes Programados ──────────────────────────────────────────
+
+async function cargarMensajes() {
+    try {
+        const res  = await fetch(`${API_BASE}/mensajes`, { headers: authHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Cierre diario
+        const cierre = data.find(m => m.tipo === 'cierre');
+        if (cierre) {
+            const h = document.getElementById('msg-cierre-hora');
+            const t = document.getElementById('msg-cierre-texto');
+            const a = document.getElementById('msg-cierre-activo');
+            if (h) h.value = cierre.hora_envio;
+            if (t) t.value = cierre.mensaje;
+            if (a) a.checked = cierre.activo;
+        }
+
+        // Extras pendientes (no enviados)
+        const extras = data.filter(m => m.tipo === 'extra' && !m.enviado);
+        _renderMensajesExtra(extras);
+    } catch (e) { /* silencioso */ }
+}
+
+function _renderMensajesExtra(lista) {
+    const contenedor = document.getElementById('msg-extra-lista');
+    if (!contenedor) return;
+    if (!lista.length) {
+        contenedor.innerHTML = '<p class="text-xs text-zinc-400 dark:text-zinc-500 text-center py-2">Sin mensajes pendientes</p>';
+        return;
+    }
+    contenedor.innerHTML = lista.map(m => `
+        <div class="flex items-center gap-3 bg-zinc-50 dark:bg-zinc-800 rounded-xl px-4 py-2.5 border border-zinc-200 dark:border-zinc-700">
+            <div class="flex-1 min-w-0">
+                <p class="text-xs font-semibold text-zinc-700 dark:text-zinc-200 truncate">${esc(m.mensaje)}</p>
+                <p class="text-xs text-zinc-400">${m.fecha_envio || 'hoy'} · ${m.hora_envio}</p>
+            </div>
+            <button onclick="eliminarMensaje(${m.id})" title="Eliminar" class="tbl-btn tbl-btn-ban flex-shrink-0">
+                <i class="ph ph-trash"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+async function guardarMensajeCierre() {
+    const hora  = (document.getElementById('msg-cierre-hora')?.value  || '').trim();
+    const texto = (document.getElementById('msg-cierre-texto')?.value || '').trim();
+    const activo = document.getElementById('msg-cierre-activo')?.checked ?? true;
+    const status = document.getElementById('msg-cierre-status');
+    const setS   = (msg, cls) => { if (status) { status.textContent = msg; status.className = `text-xs min-h-4 ${cls}`; } };
+
+    if (!hora || !texto) { setS('Completa la hora y el mensaje.', 'text-red-500'); return; }
+
+    try {
+        const res = await fetch(`${API_BASE}/mensajes`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mensaje: texto, hora_envio: hora, tipo: 'cierre' }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setS(data.detail || 'Error al guardar.', 'text-red-500'); return; }
+
+        // Si el usuario desactivó el toggle, hacer toggle en el backend
+        if (!activo) {
+            const id = data.id;
+            if (id) await fetch(`${API_BASE}/mensajes/${id}/toggle`, { method: 'PUT', headers: authHeaders() });
+        }
+
+        setS('✓ Guardado', 'text-emerald-500');
+        setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+        await cargarMensajes();
+    } catch (e) { setS('Error de conexión.', 'text-red-500'); }
+}
+
+async function agregarMensajeExtra() {
+    const fecha = (document.getElementById('msg-extra-fecha')?.value || '').trim();
+    const hora  = (document.getElementById('msg-extra-hora')?.value  || '').trim();
+    const texto = (document.getElementById('msg-extra-texto')?.value || '').trim();
+    const status = document.getElementById('msg-extra-status');
+    const setS   = (msg, cls) => { if (status) { status.textContent = msg; status.className = `text-xs min-h-4 ${cls}`; } };
+
+    if (!hora || !texto) { setS('Completa la hora y el mensaje.', 'text-red-500'); return; }
+
+    try {
+        const res = await fetch(`${API_BASE}/mensajes`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mensaje: texto, hora_envio: hora, tipo: 'extra', fecha_envio: fecha }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setS(data.detail || 'Error al agregar.', 'text-red-500'); return; }
+
+        setS('✓ Agregado', 'text-emerald-500');
+        setTimeout(() => { if (status) status.textContent = ''; }, 2000);
+        const fEl = document.getElementById('msg-extra-fecha');
+        const hEl = document.getElementById('msg-extra-hora');
+        const tEl = document.getElementById('msg-extra-texto');
+        if (fEl) fEl.value = '';
+        if (hEl) hEl.value = '';
+        if (tEl) tEl.value = '';
+        await cargarMensajes();
+    } catch (e) { setS('Error de conexión.', 'text-red-500'); }
+}
+
+// ── Eliminar terminal fantasma ─────────────────────────────────────
+async function eliminarTerminalFantasma(terminalId, nombre) {
+    if (!confirm(`¿Eliminar la terminal "${nombre}" de la base de datos?\n\nEsto es irreversible. Solo hazlo si la PC ya no existe en la red.`)) return;
+    try {
+        const res = await fetch(`${API_BASE}/terminales/${terminalId}`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (res.ok) {
+            addLog('activity', `Terminal fantasma "${nombre}" eliminada de la DB`);
+            await cargarDashboard();
+        } else {
+            const err = await res.json().catch(() => ({}));
+            addLog('error', `Error al eliminar terminal: ${err.detail || res.status}`);
+        }
+    } catch (e) {
+        addLog('error', `Error de red al eliminar terminal: ${e.message}`);
+    }
+}
+
+async function eliminarMensaje(id) {
+    try {
+        await fetch(`${API_BASE}/mensajes/${id}`, { method: 'DELETE', headers: authHeaders() });
+        await cargarMensajes();
+    } catch (e) { /* silencioso */ }
 }

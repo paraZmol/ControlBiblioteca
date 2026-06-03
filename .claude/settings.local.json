@@ -71,7 +71,21 @@
       "Bash(powershell -Command \"\\(Get-Content style.css -Raw\\) -replace 'oklch\\\\\\(0\\\\.75 0\\\\.14 200\\\\\\)', 'oklch\\(0.70 0.22 260\\)' -replace 'oklch\\\\\\(0\\\\.45 0\\\\.16 200\\\\\\)', 'oklch\\(0.45 0.22 260\\)' | Set-Content style.css -Encoding utf8; Write-Host 'done'\")",
       "Bash(powershell -Command \"Select-String -Path style.css -Pattern 'oklch.*200' | Select-Object LineNumber, Line\")",
       "Bash(powershell -Command \"\\(Get-Content style.css -Raw\\) -replace 'oklch\\\\\\(0\\\\.67 0\\\\.16 200 / 0\\\\.4\\\\\\)', 'oklch\\(0.62 0.22 260 / 0.4\\)' -replace 'oklch\\\\\\(0\\\\.55 0\\\\.16 200 / 0\\\\.10\\\\\\)', 'oklch\\(0.52 0.22 260 / 0.10\\)' -replace 'oklch\\\\\\(0\\\\.55 0\\\\.16 200 / 0\\\\.25\\\\\\)', 'oklch\\(0.52 0.22 260 / 0.25\\)' | Set-Content style.css -Encoding utf8; Write-Host 'done'\")",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(Get-Content \"c:\\\\Users\\\\nunes\\\\StudioProjects\\\\control\\\\admin\\\\static\\\\js\\\\app.js\")",
+      "Bash(Measure-Object -Line)",
+      "Bash(./mysql.exe -u root -e \"SELECT COUNT\\(*\\) AS total_logs FROM actividad_logs; SELECT id, nombre_terminal, nombre_alumno, tipo, nivel, fecha_hora FROM actividad_logs ORDER BY fecha_hora DESC LIMIT 10;\" control_biblioteca)",
+      "Bash(./mysql.exe -u root -pimpo2010 -e \"SELECT COUNT\\(*\\) AS total FROM actividad_logs;\" biblioteca_unasam)",
+      "Bash(.venv/Scripts/python.exe /c/tmp/diag_act.py)",
+      "Bash(.venv/Scripts/python.exe diag_act.py)",
+      "Bash(.venv/Scripts/python.exe diag_act2.py)",
+      "Bash(.venv/Scripts/python.exe diag_act3.py)",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('Sintaxis OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('models.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('Sintaxis OK en los 3 archivos'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; [ast.parse\\(open\\(f,encoding='utf-8'\\).read\\(\\)\\) for f in ['main.py','models.py','api/endpoints.py']]; print\\('Python OK — los 3 archivos'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import openpyxl; print\\('openpyxl OK', openpyxl.__version__\\)\")",
+      "Bash(echo \"version.txt publicada: $\\(cat /c/WinSysCache/version.txt\\)\"; echo \"exe modificado: $\\(stat -c '%y' /c/WinSysCache/ControlBiblioteca.Client.exe 2>/dev/null | cut -d'.' -f1\\)\")"
     ],
     "additionalDirectories": [
       "\\tmp",

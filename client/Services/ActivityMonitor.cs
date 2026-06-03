@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Management;
 using System.Text.Json;
 using System.Threading;
@@ -16,39 +18,71 @@ namespace ControlBiblioteca.Client.Services
     public class ActivityMonitor : IDisposable
     {
         private readonly WebSocketService _ws;
-        private ManagementEventWatcher?   _processWatcher;
         private FileSystemWatcher?        _downloadsWatcher;
         private CancellationTokenSource   _cts = new();
         private bool _activo = false;
 
-        // ── LISTA BLANCA: solo estos procesos se registran ────────────
+        // Intervalo de sondeo de procesos. Usamos polling en vez de
+        // Win32_ProcessStartTrace porque esa clase WMI exige privilegios de
+        // administrador, y el cliente corre como asInvoker (usuario normal).
+        private const int POLL_MS = 1500;
 
-        // Navegadores — nivel normal
-        private static readonly HashSet<string> _navegadores = new(StringComparer.OrdinalIgnoreCase)
+        // Conjunto de PIDs vistos en el sondeo anterior. Un proceso es "nuevo"
+        // si su PID no estaba aquí. Se reemplaza completo en cada vuelta.
+        private HashSet<int> _pidsVistos = new();
+
+        // Apps NORMALES (navegadores, académicos) ya reportadas en esta sesión.
+        // Word/Chrome lanzan varios procesos con el mismo nombre; sin esto la
+        // base se llenaría de filas idénticas. Solo registramos la PRIMERA vez
+        // que aparece cada app por sesión. Se vacía en Iniciar()/Detener().
+        // Los SOSPECHOSOS (cmd, powershell...) NO usan esto: cada apertura cuenta.
+        private readonly HashSet<string> _appsReportadas = new(StringComparer.OrdinalIgnoreCase);
+
+        // Archivos de Downloads ya reportados en esta sesión. Evita duplicar
+        // cuando el navegador crea un temporal (.crdownload) y luego lo renombra
+        // al nombre final — ambos disparan el evento Created. Se vacía con la sesión.
+        private readonly HashSet<string> _descargasReportadas = new(StringComparer.OrdinalIgnoreCase);
+
+        // Extensiones temporales de descarga en progreso — se ignoran; solo nos
+        // interesa el archivo final ya renombrado.
+        private static readonly HashSet<string> _extTemporales = new(StringComparer.OrdinalIgnoreCase)
         {
-            "chrome.exe", "firefox.exe", "msedge.exe",
-            "opera.exe", "brave.exe", "iexplore.exe",
+            ".crdownload", ".part", ".download", ".tmp", ".partial", ".opdownload",
         };
 
-        // Herramientas del sistema — nivel sospechoso
-        private static readonly HashSet<string> _sospechosos = new(StringComparer.OrdinalIgnoreCase)
+        // Navegadores conocidos para etiquetar el origen de la descarga.
+        private static readonly Dictionary<string, string> _navegadorNombre = new(StringComparer.OrdinalIgnoreCase)
         {
-            "cmd.exe", "powershell.exe", "pwsh.exe",
-            "regedit.exe", "taskmgr.exe", "msiexec.exe",
-            "wscript.exe", "cscript.exe", "regsvr32.exe",
-            "net.exe", "net1.exe", "netstat.exe",
-            "diskpart.exe", "format.exe", "taskkill.exe",
+            { "chrome.exe", "Chrome" }, { "firefox.exe", "Firefox" },
+            { "msedge.exe", "Edge" },   { "opera.exe", "Opera" },
+            { "brave.exe", "Brave" },   { "iexplore.exe", "Internet Explorer" },
         };
 
-        // Office y herramientas académicas — nivel normal
-        private static readonly HashSet<string> _academicos = new(StringComparer.OrdinalIgnoreCase)
+        // ── ENFOQUE LISTA NEGRA: se registra TODO lo que abra el alumno ──
+        // excepto el ruido del sistema operativo (_procesosIgnorados, abajo).
+        //
+        // Navegadores: solo para etiquetar descargas (ver _navegadorNombre).
+
+        // Herramientas peligrosas — se marcan como nivel "sospechoso".
+        // Esta es la lista BASE compilada; el servidor puede ampliarla en
+        // caliente vía el mensaje 'config_sospechosos' (tabla en MySQL).
+        // Se compara por el nombre REAL del ejecutable de Windows (ej. Word es
+        // WINWORD.EXE), no por el nombre comercial.
+        private static readonly HashSet<string> _sospechososBase = new(StringComparer.OrdinalIgnoreCase)
         {
-            "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE", "ONENOTE.EXE",
-            "OUTLOOK.EXE", "MSPUB.EXE", "VISIO.EXE",
-            "notepad.exe", "notepad++.exe",
-            "AcroRd32.exe", "Acrobat.exe", "FoxitReader.exe",
-            "vlc.exe", "wmplayer.exe",
+            "cmd.exe", "powershell.exe", "pwsh.exe", "powershell_ise.exe",
+            "regedit.exe", "taskmgr.exe", "msconfig.exe",
+            "wscript.exe", "cscript.exe", "regsvr32.exe", "mshta.exe", "rundll32.exe",
+            "net.exe", "net1.exe", "netstat.exe", "nbtstat.exe", "arp.exe",
+            "diskpart.exe", "format.exe", "taskkill.exe", "sc.exe", "reg.exe",
+            "bcdedit.exe", "vssadmin.exe", "wmic.exe", "psexec.exe", "ftp.exe",
+            "telnet.exe", "ncat.exe", "nc.exe", "nmap.exe", "putty.exe",
+            "gpedit.msc", "secpol.msc", "lusrmgr.msc", "compmgmt.msc",
         };
+
+        // Lista efectiva de sospechosos: base + lo que añada el servidor.
+        // Se inicializa con la base y se reemplaza al recibir config del server.
+        private static HashSet<string> _sospechosos = new(_sospechososBase, StringComparer.OrdinalIgnoreCase);
 
         // ── ARCHIVOS: extensiones que se registran en Downloads ───────
 
@@ -78,6 +112,8 @@ namespace ControlBiblioteca.Client.Services
             if (_activo) return;
             _activo = true;
             _cts    = new CancellationTokenSource();
+            _appsReportadas.Clear();      // sesión nueva → lista de apps limpia
+            _descargasReportadas.Clear(); // y de descargas
             IniciarWatcherProcesos();
             IniciarWatcherDescargas();
         }
@@ -86,32 +122,159 @@ namespace ControlBiblioteca.Client.Services
         {
             _activo = false;
             _cts.Cancel();
-            _processWatcher?.Stop();
-            _processWatcher?.Dispose();
-            _processWatcher = null;
             _downloadsWatcher?.Dispose();
             _downloadsWatcher = null;
+            _pidsVistos = new();
+            _appsReportadas.Clear();
+            _descargasReportadas.Clear();
         }
 
-        // ── Monitoreo de procesos via WMI ─────────────────────────────
+        // ── Monitoreo de procesos via polling (sin admin) ─────────────
 
         private void IniciarWatcherProcesos()
         {
+            // Snapshot inicial: marcar todo lo que YA está corriendo como visto,
+            // para no reportar procesos preexistentes como "recién abiertos".
             try
             {
-                _processWatcher = new ManagementEventWatcher(
-                    new WqlEventQuery("SELECT * FROM Win32_ProcessStartTrace")
-                );
-                _processWatcher.EventArrived += OnProcesoIniciado;
-                _processWatcher.Start();
+                _pidsVistos = new HashSet<int>(Process.GetProcesses().Select(p => p.Id));
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[ActivityMonitor] WMI no disponible: {ex.Message}");
+                Debug.WriteLine($"[ActivityMonitor] Snapshot inicial falló: {ex.Message}");
+                _pidsVistos = new HashSet<int>();
+            }
+
+            _ = Task.Run(() => LoopProcesosAsync(_cts.Token));
+        }
+
+        private async Task LoopProcesosAsync(CancellationToken token)
+        {
+            while (_activo && !token.IsCancellationRequested)
+            {
+                try { await Task.Delay(POLL_MS, token); }
+                catch (OperationCanceledException) { break; }
+
+                if (!_activo || token.IsCancellationRequested) break;
+
+                try
+                {
+                    var procesosActuales = Process.GetProcesses();
+                    var nuevosPids = new HashSet<int>(procesosActuales.Length);
+
+                    foreach (var p in procesosActuales)
+                    {
+                        int pid;
+                        string nombre;
+                        try
+                        {
+                            pid    = p.Id;
+                            nombre = p.ProcessName + ".exe"; // ProcessName no incluye extensión
+                        }
+                        catch { continue; }
+                        finally { p.Dispose(); }
+
+                        nuevosPids.Add(pid);
+
+                        // Solo procesar los que NO estaban en el sondeo anterior.
+                        if (_pidsVistos.Contains(pid)) continue;
+
+                        EvaluarProceso(nombre, pid);
+                    }
+
+                    _pidsVistos = nuevosPids;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[ActivityMonitor] Loop procesos error: {ex.Message}");
+                }
             }
         }
 
-        // Procesos del sistema que pueden lanzar hijos sospechosos legítimamente
+        private void EvaluarProceso(string nombre, int pid)
+        {
+            if (string.IsNullOrWhiteSpace(nombre)) return;
+
+            // 1. Ignorar el ruido del sistema operativo (svchost, dwm, etc.).
+            //    Todo lo demás SÍ se registra — es actividad real del alumno.
+            if (_procesosIgnorados.Contains(nombre)) return;
+
+            // 2. ¿Es una herramienta peligrosa? → nivel sospechoso.
+            //    NO filtramos por proceso padre: si el alumno abre cmd desde el
+            //    explorador, su padre es explorer.exe pero IGUAL nos interesa.
+            //    Los sospechosos NO se deduplican: cada apertura cuenta.
+            if (_sospechosos.Contains(nombre))
+            {
+                string amigableS = NombreAmigable(pid, nombre);
+                _ = EnviarEventoAsync(
+                    "comando",
+                    $"Herramienta del sistema: {amigableS}",
+                    ObtenerCommandLine(pid),
+                    "sospechoso",
+                    nombre);
+                return;
+            }
+
+            // 3. Cualquier otro programa de usuario → nivel normal.
+            //    Dedup por sesión: una app abierta = un evento, sin importar
+            //    cuántos subprocesos lance (Chrome, Word, etc.).
+            if (!_appsReportadas.Add(nombre)) return;
+
+            string amigable = NombreAmigable(pid, nombre);
+            _ = EnviarEventoAsync(
+                "proceso",
+                $"Abrió: {amigable}",
+                "",
+                "normal",
+                nombre);
+        }
+
+        // Devuelve el nombre comercial del programa (ej. "Microsoft Word") leído
+        // de los metadatos del .exe, con el nombre interno entre paréntesis para
+        // referencia (ej. "Microsoft Word (WINWORD.EXE)"). Si no hay metadatos,
+        // devuelve solo el nombre del ejecutable.
+        private static string NombreAmigable(int pid, string nombreExe)
+        {
+            try
+            {
+                using var p = Process.GetProcessById(pid);
+                string? ruta = p.MainModule?.FileName;
+                if (!string.IsNullOrEmpty(ruta))
+                {
+                    var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(ruta);
+                    string desc = (info.FileDescription ?? "").Trim();
+                    if (desc.Length > 0 && !desc.Equals(nombreExe, StringComparison.OrdinalIgnoreCase))
+                        return $"{desc} ({nombreExe})";
+                }
+            }
+            catch { /* MainModule puede fallar sin permisos — usar solo el exe */ }
+            return nombreExe;
+        }
+
+        // Intenta leer la línea de comando vía WMI (consulta Win32_Process,
+        // que SÍ funciona sin admin, a diferencia de Win32_ProcessStartTrace).
+        private static string ObtenerCommandLine(int pid)
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(
+                    $"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {pid}"
+                );
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    string cmd = obj["CommandLine"]?.ToString() ?? "";
+                    if (cmd.Length > 0)
+                        return cmd[..Math.Min(cmd.Length, 300)];
+                }
+            }
+            catch { }
+            return "";
+        }
+
+        // ── LISTA NEGRA: ruido del SO que NO se registra ──────────────
+        // Procesos internos de Windows que arrancan solos y no representan
+        // actividad del alumno. TODO lo que no esté aquí (ni en sospechosos)
+        // se registra como app normal usada por el alumno.
         private static readonly HashSet<string> _procesosIgnorados = new(StringComparer.OrdinalIgnoreCase)
         {
             "svchost.exe", "lsass.exe", "csrss.exe", "wininit.exe", "winlogon.exe",
@@ -119,101 +282,32 @@ namespace ControlBiblioteca.Client.Services
             "RuntimeBroker.exe", "SearchIndexer.exe", "audiodg.exe", "conhost.exe",
             "fontdrvhost.exe", "spoolsv.exe", "WmiPrvSE.exe", "dllhost.exe",
             "ctfmon.exe", "sihost.exe", "ShellExperienceHost.exe",
-            "SearchHost.exe", "SystemSettings.exe", "TextInputHost.exe",
+            "SearchHost.exe", "SearchApp.exe", "StartMenuExperienceHost.exe",
+            "SystemSettings.exe", "TextInputHost.exe", "LockApp.exe",
             "MsMpEng.exe", "NisSrv.exe", "SecurityHealthService.exe",
-            "TiWorker.exe", "TrustedInstaller.exe", "wuauclt.exe",
+            "SecurityHealthSystray.exe", "smartscreen.exe",
+            "TiWorker.exe", "TrustedInstaller.exe", "wuauclt.exe", "usocoreworker.exe",
+            "backgroundTaskHost.exe", "ApplicationFrameHost.exe", "WidgetService.exe",
+            "Widgets.exe", "PhoneExperienceHost.exe", "GameBar.exe", "GameBarFTServer.exe",
+            "SgrmBroker.exe", "spoolsv.exe", "dasHost.exe", "WUDFHost.exe",
+            "wlanext.exe", "unsecapp.exe", "taskhost.exe", "wmpnetwk.exe",
+            "OfficeClickToRun.exe", "SDXHelper.exe", "MsoSync.exe", "msosync.exe",
+            "splwow64.exe", "OfficeC2RClient.exe", "AppVShNotify.exe",
+            "MicrosoftEdgeUpdate.exe", "msedgewebview2.exe",
+            // Ruido adicional observado en campo: actualizaciones, activación,
+            // notificaciones, indexado y updaters de drivers — no son acciones
+            // del alumno.
+            "MoUsoCoreWorker.exe", "MoNotificationUx.exe", "sppsvc.exe",
+            "SearchProtocolHost.exe", "SearchFilterHost.exe",
+            "NvProfileUpdater64.exe", "NvProfileUpdater.exe", "nvcontainer.exe",
+            "nvsphelper64.exe", "NVDisplay.Container.exe",
+            "FileCoAuth.exe", "UserOOBEBroker.exe", "OneDrive.exe",
+            "OneDriveStandaloneUpdater.exe", "WidgetBoard.exe",
+            "CompPkgSrv.exe", "SystemSettingsBroker.exe", "ShellHost.exe",
+            "uhssvc.exe", "wermgr.exe", "WerFault.exe", "mscorsvw.exe",
+            "ngentask.exe", "ngen.exe", "AggregatorHost.exe", "CallButler.exe",
             "ControlBiblioteca.Client.exe",
         };
-
-        // Procesos que pueden lanzar cmd/powershell como hijos — ignorar en ese caso
-        private static readonly HashSet<string> _procesosOffice = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE", "ONENOTE.EXE",
-            "OUTLOOK.EXE", "MSPUB.EXE", "VISIO.EXE",
-            "OfficeClickToRun.exe", "SDXHelper.exe", "MsoSync.exe",
-            "msosync.exe", "splwow64.exe", "MicrosoftEdgeUpdate.exe",
-            "OfficeC2RClient.exe", "AppVShNotify.exe",
-        };
-
-        private void OnProcesoIniciado(object sender, EventArrivedEventArgs e)
-        {
-            if (!_activo || _cts.Token.IsCancellationRequested) return;
-
-            try
-            {
-                string nombre = e.NewEvent.Properties["ProcessName"]?.Value?.ToString() ?? "";
-                if (string.IsNullOrWhiteSpace(nombre)) return;
-
-                string tipo    = "proceso";
-                string nivel   = "normal";
-                string desc    = "";
-                string detalle = "";
-
-                if (_navegadores.Contains(nombre))
-                {
-                    tipo  = "navegador";
-                    nivel = "normal";
-                    desc  = $"Abrió navegador: {Path.GetFileNameWithoutExtension(nombre)}";
-                }
-                else if (_sospechosos.Contains(nombre))
-                {
-                    // Verificar proceso padre — si lo lanzó Office u otro proceso del sistema, ignorar
-                    if (EsHijoDeProcesoConocido(e))
-                        return;
-
-                    tipo  = "comando";
-                    nivel = "sospechoso";
-                    desc  = $"Abrió herramienta del sistema: {nombre}";
-                    try
-                    {
-                        string cmd = e.NewEvent.Properties["CommandLine"]?.Value?.ToString() ?? "";
-                        if (cmd.Length > 0)
-                            detalle = cmd[..Math.Min(cmd.Length, 300)];
-                    }
-                    catch { }
-                }
-                else if (_academicos.Contains(nombre))
-                {
-                    tipo  = "proceso";
-                    nivel = "normal";
-                    desc  = $"Abrió aplicación: {Path.GetFileNameWithoutExtension(nombre)}";
-                }
-                else
-                {
-                    return; // no está en lista blanca — ignorar
-                }
-
-                _ = EnviarEventoAsync(tipo, desc, detalle, nivel);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[ActivityMonitor] Error en proceso: {ex.Message}");
-            }
-        }
-
-        private static bool EsHijoDeProcesoConocido(EventArrivedEventArgs e)
-        {
-            try
-            {
-                // Obtener PID del proceso padre desde el evento WMI
-                uint parentPid = Convert.ToUInt32(e.NewEvent.Properties["ParentProcessID"]?.Value ?? 0);
-                if (parentPid == 0) return false;
-
-                using var searcher = new ManagementObjectSearcher(
-                    $"SELECT Name FROM Win32_Process WHERE ProcessId = {parentPid}"
-                );
-                foreach (ManagementObject obj in searcher.Get())
-                {
-                    string parentName = obj["Name"]?.ToString() ?? "";
-                    if (_procesosOffice.Contains(parentName) ||
-                        _procesosIgnorados.Contains(parentName) ||
-                        parentName.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase))
-                        return true;
-                }
-            }
-            catch { /* si falla la consulta, asumir que NO es hijo */ }
-            return false;
-        }
 
         // ── Monitoreo de archivos en Downloads ────────────────────────
 
@@ -247,27 +341,41 @@ namespace ControlBiblioteca.Client.Services
 
             try
             {
-                string ext    = Path.GetExtension(e.Name ?? "").ToLowerInvariant();
                 string nombre = e.Name ?? "";
+                string ext    = Path.GetExtension(nombre).ToLowerInvariant();
                 if (string.IsNullOrWhiteSpace(ext)) return;
 
+                // Ignorar archivos temporales de descarga en progreso. El final
+                // ya renombrado disparará su propio evento Created.
+                if (_extTemporales.Contains(ext)) return;
+
+                // Dedup por nombre de archivo: evita registrar el mismo dos veces
+                // (renombrados, reescrituras del navegador).
+                if (!_descargasReportadas.Add(nombre)) return;
+
                 string nivel;
-                string desc;
+                string accion;
 
                 if (_extSospechosas.Contains(ext))
                 {
-                    nivel = "sospechoso";
-                    desc  = $"Descargó archivo ejecutable: {nombre}";
+                    nivel  = "sospechoso";
+                    accion = "Descargó ejecutable";
                 }
                 else if (_extNormales.Contains(ext))
                 {
-                    nivel = "normal";
-                    desc  = $"Descargó archivo: {nombre}";
+                    nivel  = "normal";
+                    accion = "Descargó archivo";
                 }
                 else
                 {
                     return; // extensión no relevante — ignorar
                 }
+
+                // Etiquetar el navegador de origen si hay uno corriendo.
+                string origen = NavegadorActivo();
+                string desc   = origen.Length > 0
+                    ? $"{accion} desde {origen}: {nombre}"
+                    : $"{accion}: {nombre}";
 
                 _ = EnviarEventoAsync("archivo", desc, $"Downloads\\{nombre}", nivel);
             }
@@ -277,9 +385,27 @@ namespace ControlBiblioteca.Client.Services
             }
         }
 
+        // Devuelve el nombre amigable del navegador en ejecución (Chrome, Firefox...),
+        // o "" si no hay ninguno. Sirve para etiquetar el origen de una descarga.
+        private static string NavegadorActivo()
+        {
+            try
+            {
+                foreach (var p in Process.GetProcesses())
+                {
+                    string nombre = p.ProcessName + ".exe";
+                    p.Dispose();
+                    if (_navegadorNombre.TryGetValue(nombre, out var amigable))
+                        return amigable;
+                }
+            }
+            catch { }
+            return "";
+        }
+
         // ── Envío al servidor ─────────────────────────────────────────
 
-        private async Task EnviarEventoAsync(string evento, string descripcion, string detalle, string nivel)
+        private async Task EnviarEventoAsync(string evento, string descripcion, string detalle, string nivel, string procesoExe = "")
         {
             try
             {
@@ -291,6 +417,7 @@ namespace ControlBiblioteca.Client.Services
                     descripcion,
                     detalle,
                     nivel,
+                    proceso_exe = procesoExe,   // nombre del .exe para filtrado server-side
                 }));
             }
             catch (Exception ex)

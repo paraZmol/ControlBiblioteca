@@ -1,12 +1,12 @@
 # endpoints.py - Rutas de la API REST
 import asyncio
 from datetime import datetime, date, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Form, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
-from models import AlumnoMaestro, Terminal, Sesion, Usuario, Facultad, Escuela, Ban, PersonalUniversidad, Incidencia, Sospecha, ActividadLog
+from models import AlumnoMaestro, Terminal, Sesion, Usuario, Facultad, Escuela, Ban, PersonalUniversidad, Incidencia, Sospecha, ActividadLog, ProcesoIgnorado
 Alumno = AlumnoMaestro  # alias local para compatibilidad con código legacy
 from auth_service import (
     verificar_password, hashear_password, crear_token, obtener_usuario_actual
@@ -184,15 +184,43 @@ async def listar_terminales(
     db: AsyncSession = Depends(get_db),
     _: Usuario = Depends(obtener_usuario_actual)
 ):
-    """Listar estado de todas las terminales."""
+    """Listar terminales activas.
+    Excluye terminales offline cuya última conexión fue hace más de 2 horas:
+    son terminales fantasma que nunca volvieron a conectarse tras un crash.
+    Las que están offline pero con conexión reciente (PC recién desconectada)
+    sí se incluyen para que el admin las vea unos minutos antes de desaparecer.
+    """
+    from datetime import timedelta
+    cutoff = datetime.now() - timedelta(hours=2)
     result = await db.execute(select(Terminal).order_by(Terminal.nombre_red))
+    terminales = result.scalars().all()
     return [
         {
             "id": t.id, "nombre": t.nombre_red, "ip": t.ip,
             "estado": t.estado, "ultima_conexion": t.ultima_conexion
         }
-        for t in result.scalars().all()
+        for t in terminales
+        # Mostrar siempre las no-offline; de las offline, solo las vistas en las últimas 2h
+        if t.estado != "offline" or (t.ultima_conexion and t.ultima_conexion >= cutoff)
     ]
+
+
+@router.delete("/terminales/{terminal_id}")
+async def eliminar_terminal(
+    terminal_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual)
+):
+    """Eliminar terminal fantasma de la base de datos (solo superadmin)."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo superadmin puede eliminar terminales")
+    res = await db.execute(select(Terminal).where(Terminal.id == terminal_id))
+    t = res.scalar_one_or_none()
+    if not t:
+        raise HTTPException(status_code=404, detail="Terminal no encontrada")
+    await db.delete(t)
+    await db.commit()
+    return {"ok": True, "eliminada": t.nombre_red}
 
 
 @router.post("/terminales/registrar")
@@ -290,11 +318,30 @@ async def cerrar_sesion(
     motivo: str = "manual",
     db: AsyncSession = Depends(get_db)
 ):
-    """Cerrar una sesión activa usando exclusivamente el reloj del servidor."""
-    result = await db.execute(select(Sesion).where(Sesion.id == sesion_id, Sesion.estado == "activa"))
+    """Cerrar una sesión activa usando exclusivamente el reloj del servidor.
+
+    Idempotente: si la sesión ya está cerrada (porque la PC se desconectó/apagó
+    antes de que llegara este POST, o fue cancelada como fantasma), devolvemos
+    éxito en vez de 404 — el objetivo (sesión cerrada) ya se cumplió. Solo es
+    404 si la sesión nunca existió.
+    """
+    result = await db.execute(select(Sesion).where(Sesion.id == sesion_id))
     sesion = result.scalar_one_or_none()
     if not sesion:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada o ya cerrada")
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+
+    # Ya cerrada por otra vía (desconexión, fantasma, logout) — nada que hacer.
+    if sesion.estado != "activa":
+        # Aseguramos que la terminal quede bloqueada de todos modos.
+        await db.execute(
+            update(Terminal).where(Terminal.id == sesion.id_terminal).values(estado="bloqueado")
+        )
+        await db.commit()
+        return {
+            "mensaje": "Sesión ya estaba cerrada",
+            "ya_cerrada": True,
+            "motivo_previo": sesion.motivo_cierre,
+        }
 
     ahora = datetime.now().replace(tzinfo=None)
     sesion.hora_salida   = ahora
@@ -855,6 +902,7 @@ async def listar_actividad(
     terminal: str | None = None,
     nivel:    str | None = None,   # normal | sospechoso
     fecha:    str | None = None,   # YYYY-MM-DD
+    incluir_ignorados: bool = False,  # True = mostrar también procesos ocultados
     limit:    int = 200,
     offset:   int = 0,
     db: AsyncSession = Depends(get_db),
@@ -868,6 +916,17 @@ async def listar_actividad(
         q = q.where(ActividadLog.nombre_terminal.ilike(f"%{terminal}%"))
     if nivel:
         q = q.where(ActividadLog.nivel == nivel)
+
+    # Por defecto se ocultan los procesos marcados como ignorados (vista limpia).
+    # Los sospechosos SIEMPRE se muestran, aunque su exe esté en la lista.
+    # incluir_ignorados=True (al investigar una sospecha) muestra todo.
+    if not incluir_ignorados:
+        subq_ign = select(ProcesoIgnorado.nombre_exe)
+        q = q.where(
+            (ActividadLog.nivel == "sospechoso")
+            | (ActividadLog.proceso_exe.is_(None))
+            | (ActividadLog.proceso_exe.notin_(subq_ign))
+        )
     if fecha:
         try:
             d = date.fromisoformat(fecha)
@@ -891,6 +950,7 @@ async def listar_actividad(
                 "tipo":            r.tipo,
                 "descripcion":     r.descripcion,
                 "detalle":         r.detalle,
+                "proceso_exe":     r.proceso_exe,
                 "nivel":           r.nivel,
                 "fecha_hora":      r.fecha_hora,
             }
@@ -958,6 +1018,68 @@ async def resumen_actividad_por_pc(
             for r in rows
         ]
     }
+
+
+# ── Procesos ignorados (lista negra editable) ───────────────────────
+
+@router.get("/admin/procesos-ignorados")
+async def listar_procesos_ignorados(
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    """Lista los procesos que el admin marcó para no registrar como actividad."""
+    rows = (await db.execute(
+        select(ProcesoIgnorado).order_by(ProcesoIgnorado.nombre_exe)
+    )).scalars().all()
+    return {
+        "items": [
+            {"id": r.id, "nombre_exe": r.nombre_exe,
+             "agregado_por": r.agregado_por, "fecha": r.fecha}
+            for r in rows
+        ]
+    }
+
+
+@router.post("/admin/procesos-ignorados")
+async def agregar_proceso_ignorado(
+    nombre_exe: str = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Agrega un proceso a la lista de ignorados. Aplica al instante a todas las PCs."""
+    nombre_exe = (nombre_exe or "").strip()
+    if not nombre_exe:
+        raise HTTPException(status_code=422, detail="El nombre del ejecutable no puede estar vacío")
+
+    # Evitar duplicados (idempotente).
+    existe = (await db.execute(
+        select(ProcesoIgnorado).where(ProcesoIgnorado.nombre_exe == nombre_exe)
+    )).scalar_one_or_none()
+    if existe:
+        return {"ok": True, "ya_existia": True, "nombre_exe": nombre_exe}
+
+    pi = ProcesoIgnorado(nombre_exe=nombre_exe, agregado_por=admin.username)
+    db.add(pi)
+    await db.commit()
+    return {"ok": True, "id": pi.id, "nombre_exe": nombre_exe}
+
+
+@router.delete("/admin/procesos-ignorados/{proceso_id}")
+async def eliminar_proceso_ignorado(
+    proceso_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    """Quita un proceso de la lista de ignorados — volverá a registrarse."""
+    pi = (await db.execute(
+        select(ProcesoIgnorado).where(ProcesoIgnorado.id == proceso_id)
+    )).scalar_one_or_none()
+    if not pi:
+        raise HTTPException(status_code=404, detail="Proceso no encontrado")
+    nombre = pi.nombre_exe
+    await db.delete(pi)
+    await db.commit()
+    return {"ok": True, "eliminado": nombre}
 
 
 @router.get("/admin/exportar-excel")

@@ -251,6 +251,7 @@ class ActividadLog(Base):
     tipo:            Mapped[str] = mapped_column(String(30),  nullable=False)   # proceso | archivo | comando | navegador
     descripcion:     Mapped[str] = mapped_column(String(300), nullable=False)
     detalle:         Mapped[str] = mapped_column(String(600), nullable=True)
+    proceso_exe:     Mapped[str] = mapped_column(String(150), nullable=True)    # nombre del .exe, para "ignorar" desde el panel
     nivel:           Mapped[str] = mapped_column(String(20),  nullable=False, default="normal")  # normal | sospechoso
     fecha_hora:      Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
 
@@ -258,6 +259,21 @@ class ActividadLog(Base):
     alumno:   Mapped["AlumnoMaestro"] = relationship()
 
     def __repr__(self): return f"<ActividadLog {self.id} {self.tipo} {self.dni_alumno}>"
+
+
+class ProcesoIgnorado(Base):
+    """Procesos cuyo nombre de ejecutable NO debe registrarse como actividad.
+    Editable desde el panel: el admin marca ruido del sistema y el servidor
+    los descarta antes de guardar, aplicando al instante a todas las PCs."""
+    __tablename__ = "procesos_ignorados"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:           Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nombre_exe:   Mapped[str] = mapped_column(String(150), nullable=False, unique=True, index=True)  # ej. "MoUsoCoreWorker.exe"
+    agregado_por: Mapped[str] = mapped_column(String(100), nullable=True)   # username del admin
+    fecha:        Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    def __repr__(self): return f"<ProcesoIgnorado {self.nombre_exe}>"
 
 
 class ConfiguracionKiosco(Base):
@@ -270,6 +286,21 @@ class ConfiguracionKiosco(Base):
     backdoor_pin:       Mapped[str] = mapped_column(String(50), default="UNASAM2025")
 
     def __repr__(self): return f"<ConfiguracionKiosco ID={self.id}>"
+
+
+class MensajeProgramado(Base):
+    __tablename__ = "mensajes_programados"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:        Mapped[int]  = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mensaje:   Mapped[str]  = mapped_column(String(500), nullable=False)
+    hora_envio: Mapped[str] = mapped_column(String(5),  nullable=False)   # "HH:MM"
+    tipo:      Mapped[str]  = mapped_column(String(20), nullable=False, default="extra")  # "cierre" | "extra"
+    activo:    Mapped[bool] = mapped_column(Boolean, default=True)
+    enviado:   Mapped[bool] = mapped_column(Boolean, default=False)
+    fecha_envio: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # solo para tipo="extra"
+
+    def __repr__(self): return f"<MensajeProgramado {self.id} {self.hora_envio} tipo={self.tipo}>"
 
 
 # ── Alias legacy: Alumno → AlumnoMaestro para no romper main.py ──────
