@@ -11,15 +11,24 @@ from database import get_db
 from models import Usuario
 
 # Configuración JWT
+# La SECRET_KEY DEBE estar definida en server/.env. Sin ella el servidor no
+# arranca: generar una temporal silenciosa rompería las sesiones en cada
+# reinicio y enmascararía un error de configuración crítico. Generar una con:
+#   python -c "import secrets; print(secrets.token_hex(32))"
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 if not SECRET_KEY:
-    import secrets as _secrets
-    SECRET_KEY = _secrets.token_hex(32)
-    import logging as _logging
-    _logging.getLogger(__name__).warning(
-        "SECRET_KEY no configurada en .env — se generó una temporal. "
-        "Los tokens JWT se invalidarán al reiniciar el servidor. "
-        "Configure SECRET_KEY en server/.env para persistencia."
+    raise RuntimeError(
+        "SECRET_KEY no configurada. Defina SECRET_KEY en server/.env. "
+        "Genere una clave fuerte con: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
+# Rechazar claves débiles/placeholder conocidas para evitar que una clave de
+# desarrollo llegue accidentalmente a producción.
+_CLAVES_DEBILES = {"clave-secreta-cambiar-en-produccion", "dev_secret_key_local",
+                   "changeme", "secret", "test", "cambiar"}
+if SECRET_KEY.strip().lower() in _CLAVES_DEBILES or len(SECRET_KEY) < 32:
+    raise RuntimeError(
+        "SECRET_KEY es débil o es un placeholder. Use una clave aleatoria de al "
+        "menos 32 caracteres: python -c \"import secrets; print(secrets.token_hex(32))\""
     )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8 horas

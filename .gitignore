@@ -18,3 +18,5 @@ data/*.db
 # Variables de entorno — nunca subir al repo
 server/.env
 .env
+.env.*
+server/.env.*
