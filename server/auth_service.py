@@ -31,7 +31,13 @@ if SECRET_KEY.strip().lower() in _CLAVES_DEBILES or len(SECRET_KEY) < 32:
         "menos 32 caracteres: python -c \"import secrets; print(secrets.token_hex(32))\""
     )
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8 horas
+# B-7: expiración del token reducida de 8h a 4h (configurable por .env).
+# Menos ventana si un token es robado, sin obligar a re-loguear a cada rato.
+# Ajustable con TOKEN_EXPIRE_MINUTES en server/.env si se necesita otro valor.
+try:
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("TOKEN_EXPIRE_MINUTES", "240"))
+except ValueError:
+    ACCESS_TOKEN_EXPIRE_MINUTES = 240
 
 # Hashing de contraseñas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

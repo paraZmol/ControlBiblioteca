@@ -1,0 +1,226 @@
+═══════════════════════════════════════════════════════════════════
+  FLUJO DEL ADMINISTRADOR — Control Biblioteca UNASAM
+  Cómo el administrador usa el panel web, paso a paso.
+  Verificado contra el código. Actualizado: 2026-06-04
+═══════════════════════════════════════════════════════════════════
+
+Resumen en una línea:
+  El admin entra con usuario/contraseña → se conecta al monitoreo en vivo →
+  ve las PCs, sesiones y actividad → puede desbloquear/bloquear/apagar PCs y
+  revisar sospechas e incidencias.
+
+Menú actual del panel: Nodos | Eventos | Historial | Alertas | Base de datos |
+                       Configuración
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 1 — EL ADMIN INICIA SESIÓN
+───────────────────────────────────────────────────────────────────
+  - Abre http://<servidor>:8000/admin/ y escribe usuario + contraseña.
+  - El panel detecta solo la IP del servidor desde la URL (window.location),
+    así funciona en cualquier instalación sin configurar nada.
+    admin/static/js/app.js:5-7
+  - Envía POST /api/auth/login. server/api/endpoints.py:52-79
+  - El servidor:
+    * Busca el usuario, verifica la contraseña (bcrypt).
+    * RATE LIMITING: 3 intentos fallidos → bloqueo 5 minutos.
+    * Genera un token JWT (válido 8 horas) con el rol (admin | superadmin).
+      server/auth_service.py
+  - El panel guarda el token y muestra la interfaz según el rol.
+
+  USUARIOS POR DEFECTO (solo al crear la BD por primera vez):
+    superadmin / (DEFAULT_ADMIN_PASSWORD del .env)
+    admin      / (DEFAULT_ADMIN_PASSWORD del .env)
+    NOTA: la contraseña ya NO se escribe en los logs (A-5). Cambiarla tras
+    el primer ingreso.
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 2 — SE CONECTA AL MONITOREO EN VIVO (WebSocket)
+───────────────────────────────────────────────────────────────────
+  - El panel abre un WebSocket: ws://<servidor>:8000/ws/admin
+    admin/static/js/app.js:807 (sin token en la URL — A-8)
+  - AUTENTICA por mensaje inicial: envía {"tipo":"auth","token":<jwt>}.
+    Si el token falta o es inválido, el servidor cierra la conexión.
+    server/main.py (websocket_admin)
+  - A partir de ahí, recibe en TIEMPO REAL (sin recargar):
+    * status_update  → cuántas terminales hay conectadas y cuáles.
+    * evento_log     → login, logout, bloqueos, desconexiones.
+    * actividad      → eventos de actividad de los alumnos en vivo.
+    * sospecha       → alerta cuando se detecta algo sospechoso.
+    * ok / error     → confirmación o fallo de un comando.
+
+  Si se cae la conexión, el panel reintenta solo (cada 60s indefinidamente).
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 3 — QUÉ MUESTRA CADA PESTAÑA
+───────────────────────────────────────────────────────────────────
+
+  ► NODOS (monitoreo en vivo)
+    - Tarjetas con KPIs: equipos online, sesiones de hoy, alumnos.
+    - Mapa de PCs: cada una con su estado (bloqueado / activo / offline).
+    - Últimos eventos y alertas activas.
+    - Acciones por PC: Desbloquear, Bloquear, Apagar (ver PASO 4).
+    Carga: admin/static/js/app.js (cargarDashboard) — /dashboard/stats,
+           /terminales, /sesiones/activas
+
+  ► EVENTOS (Flujo de Actividad)
+    - Lista en vivo de lo que hacen los alumnos (abrió X programa, descargó Y).
+    - Filtros: por DNI, por PC, por nivel (Todos / Sospechosos), por fecha.
+    - Botón "Ver ignorados" para mostrar también los procesos ocultados.
+    - Botón "Lista" para administrar los procesos ignorados.
+    - Botón "Ignorar" en cada evento normal (ver PASO 5).
+    Carga: GET /admin/actividad — server/api/endpoints.py
+
+  ► HISTORIAL
+    - Todas las sesiones (quién usó qué PC, cuándo, cuánto tiempo).
+    - Filtros: período (hoy/mes/año/todo), mes/año, rango de fechas,
+      búsqueda por nombre/DNI/código, por actividad, por estado.
+    - Ordenar por fecha / estudiante / PC / actividad.
+    - Exportar a Excel y PDF (con los filtros aplicados).
+    - Importar historial desde Excel (sesiones offline).
+    Carga: GET /sesiones/activas — server/api/endpoints.py:437-510
+
+  ► ALERTAS / INCIDENCIAS (3 sub-secciones)
+    a) Incidencias: registro de faltas (leve / grave) por alumno.
+       - 3 leves activas → alerta para baneo. 1 grave → recomendación de baneo.
+    b) Sospechas: detectadas AUTOMÁTICAMENTE por el sistema. El admin las
+       aprueba (crea incidencia leve) o descarta. Botón "Ver" abre Eventos con
+       el contexto completo de ese alumno (ver PASO 6).
+    c) Baneados: lista de DNIs baneados; se puede levantar el ban.
+
+  ► BASE DE DATOS (2 sub-secciones)
+    a) Estudiantes (maestro): DNI, nombre, código, facultad, escuela.
+       Nuevo / Buscar (todos); Exportar / Importar Excel (solo superadmin).
+    b) Personal universitario: SOLO superadmin.
+
+  ► CONFIGURACIÓN (mayormente superadmin)
+    - Ruta de distribución del cliente, publicar cliente nuevo.
+    - Backup SQL de la base de datos.
+    - Cambio de credenciales admin/superadmin.
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 4 — ACCIONES SOBRE LAS PCs
+───────────────────────────────────────────────────────────────────
+
+  ► DESBLOQUEAR una PC (para un alumno)
+    1. El admin elige la PC y escribe el DNI del alumno + el motivo de uso.
+    2. El panel envía por WS: {"tipo":"desbloquear_terminal", ip, dni, razon_uso}
+    3. El servidor (server/main.py:1116+):
+       - Busca al alumno por DNI (debe existir en el maestro).
+       - Verifica que no esté baneado.
+       - CREA la sesión en la BD ANTES de mandar el desbloqueo (evita que se
+         cancele como "fantasma" si el cliente confirma muy rápido).
+       - Envía la orden de desbloquear al kiosco.
+    4. El kiosco responde "unlock_confirmed" y la sesión queda confirmada.
+
+  ► BLOQUEAR una PC
+    - El panel manda bloquear; el servidor cierra la sesión (motivo
+      "bloqueo_admin") y ordena bloquear el kiosco.
+
+  ► APAGAR una PC (remoto)
+    - El panel manda {"tipo":"remote_command","action":"shutdown"}.
+    - El kiosco cierra la sesión y ejecuta el apagado de Windows.
+    - NOTA: el cierre de sesión es idempotente; si ya estaba cerrada, no marca
+      error (se corrigió el falso 404).
+
+  ► BLOQUEAR SALA (todas)
+    - Cierra las sesiones activas y bloquea todas las terminales conectadas.
+    * falta una que me permita apagar todas la maquinas*
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 5 — FLUJO DE ACTIVIDAD Y PROCESOS IGNORADOS
+───────────────────────────────────────────────────────────────────
+  - Por defecto, la vista de Eventos OCULTA los procesos marcados como
+    "ignorados" (ruido del sistema que el admin no quiere ver).
+  - PERO: los eventos SOSPECHOSOS siempre se muestran, aunque su proceso esté
+    en la lista de ignorados.
+  - TODO se guarda siempre en la base de datos (nada se borra al ignorar): así,
+    al investigar una sospecha, se puede ver el contexto completo.
+
+  Botón "Ignorar" (en un evento normal):
+    - Marca ese ejecutable para no mostrarlo más en la vista limpia, en TODAS
+      las PCs. POST /admin/procesos-ignorados.
+  Botón "Lista":
+    - Abre un panel con todos los ignorados; permite "Quitar" cualquiera para
+      que vuelva a mostrarse. DELETE /admin/procesos-ignorados/{id}.
+  Botón "Ver ignorados / Viendo todo":
+    - Alterna entre vista limpia y vista completa.
+  Al investigar una sospecha (botón "Ver"):
+    - Se activa automáticamente la vista completa para ese alumno.
+
+  app.js: ignorarProceso, abrirProcesosIgnorados, quitarProcesoIgnorado,
+          actToggleIgnorados, actVerDesdeSospecha
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 6 — SOSPECHAS (DETECCIÓN AUTOMÁTICA)
+───────────────────────────────────────────────────────────────────
+  El sistema crea sospechas SOLO, sin que el admin haga nada:
+    - Actividad sospechosa: el alumno abre cmd/powershell/etc. o descarga un
+      ejecutable. server/main.py:1042-1118
+    - (Otras reglas según el código de sesiones.)
+
+  Cuando ocurre:
+    - Se guarda una Sospecha (estado "pendiente").
+    - Se avisa al panel en vivo ({"tipo":"sospecha"}).
+    - Aparece un contador (badge) en el menú.
+
+  El admin, en Alertas → Sospechas:
+    - APROBAR  → crea una incidencia LEVE y marca la sospecha como aprobada.
+    - DESCARTAR → la marca descartada sin crear incidencia.
+    - VER       → abre Eventos con el contexto completo del alumno.
+
+
+───────────────────────────────────────────────────────────────────
+  DIFERENCIA ENTRE ADMIN Y SUPERADMIN
+───────────────────────────────────────────────────────────────────
+  AMBOS pueden: ver Nodos/Eventos/Historial/Alertas, desbloquear/bloquear/
+                apagar PCs, aprobar/descartar sospechas, crear incidencias.
+
+  SOLO SUPERADMIN:
+    - Importar / exportar el maestro de estudiantes.
+    - Ver el personal universitario.
+    - Backup SQL de la base de datos.
+    - Eliminar terminales.
+    - Cambiar credenciales de usuarios.
+    - Configuración avanzada.
+
+  El servidor verifica el rol con: if admin.rol != "superadmin": 403
+  (NOTA de seguridad: algunos endpoints aún no verifican rol — ver
+   VULNERABILIDADES.txt E-5 / D-1.)
+
+
+───────────────────────────────────────────────────────────────────
+  DIAGRAMA RÁPIDO
+───────────────────────────────────────────────────────────────────
+  Login (usuario+contraseña)  ──►  JWT (rol)
+        │
+        ▼
+  WebSocket admin  ──{tipo:auth, token}──►  monitoreo en vivo
+        │  recibe: status_update, eventos, actividad, sospechas
+        ▼
+  Panel: Nodos / Eventos / Historial / Alertas / Base de datos / Config
+        │
+        ├─ Desbloquear PC (DNI + motivo) ──► crea Sesión ──► desbloquea kiosco
+        ├─ Bloquear / Apagar PC ──────────► comando al kiosco
+        ├─ Ignorar proceso ───────────────► oculta de la vista (no borra)
+        └─ Aprobar/Descartar sospecha ────► incidencia / nada
+
+
+───────────────────────────────────────────────────────────────────
+  ARCHIVOS CLAVE
+───────────────────────────────────────────────────────────────────
+  Frontend:
+    admin/index.html              — estructura y pestañas del panel
+    admin/static/js/app.js        — toda la lógica del panel
+    admin/static/css/style.css    — estilos
+  Servidor:
+    server/api/endpoints.py       — login, dashboard, sesiones, actividad,
+                                    sospechas, incidencias, maestro, backup
+    server/main.py                — websocket_admin y comandos (desbloquear,
+                                    bloquear, apagar, bloquear_todas)
+    server/auth_service.py        — JWT y contraseñas

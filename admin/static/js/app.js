@@ -12,6 +12,8 @@ let token   = null;
 
 let wsAdmin = null;
 
+let _sesionExpirada = false;  // evita disparar el aviso de expiración varias veces
+
 let _reconnectTimer = null;
 
 let _serverIp = 'localhost';
@@ -83,6 +85,10 @@ function _aplicarRol() {
         const btn = document.getElementById('subtab-btn-cfg-' + s);
         if (btn) btn.style.display = esSuperAdmin ? '' : 'none';
     });
+
+    // Sección de mantenimiento (atajo Ctrl+Alt+F7 + PIN): solo superadmin
+    const secMantenimiento = document.getElementById('seccion-mantenimiento-backdoor');
+    if (secMantenimiento) secMantenimiento.style.display = esSuperAdmin ? '' : 'none';
 
     if (typeof switchTab === 'function') {
         const tabActualBD = document.getElementById('tab-basedatos');
@@ -305,6 +311,8 @@ async function login() {
 
         token = data.access_token;
 
+        _sesionExpirada = false;  // nueva sesión válida: rearmar el aviso de expiración
+
         // Decodificar rol del servidor desde el JWT (sin verificar firma — solo lectura UI)
         try {
             const payload = JSON.parse(atob(token.split('.')[1]));
@@ -433,6 +441,38 @@ function logout() {
 
 }
 
+
+
+// ── Manejo de expiración de sesión (token JWT vencido = HTTP 401) ────
+// El token dura 4h. Antes, al expirar, los fetch fallaban en silencio y el
+// panel se quedaba vacío sin avisar. Ahora un interceptor global detecta el
+// 401 de cualquier llamada a la API y lleva al login con un aviso claro.
+
+function _sesionVencida() {
+    if (_sesionExpirada) return;       // ya se está manejando
+    _sesionExpirada = true;
+    logout();
+    const err = document.getElementById('loginError');
+    if (err) err.textContent = 'Su sesión expiró. Vuelva a iniciar sesión.';
+}
+
+// Interceptor global: envuelve window.fetch para detectar el 401 de la API.
+// No toca el login (que también puede devolver 401 por credenciales malas):
+// solo dispara el aviso de expiración cuando YA había un token activo.
+(function instalarInterceptor401() {
+    const _fetchOriginal = window.fetch.bind(window);
+    window.fetch = async function (recurso, opciones) {
+        const resp = await _fetchOriginal(recurso, opciones);
+        try {
+            const url = (typeof recurso === 'string') ? recurso : (recurso && recurso.url) || '';
+            const esLogin = url.includes('/auth/login');
+            if (resp.status === 401 && token && !esLogin) {
+                _sesionVencida();
+            }
+        } catch (_) { /* nunca romper la petición por el interceptor */ }
+        return resp;
+    };
+})();
 
 
 // ── REST API ───────────────────────────────────────────────────────
@@ -804,11 +844,16 @@ function conectarWebSocket() {
 
 
 
-    wsAdmin = new WebSocket(`${WS_BASE}/ws/admin?token=${encodeURIComponent(token)}`);
+    // A-8: el token YA NO va en la URL (quedaría en logs/historial). Se envía
+    // como primer mensaje {tipo:"auth"} apenas se abre la conexión.
+    wsAdmin = new WebSocket(`${WS_BASE}/ws/admin`);
 
 
 
     wsAdmin.onopen = () => {
+
+        // Autenticación: primer mensaje obligatorio antes que cualquier otra cosa.
+        wsAdmin.send(JSON.stringify({ tipo: 'auth', token: token }));
 
         setWsStatus(true);
 
@@ -864,7 +909,7 @@ function conectarWebSocket() {
 
         } else if (data.tipo === 'info') {
 
-            addLog('activity', `ℹ️ ${data.motivo}`);
+            addLog('activity', `${data.motivo}`);
 
         } else if (data.tipo === 'error') {
 
@@ -983,7 +1028,7 @@ function wsEnviar(payload) {
 
     }
 
-    addLog('activity', `Enviando WS: ${payload.tipo} ${payload.ip ? '→ ' + payload.ip : ''}`);
+    addLog('activity', `Enviando WS: ${payload.tipo} ${payload.ip ? '-> ' + payload.ip : ''}`);
 
     wsAdmin.send(JSON.stringify(payload));
 
@@ -1489,9 +1534,9 @@ function renderTerminales(terminales, sesiones = []) {
 
         
 
-        // Buscar sesión activa para esta terminal
-
-        const sesion = sesiones.find(s => s.terminal_ip === t.ip);
+        // Sesión activa embebida en la terminal (fuente canónica, sin límite ni filtros)
+        // Fallback: buscar en el array de historial por IP (compatibilidad con respuestas antiguas)
+        const sesion = t.sesion_activa || sesiones.find(s => s.terminal_ip === t.ip && s.activa);
 
 
 
@@ -1515,7 +1560,7 @@ function renderTerminales(terminales, sesiones = []) {
 
             botonesPrimarios = `
 
-                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"<i class="ph ph-power"></i> Apagar PC</button>
+                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> Apagar PC</button>
                 ${btnEliminar}
 
             `;
@@ -1526,7 +1571,7 @@ function renderTerminales(terminales, sesiones = []) {
 
                 <button class="btn-card-desbloquear" onclick="mostrarModalDesbloqueo('${esc(t.ip)}', '${pcNombre}')"><i class="ph ph-lock-open"></i> Desbloquear</button>
 
-                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"<i class="ph ph-power"></i> Apagar PC</button>
+                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> Apagar PC</button>
 
             `;
 
@@ -1536,7 +1581,7 @@ function renderTerminales(terminales, sesiones = []) {
 
                 <button class="btn-card-bloquear" onclick="bloquearTerminal('${esc(t.ip)}', '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-lock"></i> Bloquear</button>
 
-                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"<i class="ph ph-power"></i> Apagar PC</button>
+                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> Apagar PC</button>
 
             `;
 
@@ -3183,7 +3228,7 @@ async function descargarBackup() {
         const a    = document.createElement('a');
         a.href = url; a.download = name; a.click();
         URL.revokeObjectURL(url);
-        if (status) status.textContent = `✓ Descargado: ${name}`;
+        if (status) status.textContent = `Descargado: ${name}`;
         mostrarNotificacion('Backup descargado correctamente', 'ok');
     } catch (e) {
         if (status) status.textContent = `Error: ${e.message}`;
@@ -3671,88 +3716,13 @@ async function guardarRutaDistribucion() {
             if (status) { status.textContent = data.detail || 'Error al guardar.'; status.className = 'text-xs text-red-500 min-h-4'; }
             return;
         }
-        if (status) { status.textContent = '✓ Ruta guardada correctamente.'; status.className = 'text-xs text-emerald-500 min-h-4'; }
+        if (status) { status.textContent = 'Ruta guardada correctamente.'; status.className = 'text-xs text-emerald-500 min-h-4'; }
         setTimeout(() => { if (status) status.textContent = ''; }, 3000);
     } catch(e) {
         if (status) { status.textContent = 'Error de conexión.'; status.className = 'text-xs text-red-500 min-h-4'; }
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// CONFIGURACIÓN — PUBLICAR NUEVA VERSIÓN DEL CLIENTE
-// ═══════════════════════════════════════════════════════════════════
-
-async function publicarCliente() {
-    const inputVer     = document.getElementById('cfg-publicar-version');
-    const inputFile    = document.getElementById('cfg-publicar-archivo');
-    const status       = document.getElementById('cfg-publicar-status');
-    const btn          = document.getElementById('cfg-publicar-btn');
-    const progressWrap = document.getElementById('cfg-publicar-progress');
-    const progressBar  = document.getElementById('cfg-publicar-bar');
-
-    const version = (inputVer?.value || '').trim();
-    const file    = inputFile?.files?.[0];
-
-    const setStatus = (txt, color) => {
-        if (status) { status.textContent = txt; status.className = `text-xs min-h-4 ${color}`; }
-    };
-
-    if (!version)                         { setStatus('Especifica una versión.', 'text-red-500'); return; }
-    if (!file)                            { setStatus('Selecciona el archivo .exe.', 'text-red-500'); return; }
-    if (!file.name.toLowerCase().endsWith('.exe')) { setStatus('El archivo debe ser un .exe.', 'text-red-500'); return; }
-    if (file.size < 1024 * 1024)          { setStatus('Archivo demasiado pequeño (<1MB).', 'text-red-500'); return; }
-
-    if (!confirm(`¿Publicar versión ${version}? Los kioskos la aplicarán al próximo reinicio.`)) return;
-
-    const fd = new FormData();
-    fd.append('version', version);
-    fd.append('archivo', file);
-
-    btn.disabled = true;
-    btn.classList.add('opacity-60', 'cursor-not-allowed');
-    progressWrap.classList.remove('hidden');
-    progressBar.style.width = '0%';
-    setStatus(`Subiendo ${(file.size / 1024 / 1024).toFixed(1)} MB...`, 'text-slate-500');
-
-    // Usamos XHR en vez de fetch para poder mostrar progreso real de subida
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_BASE}/admin/publicar-cliente`);
-    const headers = authHeaders();
-    for (const k in headers) xhr.setRequestHeader(k, headers[k]);
-
-    xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-            const pct = (e.loaded / e.total) * 100;
-            progressBar.style.width = pct.toFixed(1) + '%';
-            setStatus(`Subiendo ${(e.loaded / 1024 / 1024).toFixed(1)} / ${(e.total / 1024 / 1024).toFixed(1)} MB (${pct.toFixed(0)}%)`, 'text-slate-500');
-        }
-    };
-
-    xhr.onload = () => {
-        btn.disabled = false;
-        btn.classList.remove('opacity-60', 'cursor-not-allowed');
-        let data = {};
-        try { data = JSON.parse(xhr.responseText); } catch {}
-        if (xhr.status >= 200 && xhr.status < 300) {
-            progressBar.style.width = '100%';
-            setStatus(`✓ Versión ${data.version} publicada (${(data.tamano_bytes / 1024 / 1024).toFixed(1)} MB). Los kioskos se actualizarán al reiniciar.`, 'text-emerald-500');
-            inputFile.value = '';
-            setTimeout(() => { progressWrap.classList.add('hidden'); }, 4000);
-        } else {
-            setStatus(`Error: ${data.detail || xhr.statusText || 'fallo al publicar'}`, 'text-red-500');
-            progressWrap.classList.add('hidden');
-        }
-    };
-
-    xhr.onerror = () => {
-        btn.disabled = false;
-        btn.classList.remove('opacity-60', 'cursor-not-allowed');
-        setStatus('Error de conexión durante la subida.', 'text-red-500');
-        progressWrap.classList.add('hidden');
-    };
-
-    xhr.send(fd);
-}
 
 // ═══════════════════════════════════════════════════════════════════
 // CONFIGURACIÓN — BACKDOOR
@@ -3822,10 +3792,82 @@ async function guardarConfigBackdoor() {
             setStatus(data.detail || 'Error al guardar configuración.', 'text-red-500');
             return;
         }
-        setStatus('✓ Configuración guardada correctamente.', 'text-emerald-500');
+        setStatus('Configuración guardada correctamente.', 'text-emerald-500');
         setTimeout(() => { if(status) status.textContent = ''; }, 3000);
     } catch (e) {
         setStatus('Error de conexión.', 'text-red-500');
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN — MODO OFFLINE
+// ═══════════════════════════════════════════════════════════════════
+
+async function cargarConfigOffline() {
+    try {
+        const res = await fetch(`${API_BASE}/config/offline-pin`, { headers: authHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const mods = data.offline_modifiers;
+        const eAlt   = document.getElementById('cfg-offline-alt');
+        const eCtrl  = document.getElementById('cfg-offline-ctrl');
+        const eShift = document.getElementById('cfg-offline-shift');
+
+        if (eAlt)   eAlt.checked   = (mods & 0x0001) !== 0;
+        if (eCtrl)  eCtrl.checked  = (mods & 0x0002) !== 0;
+        if (eShift) eShift.checked = (mods & 0x0004) !== 0;
+
+        const eKey = document.getElementById('cfg-offline-key');
+        if (eKey) eKey.value = data.offline_key;
+
+        const ePin = document.getElementById('cfg-offline-pin');
+        if (ePin) ePin.value = data.offline_pin;
+    } catch(e) {
+        console.error('Error cargando config offline:', e);
+    }
+}
+
+async function guardarConfigOffline() {
+    const status = document.getElementById('cfg-offline-status');
+    const setStatus = (txt, color) => {
+        if (status) { status.textContent = txt; status.className = `text-xs min-h-4 mt-2 text-right ${color}`; }
+    };
+
+    let mods = 0;
+    if (document.getElementById('cfg-offline-alt')?.checked)   mods |= 0x0001;
+    if (document.getElementById('cfg-offline-ctrl')?.checked)  mods |= 0x0002;
+    if (document.getElementById('cfg-offline-shift')?.checked) mods |= 0x0004;
+
+    if (mods === 0) {
+        setStatus('Debes seleccionar al menos un modificador (Ctrl, Alt o Shift).', 'text-red-500');
+        return;
+    }
+
+    const key = parseInt(document.getElementById('cfg-offline-key')?.value || 0, 10);
+    const pin = (document.getElementById('cfg-offline-pin')?.value || '').trim();
+
+    if (!pin) {
+        setStatus('El PIN offline no puede estar vacío.', 'text-red-500');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/config/offline-pin`, {
+            method: 'PUT',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ offline_modifiers: mods, offline_key: key, offline_pin: pin })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            setStatus(data.detail || 'Error al guardar.', 'text-red-500');
+            return;
+        }
+        setStatus('Configuracion offline guardada correctamente.', 'text-emerald-500');
+        setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+    } catch (e) {
+        setStatus('Error de conexion.', 'text-red-500');
     }
 }
 
@@ -3899,7 +3941,7 @@ async function guardarMensajeCierre() {
             if (id) await fetch(`${API_BASE}/mensajes/${id}/toggle`, { method: 'PUT', headers: authHeaders() });
         }
 
-        setS('✓ Guardado', 'text-emerald-500');
+        setS('Guardado', 'text-emerald-500');
         setTimeout(() => { if (status) status.textContent = ''; }, 3000);
         await cargarMensajes();
     } catch (e) { setS('Error de conexión.', 'text-red-500'); }
@@ -3923,7 +3965,7 @@ async function agregarMensajeExtra() {
         const data = await res.json();
         if (!res.ok) { setS(data.detail || 'Error al agregar.', 'text-red-500'); return; }
 
-        setS('✓ Agregado', 'text-emerald-500');
+        setS('Agregado', 'text-emerald-500');
         setTimeout(() => { if (status) status.textContent = ''; }, 2000);
         const fEl = document.getElementById('msg-extra-fecha');
         const hEl = document.getElementById('msg-extra-hora');

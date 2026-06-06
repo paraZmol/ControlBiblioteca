@@ -1,0 +1,88 @@
+═══════════════════════════════════════════════════════════════════
+  ÍNDICE DE DOCUMENTACIÓN — Control Biblioteca UNASAM
+  Actualizado: 2026-06-04
+═══════════════════════════════════════════════════════════════════
+
+Este sistema controla el acceso a las PCs de bibliotecas/centros de cómputo de
+la UNASAM: bloquea las PCs, los alumnos las desbloquean con su DNI, y un
+administrador monitorea y controla todo desde un panel web.
+
+Se instala de forma independiente en cada lugar (biblioteca, otras facultades).
+Cada instalación tiene su propio servidor; nada de IPs está fijo en el código.
+
+
+───────────────────────────────────────────────────────────────────
+  DOCUMENTOS DE FLUJO (cómo funciona el sistema)
+───────────────────────────────────────────────────────────────────
+  docs/FLUJO_ALUMNO.txt
+    → Paso a paso de cómo un alumno usa una terminal: arranque, login,
+      desbloqueo, monitoreo de actividad y cierre de sesión.
+
+  docs/FLUJO_ADMIN.txt
+    → Paso a paso de cómo el administrador usa el panel: login, monitoreo en
+      vivo, las 6 pestañas, desbloquear/bloquear/apagar PCs, sospechas e
+      incidencias, procesos ignorados, y diferencias admin/superadmin.
+
+  docs/CASOS_DE_USO.txt
+    → Guía operativa: "¿Cómo hago X? ¿Qué debería pasar?"
+      Cubre: cambiar contraseña, banear/desbanear alumnos, bloquear PCs,
+      buscar historial, investigar sospechas, actualizar el kiosco, backup,
+      errores comunes y qué significan.
+
+
+───────────────────────────────────────────────────────────────────
+  OTROS DOCUMENTOS DEL PROYECTO
+───────────────────────────────────────────────────────────────────
+  VULNERABILIDADES.txt (en la raíz)
+    → Análisis de seguridad. Estado de cada vulnerabilidad (resuelta/pendiente)
+      con cita de archivo:línea. Incluye el 2º análisis exhaustivo (categoría E).
+
+
+───────────────────────────────────────────────────────────────────
+  ARQUITECTURA EN 30 SEGUNDOS
+───────────────────────────────────────────────────────────────────
+  3 partes:
+
+  1. SERVIDOR (carpeta server/) — Python + FastAPI + MySQL
+     - Corre en la PC del encargado de cada lugar.
+     - Expone API REST (/api/...) y WebSockets (/ws/terminal, /ws/admin).
+     - Base de datos: MySQL (biblioteca_unasam). NO usa SQLite.
+     - Config en server/.env (BD, SECRET_KEY, etc.).
+
+  2. CLIENTE KIOSCO (carpeta client/) — C# WPF (Windows)
+     - Corre en cada PC de uso de los alumnos.
+     - Bloquea la PC, pide DNI, se conecta al servidor por WebSocket.
+     - Monitorea la actividad (programas, descargas).
+     - Se auto-actualiza descargando el .exe nuevo del servidor.
+     - Config en kiosco.config.json (IP del servidor).
+
+  3. PANEL ADMIN (carpeta admin/) — HTML + JavaScript
+     - Se abre en el navegador: http://<servidor>:8000/admin/
+     - Monitoreo en vivo y control de las PCs.
+
+
+───────────────────────────────────────────────────────────────────
+  CONCEPTOS CLAVE
+───────────────────────────────────────────────────────────────────
+  - SESIÓN: cuando un alumno desbloquea una PC con su DNI. Tiene estado
+    (activa/cerrada) y se confirma para evitar "sesiones fantasma".
+  - TERMINAL / NODO: una PC con el cliente kiosco instalado.
+  - ACTIVIDAD: lo que hace el alumno (abrir programas, descargar archivos).
+    Se clasifica en "normal" o "sospechoso".
+  - SOSPECHA: alerta automática cuando se detecta actividad sospechosa.
+  - INCIDENCIA: falta registrada contra un alumno (leve/grave).
+  - BAN: bloqueo de un DNI para que no pueda usar las PCs.
+  - PROCESO IGNORADO: ejecutable que el admin marca para no verlo en la lista
+    (se sigue guardando, solo se oculta de la vista).
+  - ROL: admin (básico) o superadmin (acceso completo).
+
+
+───────────────────────────────────────────────────────────────────
+  QUÉ CAMBIA EN CADA INSTALACIÓN (portabilidad)
+───────────────────────────────────────────────────────────────────
+  Solo configuración local, NO código:
+    - server/.env          → datos de la BD y SECRET_KEY de ESE servidor.
+    - kiosco.config.json   → IP del servidor, en cada PC cliente.
+    - PATH de mysqldump    → para que funcione el backup (ver VULNERABILIDADES
+                             A-6: el código lo autodetecta o se pone en .env).
+  El panel admin se adapta solo a la IP del servidor (usa window.location).
