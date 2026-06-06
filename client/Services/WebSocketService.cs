@@ -56,14 +56,26 @@ namespace ControlBiblioteca.Client.Services
                 {
                     _ws = new ClientWebSocket();
                     await _ws.ConnectAsync(new Uri(_url), _cts.Token);
-                    OnConexionCambiada?.Invoke(true);
                     espera = RECONEXION_MIN; // resetear backoff al conectar
 
-                    // Enviar saludo inicial con hostname si está configurado
+                    // Enviar saludo ANTES de notificar conexión — el servidor
+                    // procesa el hello y puede mandar bloquear antes de que
+                    // OnConexionCambiada active la lógica de sesión offline.
+                    // Al invertir el orden: primero hello → servidor responde
+                    // hello_ack (o bloquear) → cliente ya sabe el estado →
+                    // luego OnConexionCambiada activa la lógica correcta.
                     if (InitialGreeting != null)
                         await EnviarAsync(InitialGreeting());
 
                     _ = Task.Run(HeartbeatLoopAsync, _cts.Token);
+
+                    // Leer exactamente un mensaje (el hello_ack o bloquear)
+                    // antes de notificar al resto del cliente
+                    string? primerMensaje = await LeerUnMensajeAsync();
+                    OnConexionCambiada?.Invoke(true);
+                    if (primerMensaje != null)
+                        OnMensajeRecibido?.Invoke(primerMensaje);
+
                     await EscucharAsync();
                 }
                 catch (OperationCanceledException)
@@ -128,6 +140,19 @@ namespace ControlBiblioteca.Client.Services
         }
 
         // ── Métodos privados ───────────────────────────────────────
+
+        private async Task<string?> LeerUnMensajeAsync()
+        {
+            if (_ws == null) return null;
+            try
+            {
+                var buffer = new byte[4096];
+                var result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token);
+                if (result.MessageType == WebSocketMessageType.Close) return null;
+                return Encoding.UTF8.GetString(buffer, 0, result.Count);
+            }
+            catch { return null; }
+        }
 
         private async Task EscucharAsync()
         {

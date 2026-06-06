@@ -12,8 +12,12 @@ namespace ControlBiblioteca.Client.Services
         public int    ServerPort   { get; set; } = 8000;
         
         public int    BackdoorModifiers { get; set; } = 0x0003; // MOD_CONTROL | MOD_ALT
-        public int    BackdoorKey       { get; set; } = 0x7B;   // VK_F12
+        public int    BackdoorKey       { get; set; } = 0x76;   // VK_F7
         public string BackdoorPin       { get; set; } = "UNASAM2025";
+
+        public int    OfflineModifiers  { get; set; } = 0x0003; // MOD_CONTROL | MOD_ALT
+        public int    OfflineKey        { get; set; } = 0x7A;   // VK_F11
+        public string OfflinePin        { get; set; } = "UNASAM";
 
         internal string WsBaseUrl => $"ws://{ServerIp}:{ServerPort}";
 

@@ -197,6 +197,22 @@
 
     <Grid IsHitTestVisible="True">
 
+        <!-- ══ TOAST — notificación flotante en esquina superior derecha ══ -->
+        <Border x:Name="ToastBorder"
+                HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="0,40,24,0"
+                CornerRadius="14" Padding="20,14"
+                MaxWidth="380"
+                Panel.ZIndex="99"
+                Visibility="Collapsed"
+                Background="#E61E1E2E"
+                BorderBrush="#806366F1"
+                BorderThickness="1">
+            <TextBlock x:Name="TxtToast"
+                       Foreground="White" FontSize="14" FontWeight="SemiBold"
+                       TextWrapping="Wrap" MaxWidth="300"/>
+        </Border>
+
         <!-- ══ COMUNICADO: carrusel para alumno no registrado ══ -->
         <Grid x:Name="PanelComunicado" Panel.ZIndex="10"
               Visibility="Collapsed"
@@ -343,7 +359,7 @@
                     <TextBlock x:Name="TxtNombreEquipo" Text="Equipo: —"
                                FontSize="11" FontWeight="SemiBold" Foreground="#00B4DB"
                                HorizontalAlignment="Center" TextOptions.TextFormattingMode="Display"/>
-                    <TextBlock Text="✓ v4.0 — actualización exitosa"
+                    <TextBlock x:Name="TxtVersionActual"
                                FontSize="10" Foreground="#44FF88"
                                HorizontalAlignment="Center" Margin="0,2,0,0"/>
                 </StackPanel>

@@ -1,0 +1,44 @@
+UBICACION DEL EJECUTABLE
+========================
+
+Carpeta donde se genera el compilado (publish):
+  c:\Users\nunes\StudioProjects\control\client\publish\ControlBiblioteca.Client.exe
+
+Carpeta de despliegue (kiosco):
+  C:\WinSysCache\ControlBiblioteca.Client.exe
+
+Proyecto fuente (cliente WPF):
+  c:\Users\nunes\StudioProjects\control\client\
+
+Servidor FastAPI:
+  c:\Users\nunes\StudioProjects\control\server\
+
+Panel web (admin):
+  c:\Users\nunes\StudioProjects\control\admin\
+
+
+COMANDO PARA RECOMPILAR Y DESPLEGAR
+=====================================
+
+Desde PowerShell:
+
+  cd c:\Users\nunes\StudioProjects\control\client
+  dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o publish\
+
+Luego copiar el exe al kiosco:
+
+  Copy-Item "c:\Users\nunes\StudioProjects\control\client\publish\ControlBiblioteca.Client.exe" "C:\WinSysCache\ControlBiblioteca.Client.exe" -Force
+
+
+COMANDO PARA INICIAR EL SERVIDOR
+==================================
+
+  cd c:\Users\nunes\StudioProjects\control\server
+  c:\Users\nunes\StudioProjects\control\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+
+NOTAS
+======
+- Recompilar siempre antes de reemplazar el exe en C:\WinSysCache\
+- Reiniciar el servidor si se modifican archivos en server\
+- Recargar el panel con Ctrl+F5 si se modifican archivos en admin\
