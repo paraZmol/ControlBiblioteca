@@ -118,84 +118,100 @@ Impacto eliminado:
 ──────────────────────────────────────────────────────────
 A-5. [NECESARIO] Credenciales por defecto registradas en log
 ──────────────────────────────────────────────────────────
-ESTADO: PENDIENTE (verificado 2026-06-03)
-Archivo: server/main.py:433, 445 — startup lifespan
+ESTADO: ✅ RESUELTA (parcial — ver pendiente) (2026-06-03)
+Archivo: server/main.py:59 (constante), bloque de creación de usuarios
 
-Descripción:
-  Al arrancar, si no existen usuarios, el servidor crea superadmin/admin123 y
-  admin/admin123, y los REGISTRA en texto plano en el log:
-    main.py:433  logger.info("Usuario superadmin creado (superadmin/admin123)")
-    main.py:445  logger.info("Usuario admin creado (admin/admin123)")
-  El PIN del kiosco también tiene valor por defecto.
-  No se fuerza cambio de contraseña en el primer inicio de sesión.
+Descripción (resuelta):
+  1. Los logs YA NO incluyen la contraseña. Antes:
+       "Usuario superadmin creado (superadmin/admin123)"
+     Ahora (logger.warning, sin contraseña):
+       "Usuario 'superadmin' creado con la contraseña inicial por defecto.
+        Inicie sesión y CÁMBIELA cuanto antes..."
+  2. La contraseña inicial YA NO está hardcodeada: se lee de
+     _DEFAULT_ADMIN_PASSWORD (main.py:59), tomada de DEFAULT_ADMIN_PASSWORD
+     en .env (fallback "admin123" solo si no se define).
+  Nota: la constante solo se usa al CREAR usuarios en una BD vacía; no afecta
+  a los usuarios ya existentes ni al login actual.
 
-Impacto:
-  - Si el admin no cambia las contraseñas, el sistema queda expuesto
-  - Los logs revelan las credenciales iniciales en claro
-
-Cómo arreglarlo:
-  - No registrar la contraseña en el log (solo "usuario X creado")
-  - Forzar cambio de contraseña en el primer login
-  - Idealmente, exigir contraseñas iniciales desde el .env
+PENDIENTE (no cubierto en este alcance):
+  - Forzar cambio de contraseña en el primer login (requiere campo nuevo en BD
+    + lógica de login + UI). Se decidió dejarlo para una iteración posterior.
+  - Cambiar la contraseña real de superadmin/admin si aún es "admin123".
 
 
 ──────────────────────────────────────────────────────────
 A-6. [NECESARIO] Credenciales de BD expuestas en CLI (mysqldump)
 ──────────────────────────────────────────────────────────
-ESTADO: PENDIENTE (verificado 2026-06-03)
-Archivo: server/api/endpoints.py:774-785 — función backup_sql
+ESTADO: ✅ RESUELTA (2026-06-03)
+Archivo: server/api/endpoints.py — función backup_sql
 
-Descripción:
-  mysqldump se ejecuta con --password={password} como argumento de línea de
-  comando (endpoints.py:777), exponiendo la contraseña en la lista de procesos
-  (ps aux / tasklist) y en logs del SO.
+Descripción (resuelta):
+  Antes mysqldump se ejecutaba con --password={password} (visible en
+  tasklist/ps). Ahora la contraseña se pasa por la variable de entorno
+  MYSQL_PWD (que mysqldump lee automáticamente), eliminada de la línea de
+  comando:
+    - Se quitó el argumento --password=... del cmd.
+    - Se agregó env = {**os.environ, "MYSQL_PWD": password} al subproceso.
+  Verificado con el mysqldump real (MySQL Server 9.6): autentica correctamente
+  con MYSQL_PWD y genera el dump. La contraseña ya no aparece en el comando.
 
-Impacto:
-  - Credenciales de BD visibles para otros procesos/usuarios del sistema
+PATH de mysqldump (resuelto de forma robusta en el código):
+  - El endpoint ya NO depende del PATH heredado al arrancar el servidor (que
+    causó un FileNotFoundError [WinError 2] cuando uvicorn se inició sin MySQL
+    en el PATH). Se agregó _resolver_mysqldump() que busca en este orden:
+      1. MYSQLDUMP_PATH del .env (ruta absoluta explícita)
+      2. shutil.which('mysqldump') — PATH actual
+      3. Carpetas típicas: C:\Program Files\MySQL\MySQL Server*\bin (real
+         primero), y C:\xampp\mysql\bin como último recurso.
+    Se respeta el orden de patrones para evitar el mysqldump de XAMPP, que es
+    incompatible (caching_sha2_password).
+  - Verificado: backup completo OK (269 KB, incluye CREATE TABLE, exit 0)
+    INCLUSO sin mysqldump en el PATH del proceso.
 
-Cómo arreglarlo:
-  - Usar archivo .my.cnf con permisos 600
-  - O pasar la contraseña por variable de entorno MYSQL_PWD / stdin
+  PORTABILIDAD (PC del encargado / servidor futuro):
+  - Si MySQL se instala en una ruta estándar de Windows, el resolver lo
+    encuentra solo. Si está en una ruta no estándar, basta definir
+    MYSQLDUMP_PATH=<ruta\mysqldump.exe> en el .env.
 
 
 ──────────────────────────────────────────────────────────
 A-7. [NECESARIO] Endpoint backup-sql accesible a cualquier admin
 ──────────────────────────────────────────────────────────
-ESTADO: PENDIENTE (verificado 2026-06-03)
-Archivo: server/api/endpoints.py:754-757 — función backup_sql
+ESTADO: ✅ RESUELTA (2026-06-03)
+Archivo: server/api/endpoints.py — función backup_sql
 
-Descripción:
-  /admin/backup-sql solo exige login (Depends(obtener_usuario_actual)) pero
-  NO verifica que sea superadmin. Un usuario rol 'admin' puede exportar toda
-  la base de datos. (Comparar: importar-excel, importar-maestro SÍ verifican
-  el rol superadmin — backup-sql se quedó sin esa verificación.)
+Descripción (resuelta):
+  El endpoint /admin/backup-sql ahora verifica el rol al inicio:
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, ...)
+  El parámetro pasó de `_` a `admin` para poder comprobar el rol. Un usuario
+  con rol 'admin' básico ya NO puede exportar la base completa; solo superadmin.
 
-Impacto:
-  - Exportar todos los datos de alumnos, sesiones e incidencias
-  - Violación de privacidad y cumplimiento normativo
-
-Cómo arreglarlo:
-  - Cambiar la dependencia y agregar: if admin.rol != "superadmin": raise HTTPException(403)
+Impacto eliminado:
+  - Un admin básico ya no puede exportar la PII de todos los alumnos/sesiones.
 
 
 ──────────────────────────────────────────────────────────
 A-8. [NECESARIO] Token JWT pasado como parámetro en la URL del WebSocket
 ──────────────────────────────────────────────────────────
-ESTADO: PENDIENTE (mitigado parcialmente por red local + auth funciona)
-Archivo: server/main.py:1131 (Query token), admin/static/js/app.js:807
+ESTADO: ✅ RESUELTA (2026-06-03)
+Archivo: server/main.py (websocket_admin), admin/static/js/app.js
 
-Descripción:
-  El token JWT se pasa como query param:
-    ws://host/ws/admin?token=eyJ...
-  Queda en logs del servidor, proxies e historial. La AUTENTICACIÓN ya funciona
-  (A-1 resuelta), pero el método de transmisión sigue siendo subóptimo.
+Descripción (resuelta):
+  El token YA NO viaja en la URL. Ahora:
+    - Servidor: websocket_admin() ya no recibe token por Query. Tras accept(),
+      espera (timeout 10s) el PRIMER mensaje {"tipo":"auth","token":"<jwt>"}.
+      Si no llega, no es 'auth', o el token es inválido → cierra (4001/4003)
+      sin entrar al loop principal. Se eliminó el import Query (sin uso).
+    - Frontend: la URL es ws://host/ws/admin (sin token). En onopen se envía
+      {tipo:"auth", token} como primer mensaje. (JS v18.)
+  Verificado de extremo a extremo contra servidor con el código nuevo:
+    Caso token válido  → CONECTADO, recibe status_update.
+    Caso token inválido → conexión RECHAZADA.
+    Caso sin auth       → conexión RECHAZADA.
 
-Impacto:
-  - Token expuesto en logs de acceso → posible robo de sesión
-
-Cómo arreglarlo:
-  - Enviar el token en el primer mensaje WebSocket (tipo "auth") tras conectar
-  - El servidor rechaza mensajes hasta recibir el auth inicial
+Impacto eliminado:
+  - El token ya no aparece en logs de acceso / proxies / historial de URL.
 
 
 ═══════════════════════════════════════════════════════════
@@ -221,20 +237,30 @@ Pendiente menor (ver C-5):
 B-2. [MEDIO] Mensajes de actividad WebSocket sin validar origen
 ──────────────────────────────────────────────────────────
 ESTADO: PARCIAL
-Archivo: server/main.py — handler tipo "actividad"
+Archivo: server/main.py — websocket_terminal (~701-720)
 
-Descripción:
-  El WS de terminal (/ws/terminal/{ip}) no exige auth como el de admin. Un
-  cliente en la red podría conectarse y enviar actividad falsa asociada a un
-  alumno con sesión activa. El servidor sí valida que exista la terminal y la
-  sesión activa antes de guardar, lo que limita el abuso.
+ESTADO: ✅ RESUELTA (2026-06-03) — también resuelve E-1
 
-Impacto:
-  - Inyectar logs de actividad falsos / generar sospechas falsas
+Descripción (resuelta):
+  El WS de terminal usaba la IP del path ({terminal_ip}), controlada por el
+  cliente, como identidad — permitía suplantar otra PC. Ahora el servidor usa
+  la IP REAL de la conexión TCP (websocket.client.host) como identidad de
+  confianza; la IP del path solo se registra para diagnóstico y NO se exige que
+  coincida (algunas PCs multi-interfaz, ej. REZE, reportan una IP de path
+  distinta a su ruta real al servidor — exigir coincidencia las habría roto).
+  La identidad canónica definitiva sigue siendo el hostname del 'hello'.
 
-Cómo arreglarlo:
-  - Token/secreto por terminal al conectar el WS de terminal
-  - Validar que la IP de conexión coincida con la terminal registrada
+  Verificado de extremo a extremo: una conexión que pone una IP FALSA en la URL
+  (10.21.1.99) queda registrada con su IP REAL (127.0.0.1), no la falsa, y la
+  conexión sigue funcionando (heartbeat/hello_ack OK).
+
+Impacto eliminado:
+  - Una PC ya no puede suplantar a otra manipulando la IP de la URL.
+  - Se limita la inyección de actividad falsa a nombre de otra terminal.
+
+NOTA: Esto NO añade un secreto/token por terminal (eso requeriría recompilar el
+  cliente). Un atacante en la MISMA IP de una PC real podría aún enviar mensajes;
+  para defensa total haría falta el token por terminal (queda como mejora futura).
 
 
 ──────────────────────────────────────────────────────────
@@ -254,45 +280,36 @@ Descripción (resuelta):
 ──────────────────────────────────────────────────────────
 B-4. [MEDIO] Sin encabezados de seguridad HTTP en el panel admin
 ──────────────────────────────────────────────────────────
-ESTADO: PENDIENTE (verificado 2026-06-03)
-Archivo: server/main.py:465-473 (solo CORSMiddleware)
+ESTADO: ✅ RESUELTA (2026-06-04)
+Archivo: server/main.py — middleware agregar_headers_seguridad
 
-Descripción:
-  Solo está configurado CORSMiddleware. No hay X-Frame-Options,
-  Content-Security-Policy, X-Content-Type-Options ni Strict-Transport-Security.
-
-Impacto:
-  - Clickjacking, MIME sniffing
-
-Cómo arreglarlo:
-  - Middleware FastAPI que inyecte al menos:
-    X-Frame-Options: DENY ; X-Content-Type-Options: nosniff
+Descripción (resuelta):
+  Se agregó un middleware @app.middleware("http") que inyecta en TODAS las
+  respuestas:
+    X-Frame-Options: DENY                (anti-clickjacking)
+    X-Content-Type-Options: nosniff      (anti MIME sniffing)
+    Referrer-Policy: same-origin
+    Permissions-Policy: geolocation=(), microphone=(), camera=()
+  NO se incluye HSTS (el sistema corre en HTTP/red local; forzaría HTTPS y
+  rompería el acceso) ni CSP estricta (el panel usa Tailwind/Phosphor desde CDN).
+  Verificado: los 4 headers aparecen en las respuestas (probado en servidor).
 
 
 ──────────────────────────────────────────────────────────
 B-5. [MEDIO] Mensajes de error verbosos exponen detalles internos
 ──────────────────────────────────────────────────────────
-ESTADO: PENDIENTE (verificado 2026-06-03 — múltiples ubicaciones)
-Archivo: server/api/endpoints.py — varias
+ESTADO: ✅ RESUELTA (2026-06-04) — también cubre E-12
+Archivo: server/api/endpoints.py y server/main.py — varias
 
-Descripción:
-  Varios endpoints devuelven la excepción interna al cliente:
-    :795   detail=f"mysqldump falló: {stderr.decode()[:300]}"
-    :1469  detail=f"Archivo Excel inválido: {e}"
-    :1486  detail=f"No se pudo preparar la terminal virtual: {e}"
-    :1610  detail=f"Error al guardar en la base de datos: {e}"
-    :1644  detail=f"Archivo Excel inválido: {e}"
-    :2295  detail=f"Archivo inválido: {e}"
-    :2640  detail=f"No se pudo crear la carpeta '{ruta}': {e}"
-    :2661  detail=f"Error escribiendo archivo: {e}"
-    :2675  detail=f"No se pudo reemplazar el ejecutable: {e}"
-
-Impacto:
-  - Revela estructura interna, comandos, rutas — útil para un atacante
-
-Cómo arreglarlo:
-  - Loguear el error completo solo en el servidor
-  - Devolver al cliente un mensaje genérico
+Descripción (resuelta):
+  Las 10 ubicaciones que devolvían la excepción interna al cliente ahora:
+    - Registran el detalle completo en el LOG del servidor (logger.error/warning).
+    - Devuelven al cliente un mensaje GENÉRICO ("Revise los logs...", "El archivo
+      no es un Excel válido", etc.).
+  Cubre: backup mysqldump, importar-excel (x2), terminal virtual, guardar BD,
+  importar-personal, publicar-cliente (crear carpeta, escribir, reemplazar,
+  version.txt) y /api/limpiar-todo (str(e)).
+  Verificado: 0 fugas de excepción al cliente; sintaxis OK.
 
 
 ──────────────────────────────────────────────────────────
@@ -312,55 +329,54 @@ Cómo arreglarlo:
 ──────────────────────────────────────────────────────────
 B-7. [MEDIO] Token JWT con expiración larga (8 horas) sin revocación
 ──────────────────────────────────────────────────────────
-ESTADO: PENDIENTE (verificado 2026-06-03)
-Archivo: server/auth_service.py:25 — ACCESS_TOKEN_EXPIRE_MINUTES = 480
+ESTADO: ✅ RESUELTA PARCIAL (2026-06-04)
+Archivo: server/auth_service.py — ACCESS_TOKEN_EXPIRE_MINUTES
 
-Descripción:
-  Tokens de 8 horas sin mecanismo de revocación. Logout no invalida el token.
+Descripción (resuelta):
+  La expiración se redujo de 8h (480 min) a 4h (240 min), configurable por
+  TOKEN_EXPIRE_MINUTES en .env. Reduce la ventana si un token es robado.
+  Verificado: carga 240 min (4h).
 
-Impacto:
-  - Token robado da acceso por hasta 8 horas
-
-Cómo arreglarlo:
-  - Reducir a 2-4 horas, o implementar blacklist/refresh tokens
+PENDIENTE (mejora futura, no en este alcance):
+  - Revocación real (blacklist de tokens) para invalidar al hacer logout.
+    Requiere tabla + verificación por request. Bajo el contexto (red local,
+    un admin) la reducción de expiración es la mejora de mayor valor/menor riesgo.
 
 
 ──────────────────────────────────────────────────────────
 B-8. [MEDIO] PII de alumnos registrada en logs del servidor
 ──────────────────────────────────────────────────────────
-ESTADO: PENDIENTE (verificado 2026-06-03)
-Archivo: server/main.py — múltiples
+ESTADO: ✅ RESUELTA (2026-06-04)
+Archivo: server/main.py — helpers _mask_dni / _mask_nombre + 13 logs
 
-Descripción:
-  Nombres completos y DNIs en texto plano en logs:
-    :139   logger.info(f"[SGA] Alumno: {nombres} {apellidos} | ... | DNI={dni_real}")
-    :924   logger.info(f"[WS] ... alumno OK: {nombres} {apellidos} | DNI={codigo}")
-    :1072  logger.info(f"[ACT] {nombre_red} | {alumno.dni} | ...")
-    :1274  logger.info(f"[WS-Admin] Sesión creada id=... para {alumno.nombre}")
-
-Impacto:
-  - Exposición de datos personales (cumplimiento normativo)
-
-Cómo arreglarlo:
-  - Enmascarar DNI (****1234) y nombres (iniciales) en logs operativos
+Descripción (resuelta):
+  Se agregaron helpers _mask_dni (71396514 -> ****6514) y _mask_nombre
+  (Juan Carlos Pérez -> J.C.P.) y se aplicaron a las 13 líneas de log que
+  exponían DNI o nombre (SGA, login WS, maestro, actividad, sesión admin, etc.).
+  Configurable: LOG_PII_CLARO=true en .env desactiva el enmascarado para
+  auditoría puntual.
+  NOTA: los usos NO-log (campo nombre de un objeto, nombre_display enviado al
+  cliente, mensaje al panel del admin) se mantienen en claro a propósito, porque
+  son datos funcionales, no logs.
+  Verificado: helpers probados; 0 PII en claro en logs.
 
 
 ──────────────────────────────────────────────────────────
 B-9. [MEDIO] Contraseñas sin requisitos de complejidad
 ──────────────────────────────────────────────────────────
-ESTADO: PENDIENTE (verificado 2026-06-03)
-Archivo: server/main.py:554-556 — endpoint /api/config/usuario
+ESTADO: ✅ RESUELTA (2026-06-04)
+Archivo: server/main.py — helper _validar_complejidad_password +
+         endpoint /api/config/usuario
 
-Descripción:
-  Solo se valida longitud mínima de 6 caracteres (main.py:555). Sin exigir
-  mayúsculas, números ni símbolos. "admin123" cumple este requisito.
+Descripción (resuelta):
+  Antes solo exigía 6 caracteres. Ahora un helper
+  _validar_complejidad_password exige: mínimo 8 caracteres, al menos 1
+  mayúscula y al menos 1 número. Se aplica al cambiar contraseña.
+  Verificado: rechaza "admin123" (sin mayúscula) y contraseñas cortas/sin
+  número; acepta "Admin123".
 
-Impacto:
-  - Contraseñas débiles fáciles de atacar por fuerza bruta
-
-Cómo arreglarlo:
-  - Exigir mínimo 8 caracteres, al menos 1 mayúscula y 1 número
-  - Validar en backend y formulario
+PENDIENTE menor: replicar la misma validación en el formulario del panel
+  (frontend) para feedback inmediato (el backend ya la exige, que es lo crítico).
 
 
 ──────────────────────────────────────────────────────────
@@ -560,32 +576,752 @@ Cómo mitigar:
   - Política de retención también para los respaldos (no acumular indefinido)
 
 
+══════════════════════════════════════════════════════════
+  CATEGORÍA E — SEGUNDO ANÁLISIS EXHAUSTIVO (2026-06-03)
+══════════════════════════════════════════════════════════
+  Auditoría independiente del código actual (servidor + cliente C#) tras
+  resolver A-1..A-8. Hallazgos NUEVOS verificados, deduplicados y con
+  severidad ajustada a la realidad (no se exageró). No se modificó código.
+
+──────────────────────────────────────────────────────────
+E-1. [NECESARIO] WebSocket /ws/terminal/{ip} sin autenticación
+──────────────────────────────────────────────────────────
+ESTADO: ✅ RESUELTA PARCIAL (2026-06-03) — ver B-2
+  Resuelta la SUPLANTACIÓN por IP de URL: el servidor ahora usa la IP real de
+  la conexión TCP como identidad (no la del path). Verificado de extremo a
+  extremo. Lo que QUEDA pendiente (mejora futura) es el token/secreto por
+  terminal para impedir que algo en la misma IP de una PC real inyecte
+  mensajes — requiere recompilar el cliente. Detalle completo en B-2.
+Archivo: server/main.py:701-733 — websocket_terminal
+
+Descripción:
+  El WS de terminal NO exige ninguna credencial. Cualquiera en la LAN puede
+  conectar a ws://servidor:8000/ws/terminal/<ip-cualquiera> y enviar mensajes
+  (hello, login_request, actividad, logout) haciéndose pasar por una PC. Además
+  el {terminal_ip} viene de la URL y NO se valida contra la IP real de la
+  conexión TCP (websocket.client.host), así que se puede suplantar otra PC.
+  (Es el mismo riesgo que B-2, pero confirmado y elevado: B-2 asumía que se
+  resolvía con A-1; A-1 solo protegió el WS de ADMIN, no el de terminal.)
+
+Impacto:
+  - Inyectar sesiones/actividad falsas a nombre de alumnos reales
+  - Suplantar la identidad de una terminal (registrar/bloquear PCs ajenas)
+  - Contaminar historial y disparar sospechas falsas
+
+Cómo arreglarlo (futuro):
+  - Token/secreto compartido por terminal al conectar, o
+  - Validar websocket.client.host contra la IP declarada, y
+  - Restringir por whitelist de IPs/subred del laboratorio
+
+
+──────────────────────────────────────────────────────────
+E-2. [NECESARIO] Auto-update del cliente sin verificar firma/hash (RCE vía MITM)
+──────────────────────────────────────────────────────────
+ESTADO: ⏳ PENDIENTE — PARA OTRA OCASIÓN (2026-06-04)
+  Requiere modificar y RECOMPILAR el cliente C# + redistribuir el .exe a las
+  27+ PCs + probar en campo (estando físicamente en la biblioteca). NO se toca
+  ahora. El servidor YA expone el SHA-256 en /version (ver E-9): lo que falta es
+  que el cliente lo compare contra el exe descargado antes de ejecutarlo.
+  PASO PREVIO HISTÓRICO: PENDIENTE (verificado 2026-06-03)
+Archivo: client/Services/AutoUpdater.cs (descarga ~117, validación ~221-230,
+         ejecución ~163-175)
+
+Descripción:
+  El cliente descarga ControlBiblioteca.Client.exe por HTTP plano y solo valida
+  la firma MZ (cabecera PE) + tamaño mínimo. NO verifica firma digital ni hash
+  criptográfico contra un valor esperado. Un atacante con MITM en la red local
+  (ARP spoofing, etc.) puede entregar un .exe malicioso que pase la validación
+  MZ; el cliente lo instala y lo ejecuta automáticamente → ejecución de código
+  arbitrario en todas las PCs del laboratorio.
+
+Impacto:
+  - RCE masivo en las terminales vía un solo punto (el canal de actualización)
+
+Cómo arreglarlo (futuro):
+  - Servir el exe por HTTPS y validar el certificado, o
+  - Publicar un hash SHA-256 firmado del exe y verificarlo antes de ejecutar, o
+  - Firmar digitalmente el exe y validar la firma Authenticode antes de lanzar
+
+
+──────────────────────────────────────────────────────────
+E-3. [NECESARIO] Comandos remotos del servidor ejecutados sin validar origen
+──────────────────────────────────────────────────────────
+ESTADO: ⏳ PENDIENTE — PARA OTRA OCASIÓN (2026-06-04)
+  Requiere modificar y RECOMPILAR el cliente C# + migrar el canal a WSS (TLS) o
+  firmar los comandos con HMAC + redistribuir + probar en campo. NO se toca
+  ahora (no estoy en la biblioteca para probar el despliegue).
+  PASO PREVIO HISTÓRICO: PENDIENTE (verificado 2026-06-03)
+Archivo: client/UI/MainWindow.xaml.cs (handler remote_command ~650-673 y
+         otros casos: desbloquear, bloquear, config_backdoor_update,
+         mensaje_broadcast), client/Services/WebSocketService.cs (ws:// sin TLS)
+
+Descripción:
+  El cliente acepta y ejecuta comandos del servidor (shutdown, desbloquear,
+  bloquear, actualizar PIN de backdoor, broadcast) sin autenticar el origen del
+  mensaje. La conexión es ws:// sin cifrado ni validación de certificado. Un
+  MITM o un servidor suplantado puede: apagar PCs (DoS), desbloquear/cerrar
+  sesiones, o CAMBIAR EL PIN DEL BACKDOOR del kiosco (config_backdoor_update).
+
+Impacto:
+  - DoS (apagado remoto), control de sesiones y del backdoor del kiosco
+
+Cómo arreglarlo (futuro):
+  - WSS (TLS) y/o firmar los comandos del servidor con HMAC verificable
+  - El cliente fija/verifica la identidad del servidor
+
+
+──────────────────────────────────────────────────────────
+E-4. [NECESARIO] PIN del backdoor del kiosco hardcodeado y editable por admin básico
+──────────────────────────────────────────────────────────
+ESTADO: ⏳ PENDIENTE — PARA OTRA OCASIÓN (2026-06-04)
+  Requiere cambiar el default en el cliente C# + modelo del servidor, RECOMPILAR
+  el cliente, restringir /api/config/backdoor a superadmin y redistribuir +
+  probar en campo. NO se toca ahora. NOTA: la parte de servidor (restringir el
+  endpoint a superadmin) SÍ se podría hacer aislada más adelante sin recompilar;
+  se deja junto a E-4 para abordar el backdoor completo de una vez.
+  PASO PREVIO HISTÓRICO: PENDIENTE (verificado 2026-06-03)
+Archivo: server/models.py (ConfiguracionKiosco backdoor_pin default
+         "UNASAM2025"), client/Services/KioscoConfig.cs (mismo default),
+         server/main.py (GET/PUT /api/config/backdoor sin check superadmin)
+
+Descripción:
+  El PIN para salir del modo kiosco (combo Ctrl+Alt+F12 + PIN) tiene valor por
+  defecto "UNASAM2025" hardcodeado tanto en el modelo del servidor como en el
+  cliente. Cualquiera que lea el binario (decompilador .NET) o el código lo
+  obtiene. Además, los endpoints /api/config/backdoor (GET y PUT) solo exigen
+  login, NO rol superadmin → un admin básico puede leer y cambiar el PIN. El
+  PIN viaja al cliente en claro (ws:// sin TLS) y se compara en texto plano sin
+  rate limiting de intentos.
+
+Impacto:
+  - Salida del modo kiosco por cualquiera que conozca/extraiga el PIN
+  - Un admin básico controla el mecanismo de seguridad del kiosco
+
+Cómo arreglarlo (futuro):
+  - Cambiar el PIN por defecto y no hardcodearlo (config por instalación)
+  - Restringir GET/PUT /api/config/backdoor a superadmin
+  - Transmitir por canal cifrado; limitar intentos de PIN en el cliente
+
+
+──────────────────────────────────────────────────────────
+E-5. [MEDIO] Múltiples endpoints /admin/* y /dashboard sin verificación de rol
+──────────────────────────────────────────────────────────
+ESTADO: ACEPTADO POR DISEÑO (2026-06-04)
+  Decisión del responsable: el rol 'admin' (no superadmin) DEBE conservar las
+  funciones operativas que hoy usa — exportar Excel/PDF del historial (para
+  reportes) y administrar la lista de procesos ignorados. Actualmente hay 1
+  admin + 1 superadmin, y se escalará a más admins; esas funciones son parte
+  de su trabajo diario. Las acciones realmente sensibles (crear usuarios,
+  importar padrón, backup completo SQL, bans, reset, publicar cliente, ruta de
+  distribución) YA exigen superadmin (verificado en el código). Por tanto NO se
+  restringe nada adicional: E-5 queda como riesgo aceptado, no como defecto.
+Archivo: server/api/endpoints.py — varios
+
+Descripción:
+  Endpoints bajo /admin (y /dashboard) que solo exigen login
+  (Depends(obtener_usuario_actual)) SIN comprobar rol. Un usuario 'admin'
+  básico accede a funciones que podrían ser de superadmin:
+    GET  /admin/sospechas
+    GET  /admin/actividad, /admin/actividad/resumen-hoy, /resumen-por-pc
+    GET  /admin/procesos-ignorados   (ver también D-1)
+    POST /admin/procesos-ignorados   (D-1)
+    DELETE /admin/procesos-ignorados/{id}  (D-1)
+    GET  /admin/exportar-excel, /admin/exportar-pdf
+    GET  /dashboard/stats
+  NOTA: depende del modelo de negocio si 'admin' debe ver esto. Pero al menos
+  las acciones de escritura (procesos-ignorados POST/DELETE) y las
+  exportaciones con PII deberían exigir superadmin.
+
+Impacto:
+  - Escalada de privilegios funcional: un admin básico opera como superadmin
+    en varias áreas (exportar datos, ocultar procesos, etc.)
+
+Cómo arreglarlo (futuro):
+  - Definir qué rol corresponde a cada endpoint y agregar el check de rol
+  - Como mínimo, restringir exportaciones y escritura de procesos-ignorados
+
+
+──────────────────────────────────────────────────────────
+E-6. [MEDIO] Endpoints públicos del kiosco sin auth ni rate limit (enumeración)
+──────────────────────────────────────────────────────────
+ESTADO: ✅ RESUELTA (2026-06-04)
+  Se añadió rate limiting POR IP (nuevo módulo server/core/rate_limit.py, en
+  memoria, sin dependencias externas) a los endpoints públicos que permitían
+  enumeración: /alumnos/validar y /admin/bans/check/{dni} → 30 peticiones/min
+  por IP. Suficiente para el uso real del kiosco (un login por vez) pero corta
+  un escaneo masivo de DNIs desde la WiFi del laboratorio. La descarga del .exe
+  sigue siendo pública por diseño (el kiosco la necesita sin credenciales);
+  el riesgo de exposición del binario se mitiga por E-9 (hash) y se acota con
+  whitelist de IPs a futuro. Verificado: el limitador corta tras el límite y
+  aísla por IP (prueba unitaria OK).
+ESTADO ANTERIOR: PARCIAL / DISEÑO (verificado 2026-06-03) — complementa C-1
+Archivo: server/api/endpoints.py — /alumnos/validar, /admin/bans/check/{dni},
+         /catalogos/motivos ; server/main.py — /api/server-info, /version,
+         /descargar-cliente
+
+Descripción:
+  Confirmados endpoints sin autenticación. /alumnos/validar y
+  /admin/bans/check/{dni} permiten enumerar DNIs y saber quién está baneado, sin
+  rate limiting. /descargar-cliente sirve el .exe sin auth (cualquiera en la red
+  lo baja). Es en parte diseño (el kiosco los necesita), pero sin rate limiting
+  ni whitelist de IPs el riesgo de enumeración masiva es real.
+
+Impacto:
+  - Enumeración de DNIs/alumnos y de bans desde el WiFi del laboratorio
+
+Cómo mitigar (futuro):
+  - Rate limiting por IP y/o whitelist de IPs de las PCs del laboratorio
+
+
+──────────────────────────────────────────────────────────
+E-7. [MEDIO] Rate limiting de login por usuario, no por IP (fuerza bruta distribuida)
+──────────────────────────────────────────────────────────
+ESTADO: ✅ RESUELTA (2026-06-04)
+  1) Rate limiting POR IP en /auth/login: 10 intentos / 5 min por IP (además
+     del bloqueo por usuario tras 3 fallos de B-3). Frena la fuerza bruta
+     distribuida (probar muchos usuarios desde una IP).
+  2) Timing constante: si el usuario NO existe, ahora se verifica igual contra
+     un hash bcrypt señuelo (_HASH_SENUELO) para gastar el mismo tiempo de CPU.
+     Antes "usuario inexistente" respondía al instante y "contraseña incorrecta"
+     tardaba ~300ms, lo que permitía enumerar usuarios por timing. Ahora ambos
+     tardan lo mismo. Verificado: módulo importa y lógica de límite probada.
+ESTADO ANTERIOR: PENDIENTE (verificado 2026-06-03) — matiza B-3
+Archivo: server/api/endpoints.py — login (~52-79)
+
+Descripción:
+  B-3 (bloqueo tras 3 intentos) está implementado, PERO el contador es por
+  USUARIO (usuario.intentos_fallidos), no por IP. Un atacante puede probar
+  muchos usuarios distintos, o distribuir desde varias IPs, sin tope global.
+  Además, hay diferencia de timing entre "usuario no existe" (consulta rápida)
+  y "contraseña incorrecta" (bcrypt ~300ms) → enumeración de usuarios por
+  timing.
+
+Impacto:
+  - Fuerza bruta distribuida; enumeración de usuarios válidos por timing
+
+Cómo arreglarlo (futuro):
+  - Rate limiting por IP además del bloqueo por usuario
+  - Igualar el tiempo de respuesta exista o no el usuario
+
+
+──────────────────────────────────────────────────────────
+E-8. [MEDIO] Validación de ruta de distribución sin whitelist
+──────────────────────────────────────────────────────────
+ESTADO: ✅ RESUELTA (2026-06-04)
+  guardar_ruta_distribucion ahora normaliza la ruta con resolve() y la valida
+  contra una WHITELIST de carpetas base permitidas (_bases_distribucion_permitidas):
+  la carpeta default (C:\WinSysCache) y, opcionalmente, las que se declaren en
+  la variable de entorno RUTA_DISTRIBUCION_BASE (separadas por ';'). Cualquier
+  ruta fuera de esas bases (p.ej. C:\Windows\System32, C:\Users) se rechaza con
+  HTTP 422. Verificado con pruebas: acepta la base y subcarpetas, rechaza
+  System32/Users, respeta el env extra. También se guarda la ruta YA normalizada.
+ESTADO ANTERIOR: PENDIENTE (verificado 2026-06-03)
+Archivo: server/api/endpoints.py — guardar_ruta_distribucion (~2402-2424),
+         descargar_cliente / obtener_version
+
+Descripción:
+  La ruta de distribución del cliente se guarda en BD (ajustes_sistema) y solo
+  se valida que la carpeta exista — sin whitelist ni normalización. Un
+  superadmin (o quien comprometa su sesión) puede apuntarla a cualquier carpeta.
+  El nombre de archivo servido es fijo (ControlBiblioteca.Client.exe / version
+  .txt), así que NO es un path traversal explotable por usuario externo; el
+  riesgo es de configuración (apuntar a una ruta no deseada). Severidad media,
+  no alta.
+
+Impacto:
+  - Mala configuración o sesión de superadmin comprometida → servir archivos
+    desde una carpeta arbitraria
+
+Cómo arreglarlo (futuro):
+  - Whitelist o ruta base fija; normalizar con resolve() y validar
+
+
+──────────────────────────────────────────────────────────
+E-9. [MEDIO] Subida del cliente (.exe) validada solo por cabecera MZ
+──────────────────────────────────────────────────────────
+ESTADO: ✅ RESUELTA PARCIAL (2026-06-04)
+  publicar_cliente ahora calcula el SHA-256 del .exe publicado y lo guarda en
+  cliente.sha256 junto al binario. El endpoint /version expone ese hash en el
+  campo "sha256". Esto sienta la base para que el cliente verifique la
+  integridad de lo que descarga (mitiga E-2). LO QUE QUEDA: el cliente C#
+  todavía NO compara el hash (requiere recompilar — ver E-2). La validación MZ
+  + tamaño mínimo se mantiene. Servir el hash por el mismo canal HTTP no es
+  protección criptográfica completa frente a un MITM que altere ambos; la
+  protección fuerte (HTTPS/firma) es trabajo futuro (E-2). Verificado: el hash
+  se calcula, se escribe y se devuelve en /version.
+ESTADO ANTERIOR: PENDIENTE (verificado 2026-06-03)
+Archivo: server/api/endpoints.py — publicar_cliente (~2427-2512)
+
+Descripción:
+  publicar_cliente (superadmin) acepta el .exe validando solo que empiece con
+  "MZ". No verifica firma digital ni hash. Combinado con E-2 (el cliente no
+  valida lo que descarga), un .exe arbitrario subido aquí se distribuye y
+  ejecuta en todas las PCs. Requiere superadmin, por eso es medio y no alto.
+
+Cómo arreglarlo (futuro):
+  - Validar/almacenar hash del exe oficial; idealmente firma Authenticode
+
+
+──────────────────────────────────────────────────────────
+E-10. [MEDIO] Importaciones Excel sin límite de tamaño (DoS)
+──────────────────────────────────────────────────────────
+ESTADO: ✅ RESUELTA (2026-06-04) — también cubre C-3
+  Las tres importaciones (importar-excel, importar-maestro, personal/importar)
+  ahora leen el archivo con _leer_upload_limitado(): lee por chunks de 256 KB y
+  aborta con HTTP 413 apenas supera el límite, SIN materializar el archivo
+  entero en memoria. Límite por defecto 25 MB (configurable con MAX_EXCEL_MB en
+  .env), de sobra para un padrón completo. Verificado: 500 KB pasa, 2 MB sobre
+  un límite de prueba de 1 MB se rechaza con 413.
+ESTADO ANTERIOR: PENDIENTE (verificado 2026-06-03) — confirma y amplía C-3
+Archivo: server/api/endpoints.py — importar_excel_upload (~1269),
+         importar_maestro (~1446), importar_personal (~2169)
+
+Descripción:
+  Las tres importaciones hacen `await archivo.read()` sin límite de tamaño ni
+  validación de content_type. Un archivo muy grande agota memoria/disco.
+  Mitigado en parte: las tres exigen superadmin.
+
+Cómo arreglarlo (futuro):
+  - Validar tamaño antes de leer (HTTP 413) y límite en el proxy/uvicorn
+
+
+──────────────────────────────────────────────────────────
+E-11. [MEDIO] Sin headers de seguridad HTTP (confirma B-4)
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (verificado 2026-06-03) — duplica B-4
+Archivo: server/main.py — solo CORSMiddleware
+
+Descripción:
+  Re-confirmado en este análisis: no hay X-Frame-Options, CSP,
+  X-Content-Type-Options ni HSTS. Ver B-4 para detalle.
+
+
+──────────────────────────────────────────────────────────
+E-12. [BAJO] Mensajes de error que filtran detalles internos (confirma B-5)
+──────────────────────────────────────────────────────────
+ESTADO: ✅ RESUELTA (2026-06-04)
+  - /api/limpiar-todo: ya devolvía mensaje genérico (resuelto en B-5; verificado
+    en main.py — el except registra el detalle en log y responde "Error durante
+    la limpieza. Revise los logs del servidor.").
+  - guardar_ruta_distribucion: el mensaje que revelaba la ruta absoluta
+    ("La carpeta 'C:\...' no existe") se cambió a genérico ("La carpeta indicada
+    no existe en el servidor") al resolver E-8.
+ESTADO ANTERIOR: PENDIENTE (verificado 2026-06-03) — amplía B-5
+Archivo: server/main.py:~675 (limpiar-todo str(e)),
+         server/api/endpoints.py:~616 (mysqldump stderr), ~2418 (ruta absoluta)
+
+Descripción:
+  Además de los de B-5, se confirma que /api/limpiar-todo devuelve str(e) y que
+  guardar_ruta_distribucion revela rutas absolutas del servidor en el mensaje.
+
+
+──────────────────────────────────────────────────────────
+E-13. [BAJO] Entrada del WS de actividad sin whitelist/sanitización
+──────────────────────────────────────────────────────────
+ESTADO: ✅ RESUELTA (2026-06-04)
+  En el handler "actividad" (main.py):
+  - 'evento' (tipo_ev): whitelist estricta {proceso, comando, archivo} — son
+    los únicos que emite el cliente; cualquier otro valor se normaliza a
+    "proceso".
+  - 'proceso_exe': se sanea con regex (solo letras, dígitos, . _ - y espacio),
+    truncado a 120 chars. Quita <, >, /, comillas, etc.
+  - 'nivel': ya tenía whitelist {normal, sospechoso}.
+  Defensa en profundidad: el panel ya escapa HTML al mostrar (escapeHtml).
+  Verificado: WINWORD.EXE/chrome.exe pasan intactos; payloads con <script>,
+  '/', '..' quedan limpios; tipos desconocidos caen a "proceso".
+ESTADO ANTERIOR: PENDIENTE (verificado 2026-06-03)
+Archivo: server/main.py — handler "actividad" (~1048-1072), "hello" hostname
+
+Descripción:
+  'tipo_ev' (evento) y 'proceso_exe' del WS de actividad no se validan contra
+  whitelist; 'hostname' del hello no valida formato. Se truncan por longitud y
+  el ORM evita SQL injection, pero podrían contener contenido malformado/Unicode
+  que, si se muestra sin escape en el panel, derive en XSS. El panel usa
+  escapeHtml en la tabla de actividad (mitigado), pero conviene validar origen.
+
+Cómo arreglarlo (futuro):
+  - Whitelist de 'tipo_ev'; validar 'hostname' (RFC 1123); asegurar escape en UI
+
+
+──────────────────────────────────────────────────────────
+E-14. [INFO] Aspectos verificados como CORRECTOS (no son vulnerabilidades)
+──────────────────────────────────────────────────────────
+  Para dejar constancia de lo revisado y descartado:
+  - JWT: algoritmo fijado a HS256 (no acepta 'none'); python-jose valida exp
+    automáticamente. CORRECTO.
+  - bcrypt vía passlib: salt aleatorio, verificación de tiempo constante.
+    CORRECTO.
+  - SECRET_KEY: validación estricta (rechaza débiles y <32 chars). CORRECTO.
+  - backup_sql / mysqldump: usa create_subprocess_exec (sin shell), args no
+    vienen del usuario, password por MYSQL_PWD. CORRECTO (A-6 resuelta).
+  - Búsquedas con .ilike(f"%{search}%"): SQLAlchemy parametriza el valor; NO es
+    SQL injection. (Riesgo menor: wildcards % y _ no escapados.)
+  - No se usa pickle/eval/exec con entrada de usuario. CORRECTO.
+  - WS admin: token por mensaje inicial, no en URL (A-8 resuelta). CORRECTO.
+
+
 ═══════════════════════════════════════════════════════════
-  RESUMEN EJECUTIVO — 2026-06-03
+  RESUMEN EJECUTIVO — 2026-06-04 (actualizado: categoría E server-side completa)
 ═══════════════════════════════════════════════════════════
 
-  NECESARIO  (pendiente)  : 6  — A-2(parcial), A-3, A-4, A-5, A-6, A-7, A-8
-  NECESARIO  (resuelto)   : 1  — A-1 (auth WS admin)
-  MEDIO      (pendiente)  : 5  — B-4, B-5, B-7, B-8, B-9
-  MEDIO      (resuelto)   : 4  — B-1, B-3, B-10, B-11
-  MEDIO      (mitigado)   : 2  — B-2, B-6
-  BAJO       (pendiente)  : 4  — C-3, C-4, C-5, C-6
+  NECESARIO  (resuelto)   : 8  — A-1 a A-8 (todas)
+  MEDIO      (resuelto)   : 9  — B-1, B-3, B-4, B-5, B-7*, B-8, B-9, B-10, B-11
+  MEDIO      (resuelto)   :     — B-2 (resuelta, también cubre E-1 parcial)
+  MEDIO      (mitigado)   : 1  — B-6
+       * B-7 parcial (expiración reducida; falta revocación — mejora futura)
+  TODA LA CATEGORÍA B: resuelta o mitigada.
+  BAJO       (pendiente)  : 4  — C-3 (cubierta por E-10), C-4, C-5, C-6
   BAJO       (diseño)     : 4  — C-1, C-2, C-7, C-8
-  NUEVAS     (pendiente)  : 2  — D-1, D-2
+  CAT. D     (pendiente)  : 2  — D-1, D-2
 
-  Total identificadas     : 28
-  Resueltas/corregidas    :  5  (A-1, B-1, B-3, B-10, B-11)
-  Pendientes/parciales    : 23
+  CATEGORÍA E — ESTADO ACTUAL (2026-06-04):
+    RESUELTAS (server-side, ya en código):
+      E-6  rate limit kiosco por IP
+      E-7  rate limit login por IP + timing constante
+      E-8  whitelist/normalización ruta distribución
+      E-9  hash SHA-256 del exe en /version (parcial: falta que el cliente lo use)
+      E-10 límite de tamaño en importaciones Excel
+      E-12 mensajes de error genéricos (ya cubierto por B-5 + E-8)
+      E-13 whitelist/saneo de la entrada del WS de actividad
+      E-1  parcial (suplantación por IP resuelta vía B-2)
+      E-11 cubierta por B-4 (headers de seguridad)
+      E-5  ACEPTADO POR DISEÑO (admin conserva exportar/procesos)
+    PENDIENTES — requieren RECOMPILAR EL CLIENTE C#:
+      E-2  auto-update sin verificar firma/hash (RCE vía MITM)  [ALTA]
+      E-3  comandos remotos sin validar origen / ws:// sin TLS  [ALTA]
+      E-4  PIN backdoor hardcodeado y editable por admin básico [ALTA]
+
+  NOTA IMPORTANTE: con la categoría E server-side resuelta, el riesgo restante
+  está CONCENTRADO en el CLIENTE C# y el canal de comunicación. La cadena
+  E-2 + E-3 (auto-update y comandos sin TLS ni firma) es el vector más grave:
+  permite RCE masivo en las PCs vía MITM en la red local. La mitigación raíz
+  común es migrar el canal a HTTPS/WSS con validación de certificado y firmar
+  los comandos/binarios. Esto NO se puede resolver solo en el servidor: hay que
+  modificar y recompilar el cliente, redistribuir el .exe a las 27+ PCs y
+  probar en campo. Por eso quedan como bloque aparte para coordinar con el
+  usuario antes de tocarlas (impactan el despliegue).
+
+  Total identificadas (A–E): 41
+  Resueltas/corregidas      : 18 (A-1..A-8, B-1..B-5, B-7*, B-8, B-9, B-10, B-11)
+                              (+ B-2 cubre E-1 parcial; B-4 cubre E-11; B-5 cubre E-12)
+  Pendientes/parciales      : 23 (categorías C, D y E-2..E-10/E-13)
+
+  PRÓXIMO FOCO (lo más grave que queda):
+    - E-2/E-3/E-9: canal de actualización y comandos del cliente sin TLS ni
+      firma → RCE vía MITM. Mitigación raíz: HTTPS/WSS + validar firma del exe.
+    - E-4: PIN de backdoor hardcodeado y editable por admin básico.
+    - D-1/E-5: endpoints sin verificación de rol superadmin.
+
+══════════════════════════════════════════════════════════
+  CATEGORÍA F — TERCER ANÁLISIS EXHAUSTIVO (2026-06-05)
+══════════════════════════════════════════════════════════
+  Auditoría tras eliminar publicar-cliente/descargar-cliente. Hallazgos
+  nuevos verificados en código. No se repite lo ya documentado.
+
+──────────────────────────────────────────────────────────
+F-1. [NECESARIO] PIN de backdoor transmitido en claro por WebSocket
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (nuevo — 2026-06-05)
+Archivo: server/main.py — hello_ack (~línea 897), config_backdoor_update (~línea 683)
+
+Descripción:
+  Cuando una terminal conecta y envía "hello", el servidor responde "hello_ack"
+  incluyendo backdoor_pin en claro en el JSON. Además, al actualizar la config
+  del backdoor, se hace manager.broadcast() a TODAS las conexiones (terminales
+  + admins) con el PIN en texto plano. El WebSocket corre en HTTP sin TLS.
+  Cualquier dispositivo en la LAN capturando tráfico puede obtener el PIN.
+
+Impacto:
+  - El backdoor permite desbloquear el kiosco sin credenciales de alumno.
+    Si el PIN se filtra, cualquiera con acceso físico puede salir del modo kiosco.
+
+Cómo arreglar (futuro):
+  - No distribuir el PIN por red: configurarlo localmente en cada PC (archivo
+    local cifrado o variable de entorno) y usar el servidor solo para
+    activar/desactivar el feature.
+  - O transmitirlo hasheado y que el cliente compare el hash del input.
+
+
+──────────────────────────────────────────────────────────
+F-2. [MEDIO] GET /api/server-info sin autenticación expone IP y URL del WS
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (nuevo — 2026-06-05)
+Archivo: server/main.py líneas 562-570
+
+Descripción:
+  El endpoint GET /api/server-info no requiere JWT. Devuelve IP local del
+  servidor, puerto y URL del WebSocket admin. Accesible desde cualquier
+  cliente en la red sin credenciales.
+
+Impacto:
+  - Reconocimiento de infraestructura: un atacante en la LAN descubre la IP
+    del servidor y la URL del WebSocket de admin sin autenticarse.
+
+Cómo arreglar:
+  - Agregar Depends(obtener_usuario_actual) al endpoint.
+    El panel lo llama tras el login, por lo que no rompe el flujo.
+
+
+──────────────────────────────────────────────────────────
+F-3. [NECESARIO] GET y PUT /api/config/backdoor sin verificación de rol
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (nuevo — 2026-06-05)
+Archivo: server/main.py líneas 648-689
+
+Descripción:
+  Ambos endpoints (GET y PUT) solo requieren obtener_usuario_actual sin
+  comprobar rol. Un admin básico puede LEER y MODIFICAR el PIN y atajos
+  de teclado del backdoor del kiosco.
+
+Impacto:
+  - Admin básico controla el mecanismo de seguridad del kiosco.
+  - Relacionado con E-4 (pendiente por recompilación del cliente).
+
+Cómo arreglar:
+  - Agregar en ambos endpoints:
+      if admin.rol != "superadmin":
+          raise HTTPException(status_code=403, detail="Solo superadmin")
+  - Esta parte del servidor SÍ se puede corregir sin recompilar el cliente.
+
+
+──────────────────────────────────────────────────────────
+F-4. [MEDIO] Endpoints de sesiones sin autenticación
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (nuevo — 2026-06-05)
+Archivo: server/api/endpoints.py — POST /api/sesiones/iniciar, POST /api/sesiones/{id}/cerrar
+
+Descripción:
+  Estos endpoints REST no tienen Depends(obtener_usuario_actual). Cualquier
+  cliente en la red puede crear sesiones arbitrarias para cualquier alumno
+  en cualquier terminal, o cerrar sesiones activas de otros alumnos.
+
+Impacto:
+  - Crear sesiones falsas para inflar estadísticas o generar sospechas falsas.
+  - Cerrar sesiones activas de alumnos legítimos (denegación de servicio).
+
+Cómo arreglar:
+  - Si el cliente C# los usa sin JWT, implementar autenticación por IP de
+    origen (whitelist de IPs de terminales registradas) o un token de servicio.
+  - Si son legacy sin uso real, agregar Depends(obtener_usuario_actual).
+
+
+──────────────────────────────────────────────────────────
+F-5. [MEDIO] Mensajes programados modificables por admin básico
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (nuevo — 2026-06-05)
+Archivo: server/main.py — GET/POST/PUT/DELETE /api/mensajes (~líneas 1480-1577)
+
+Descripción:
+  Los 4 endpoints de mensajes programados solo exigen login, sin check de
+  rol. Un admin básico puede crear, modificar, activar/desactivar y eliminar
+  mensajes que se difunden a TODOS los kioscos por WebSocket.
+
+Impacto:
+  - Admin básico puede enviar mensajes falsos o de pánico a todas las
+    terminales sin autorización del superadmin.
+
+Cómo arreglar:
+  - Agregar verificación de rol "superadmin" en POST y DELETE.
+    GET puede quedar abierto a admin (solo lectura).
+
+
+──────────────────────────────────────────────────────────
+F-6. [BAJO] PIN del backdoor sin validación de longitud mínima en servidor
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE (nuevo — 2026-06-05)
+Archivo: server/main.py líneas 643-646 (_ConfiguracionKioscoReq)
+
+Descripción:
+  backdoor_pin: str acepta string vacío "" sin validar longitud mínima ni
+  complejidad. La validación del frontend rechaza vacíos, pero no es
+  suficiente como control de seguridad.
+
+Cómo arreglar:
+  - Usar Field(min_length=4) en el modelo Pydantic:
+      backdoor_pin: str = Field(..., min_length=4)
+
+
+══════════════════════════════════════════════════════════
+  BUGS FUNCIONALES IDENTIFICADOS (2026-06-05)
+══════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────
+BUG-1. cerrar_todas_sesiones usa datetime.utcnow() — desfase de 5 horas
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/api/endpoints.py línea 1275
+
+Descripción:
+  cerrar_todas_sesiones usa datetime.utcnow() mientras el resto del sistema
+  usa datetime.now(). En Perú (UTC-5) esto registra hora_salida con 5 horas
+  de desfase para sesiones cerradas en cierre masivo. Los reportes muestran
+  horarios incorrectos para esas sesiones.
+
+Cómo arreglar: cambiar datetime.utcnow() por datetime.now() en línea 1275.
+
+
+──────────────────────────────────────────────────────────
+BUG-2. actualizar_maestro no actualiza id_facultad al editar escuela/facultad
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/api/endpoints.py líneas 1840-1862
+
+Descripción:
+  En PUT /admin/maestro/{dni}, se calcula id_fac para la nueva facultad pero
+  solo se asigna alumno.id_escuela = id_esc. El campo alumno.id_facultad
+  nunca se actualiza, quedando con la facultad anterior aunque el usuario
+  haya especificado una nueva. Pérdida silenciosa de datos.
+
+Cómo arreglar: agregar alumno.id_facultad = id_fac junto al id_escuela.
+
+
+──────────────────────────────────────────────────────────
+BUG-3. guardarUsuario en app.js valida contraseña con mínimo 6 chars (servidor exige 8)
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: admin/static/js/app.js (~línea 3086)
+
+Descripción:
+  La validación del panel usa password.length < 6, pero el servidor exige
+  ≥8 chars + mayúscula + número. El usuario pasa la validación del front,
+  envía la petición y recibe un 422 confuso del servidor.
+
+Cómo arreglar:
+  - Cambiar a password.length < 8 y mostrar el mensaje completo de
+    requisitos: "al menos 8 caracteres, una mayúscula y un número".
+
+
+──────────────────────────────────────────────────────────
+BUG-4. Sesiones huérfanas al arrancar registran hora_salida = hora_entrada (duración 0)
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/main.py — _limpiar_sesiones_arranque (~líneas 374-392)
+
+Descripción:
+  Al arrancar el servidor, sesiones activas remanentes (corte de luz) se
+  cierran con hora_salida = hora_entrada, produciendo duración 0 min.
+  Distorsiona estadísticas de uso.
+
+Cómo arreglar:
+  - Usar datetime.now() como hora_salida y motivo "cierre_arranque_servidor"
+    para distinguirlas y registrar el tiempo real más cercano.
+
+
+──────────────────────────────────────────────────────────
+BUG-5. Filtro de fecha excluye el último segundo del día (< 23:59:59)
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/api/endpoints.py — _aplicar_filtro_fecha (~líneas 803-807)
+
+Descripción:
+  El filtro usa < datetime(d.year, d.month, d.day, 23, 59, 59), excluyendo
+  eventos entre 23:59:59.000001 y 23:59:59.999999. Corrección:
+    q = q.where(ActividadLog.fecha_hora < datetime(d.year,d.month,d.day)
+                                          + timedelta(days=1))
+
+
+──────────────────────────────────────────────────────────
+BUG-6. DNIs de alumnos en claro en consola del panel (contradice política B-8)
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: admin/static/js/app.js — renderSesiones (~líneas 1639-1643)
+
+Descripción:
+  addLog('activity', ...) registra DNI completo del alumno en la consola
+  del panel cada 15 segundos. Contradice la política de enmascarado de PII
+  implementada en el servidor (B-8).
+
+Cómo arreglar: enmascarar el DNI mostrando solo los últimos 4 dígitos:
+  `****${s.alumno_dni?.slice(-4) || '—'}`
+
+
+──────────────────────────────────────────────────────────
+BUG-7. Hora de mensajes programados acepta valores fuera de rango (ej: 25:99)
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: server/main.py línea 1511
+
+Descripción:
+  La validación re.match(r"^\d{2}:\d{2}$", hora) verifica formato pero no
+  rango. Acepta "25:99". El mensaje programado nunca se envía pero la API
+  devuelve 200 OK y el usuario cree que está configurado.
+
+Cómo arreglar:
+  h, m = map(int, datos.hora_envio.split(":"))
+  if not (0 <= h <= 23 and 0 <= m <= 59):
+      raise HTTPException(422, "hora_envio fuera de rango")
+
+
+──────────────────────────────────────────────────────────
+BUG-8. innerHTML desde localStorage sin sanitizar — riesgo XSS
+──────────────────────────────────────────────────────────
+ESTADO: PENDIENTE
+Archivo: admin/static/js/app.js — _aplicarConfigApp (~líneas 3145-3146)
+
+Descripción:
+  loginSub.innerHTML = subtitulo y loginFoot.innerHTML = footer escriben
+  contenido de localStorage directamente como HTML. Si hay acceso físico
+  a la máquina del panel o XSS en otra parte, se puede inyectar HTML/scripts
+  en la página de login.
+
+Cómo arreglar: usar textContent en lugar de innerHTML para textos simples.
+
+
+══════════════════════════════════════════════════════════
+  CAMBIOS DE ESTADO POR MODIFICACIONES DEL 2026-06-05
+══════════════════════════════════════════════════════════
+
+E-9 (SHA-256 del exe en /version): RECONTEXTUALIZADA
+  Se eliminó /descargar-cliente y /publicar-cliente. El cliente ya no
+  descarga el .exe desde el servidor (flujo manual). El campo "sha256"
+  en /version sigue siendo útil para que el técnico verifique manualmente
+  la integridad del .exe al hacer el reemplazo físico. El hash en
+  cliente.sha256 ya no se actualiza automáticamente (no hay publicar-cliente).
+  Estado: PARCIALMENTE OBSOLETA para su propósito original (verificación de
+  descarga HTTP); útil como referencia informativa en el flujo manual.
+
+C-5 (/api/config/nivel2-hash devuelve SHA-256 sin sal):
+  Sigue pendiente. El endpoint existe y funciona. Si la feature de "nivel2"
+  ya no se usa en el panel, conviene eliminarlo (ver nota original).
+
+
+═══════════════════════════════════════════════════════════
+  RESUMEN EJECUTIVO — 2026-06-05 (análisis exhaustivo categoría F)
+═══════════════════════════════════════════════════════════
+
+  NECESARIO  (resuelto)   : 8  — A-1 a A-8 (todas)
+  MEDIO      (resuelto)   : 9  — B-1, B-3, B-4, B-5, B-7*, B-8, B-9, B-10, B-11
+  MEDIO      (mitigado)   : 1  — B-6
+  TODA LA CATEGORÍA B: resuelta o mitigada.
+  BAJO       (pendiente)  : 4  — C-4, C-5, C-6, C-7/C-8 diseño
+  CAT. D     (pendiente)  : 2  — D-1, D-2
+  CAT. E     (pendiente)  : 3  — E-2/E-3/E-4 (requieren recompilar cliente)
+  CAT. F     (pendiente)  : 6  — F-1 (ALTA), F-3 (ALTA), F-4 (MEDIA),
+                                  F-2 (MEDIA), F-5 (MEDIA), F-6 (BAJA)
+  BUGS FUNC. (pendiente)  : 8  — BUG-1..BUG-8
+
+  PRÓXIMAS ACCIONES DE ALTO IMPACTO (sin recompilar cliente):
+    1. F-3: agregar check superadmin en GET/PUT /api/config/backdoor  (5 min)
+    2. D-1: agregar check superadmin en POST/DELETE procesos-ignorados (5 min)
+    3. F-5: agregar check superadmin en POST/DELETE mensajes           (5 min)
+    4. BUG-1: datetime.utcnow() -> datetime.now() en cerrar_todas     (1 línea)
+    5. BUG-2: id_facultad no se actualiza en actualizar_maestro       (1 línea)
+    6. BUG-3: validación contraseña en panel (6 -> 8 chars + reglas)  (1 línea)
+    7. BUG-8: innerHTML -> textContent en _aplicarConfigApp           (2 líneas)
+    8. F-1/E-4: PIN backdoor — abordar junto al cliente (E-4) cuando
+       se compile la siguiente versión del cliente.
 
 PRIORIDAD DE RESOLUCIÓN RECOMENDADA (rápidas y de alto impacto primero):
-  1. A-7 — backup-sql solo superadmin               (5 min, 1 línea)
-  2. D-1 — procesos-ignorados solo superadmin        (5 min, 2 líneas)
-  3. A-2 — SECRET_KEY fuerte en .env de producción   (5 min)
-  4. A-5 — no loguear contraseñas por defecto        (fácil)
-  5. A-3 — habilitar verificación SSL al SGA          (depende del cert)
-  6. A-4 — validar formato de fechas en estadísticas  (moderado, alto impacto)
-  7. B-5 — mensajes de error genéricos al cliente     (moderado)
-  8. A-6 — mysqldump sin password en CLI              (moderado)
-  9. A-8 — token JWT fuera de la URL del WS           (moderado)
- 10. B-4/B-7/B-8/B-9 — hardening (headers, expiración, PII, complejidad)
- 11. C-3..C-6, D-2 — mitigaciones de bajo riesgo
+  1. F-3 — backdoor accesible por admin básico          (5 min, 2 líneas)
+  2. D-1 — procesos-ignorados solo superadmin           (5 min, 2 líneas)
+  3. F-5 — mensajes solo superadmin                     (5 min, 2 líneas)
+  4. BUG-1 — utcnow() -> now() en cerrar_todas          (1 línea)
+  5. BUG-2 — id_facultad perdido en actualizar_maestro  (1 línea)
+  6. BUG-3 — validación contraseña panel más estricta   (1 línea + mensaje)
+  7. BUG-7 — validar rango hora mensajes programados    (3 líneas)
+  8. BUG-8 — innerHTML -> textContent en config app     (2 líneas)
+  9. F-2 — server-info requiere autenticación           (1 línea)
+ 10. F-4 — sesiones/iniciar/cerrar con autenticación    (moderado)
+ 11. BUG-6 — enmascarar DNI en consola del panel        (1 línea)
+ 12. BUG-5 — filtro fecha excluye último segundo        (moderado)
+ 13. BUG-4 — sesiones huérfanas registran duración 0    (fácil)

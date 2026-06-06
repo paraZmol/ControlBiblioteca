@@ -1,5 +1,11 @@
 {
-  "TerminalName": "REZE",
+  "TerminalName": "BUBU",
   "ServerIp": "192.168.1.33",
-  "ServerPort": 8000
+  "ServerPort": 8000,
+  "BackdoorModifiers": 6,
+  "BackdoorKey": 118,
+  "BackdoorPin": "UNASAM2026",
+  "OfflineModifiers": 6,
+  "OfflineKey": 114,
+  "OfflinePin": "UNASAM"
 }

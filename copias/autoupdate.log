@@ -1,25 +1,54 @@
-2026-05-30 23:21:26 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
-2026-05-30 23:21:26 bak previo eliminado.
-2026-05-30 23:21:26 new previo eliminado.
-2026-05-30 23:21:26 Versión servidor='4.0' | instalada='4.0'
-2026-05-30 23:21:26 Sin actualización necesaria (servidor no es mayor).
-2026-05-30 23:22:11 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
-2026-05-30 23:22:11 bak previo eliminado.
-2026-05-30 23:22:11 new previo eliminado.
-2026-05-30 23:22:11 Versión servidor='4.0' | instalada='4.0'
-2026-05-30 23:22:11 Sin actualización necesaria (servidor no es mayor).
-2026-05-30 23:23:11 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
-2026-05-30 23:23:11 bak previo eliminado.
-2026-05-30 23:23:11 new previo eliminado.
-2026-05-30 23:23:11 Versión servidor='4.0' | instalada='4.0'
-2026-05-30 23:23:11 Sin actualización necesaria (servidor no es mayor).
-2026-05-30 23:24:11 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
-2026-05-30 23:24:11 bak previo eliminado.
-2026-05-30 23:24:11 new previo eliminado.
-2026-05-30 23:24:11 Versión servidor='4.0' | instalada='4.0'
-2026-05-30 23:24:11 Sin actualización necesaria (servidor no es mayor).
-2026-05-30 23:25:11 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
-2026-05-30 23:25:11 bak previo eliminado.
-2026-05-30 23:25:11 new previo eliminado.
-2026-05-30 23:25:11 Versión servidor='4.0' | instalada='4.0'
-2026-05-30 23:25:11 Sin actualización necesaria (servidor no es mayor).
+2026-06-06 04:34:07 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
+2026-06-06 04:34:07 bak previo eliminado.
+2026-06-06 04:34:07 new previo eliminado.
+2026-06-06 04:34:07 Versión servidor='4.30' | instalada='4.0'
+2026-06-06 04:34:07 Descargando desde http://192.168.1.33:8000/api/descargar-cliente
+2026-06-06 04:34:07 ERROR: HttpRequestException: Response status code does not indicate success: 404 (Not Found).
+2026-06-06 04:45:55 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
+2026-06-06 04:45:55 bak previo eliminado.
+2026-06-06 04:45:55 new previo eliminado.
+2026-06-06 04:45:55 Versión servidor='4.31' | instalada='4.0'
+2026-06-06 04:45:55 Descargando desde http://192.168.1.33:8000/api/descargar-cliente
+2026-06-06 04:45:55 ERROR: HttpRequestException: Response status code does not indicate success: 404 (Not Found).
+2026-06-06 04:47:49 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
+2026-06-06 04:47:49 bak previo eliminado.
+2026-06-06 04:47:49 new previo eliminado.
+2026-06-06 04:47:49 Versión servidor='4.31' | instalada='4.0'
+2026-06-06 04:47:49 Descargando desde http://192.168.1.33:8000/api/descargar-cliente
+2026-06-06 04:47:49 ERROR: HttpRequestException: Response status code does not indicate success: 404 (Not Found).
+2026-06-06 04:56:55 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
+2026-06-06 04:56:55 bak previo eliminado.
+2026-06-06 04:56:55 new previo eliminado.
+2026-06-06 04:56:56 Versión servidor='4.31' | instalada='4.0'
+2026-06-06 04:56:56 Descargando desde http://192.168.1.33:8000/api/descargar-cliente
+2026-06-06 04:56:56 ERROR: HttpRequestException: Response status code does not indicate success: 404 (Not Found).
+2026-06-06 05:16:55 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
+2026-06-06 05:16:55 bak previo eliminado.
+2026-06-06 05:16:55 new previo eliminado.
+2026-06-06 05:16:55 Versión servidor='4.31' | instalada='4.0'
+2026-06-06 05:16:55 Descargando desde http://192.168.1.33:8000/api/descargar-cliente
+2026-06-06 05:16:55 ERROR: HttpRequestException: Response status code does not indicate success: 404 (Not Found).
+2026-06-06 05:17:56 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
+2026-06-06 05:17:56 bak previo eliminado.
+2026-06-06 05:17:56 new previo eliminado.
+2026-06-06 05:17:57 Versión servidor='4.32' | instalada='4.0'
+2026-06-06 05:17:57 Descargando desde http://192.168.1.33:8000/api/descargar-cliente
+2026-06-06 05:17:57 ERROR: HttpRequestException: Response status code does not indicate success: 404 (Not Found).
+2026-06-06 05:32:45 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
+2026-06-06 05:32:45 bak previo eliminado.
+2026-06-06 05:32:45 new previo eliminado.
+2026-06-06 05:32:45 Versión servidor='4.33' | instalada='4.0'
+2026-06-06 05:32:45 Descargando desde http://192.168.1.33:8000/api/descargar-cliente
+2026-06-06 05:32:45 ERROR: HttpRequestException: Response status code does not indicate success: 404 (Not Found).
+2026-06-06 05:53:09 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
+2026-06-06 05:53:09 bak previo eliminado.
+2026-06-06 05:53:09 new previo eliminado.
+2026-06-06 05:53:10 Versión servidor='4.34' | instalada='4.0'
+2026-06-06 05:53:10 Descargando desde http://192.168.1.33:8000/api/descargar-cliente
+2026-06-06 05:53:10 ERROR: HttpRequestException: Response status code does not indicate success: 404 (Not Found).
+2026-06-06 05:58:53 Iniciando. versionInstalada=4.0 exe=C:\SistemaBiblioteca\ControlBiblioteca.Client.exe
+2026-06-06 05:58:53 bak previo eliminado.
+2026-06-06 05:58:53 new previo eliminado.
+2026-06-06 05:58:54 Versión servidor='4.35' | instalada='4.0'
+2026-06-06 05:58:54 Descargando desde http://192.168.1.33:8000/api/descargar-cliente
+2026-06-06 05:58:54 ERROR: HttpRequestException: Response status code does not indicate success: 404 (Not Found).

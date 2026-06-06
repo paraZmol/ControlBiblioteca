@@ -1,0 +1,555 @@
+═══════════════════════════════════════════════════════════════════
+  CASOS DE USO — Control Biblioteca UNASAM
+  Pasos exactos y respuesta esperada del sistema para cada operación.
+  Actualizado: 2026-06-06
+═══════════════════════════════════════════════════════════════════
+
+Este archivo responde: "¿Cómo hago X? ¿Qué debería pasar?"
+Para entender el flujo general del sistema, ver FLUJO_ADMIN.txt y
+FLUJO_ALUMNO.txt.
+
+
+───────────────────────────────────────────────────────────────────
+  ÍNDICE RÁPIDO
+───────────────────────────────────────────────────────────────────
+  A. Gestión de usuarios del panel (admin/superadmin)
+     A-1. Cambiar la contraseña del admin
+     A-2. Cambiar la contraseña del superadmin
+     A-3. Qué pasa si olvidás la contraseña
+
+  B. Gestión de alumnos y acceso
+     B-1. Registrar un alumno nuevo
+     B-2. Banear a un alumno
+     B-3. Levantar el ban de un alumno
+     B-4. Desbloquear manualmente una PC para un alumno
+
+  C. Control de terminales (PCs)
+     C-1. Bloquear una PC desde el panel
+     C-2. Apagar una PC de forma remota
+     C-3. Bloquear todas las PCs a la vez
+     C-4. Qué pasa si una PC se desconecta
+
+  D. Historial y sesiones
+     D-1. Buscar las sesiones de un alumno
+     D-2. Cerrar una sesión que quedó abierta por error
+     D-3. Exportar el historial a Excel
+     D-4. Por qué no aparece una sesión en el historial
+
+  E. Actividad y sospechas
+     E-1. Ver qué hizo un alumno durante su sesión
+     E-2. Investigar una sospecha
+     E-3. Crear una incidencia manualmente
+     E-4. Ignorar un proceso del sistema (eliminar ruido)
+
+  F. Mantenimiento del sistema
+     F-1. Actualizar el cliente kiosco en todas las PCs
+     F-2. Hacer un backup de la base de datos
+     F-3. Qué hacer si el servidor no arranca
+     F-4. Cómo agregar una terminal nueva
+
+
+───────────────────────────────────────────────────────────────────
+  A. GESTIÓN DE USUARIOS DEL PANEL
+───────────────────────────────────────────────────────────────────
+
+  A-1. CAMBIAR LA CONTRASEÑA DEL ADMIN
+  ─────────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN.
+
+  Pasos:
+    1. Iniciar sesión en el panel con la cuenta superadmin.
+    2. Ir a la pestaña Configuración.
+    3. Buscar la sección de credenciales / cambio de contraseña.
+    4. Escribir la nueva contraseña para el usuario "admin".
+       REQUISITO: mínimo 8 caracteres (el servidor rechaza menos).
+    5. Confirmar.
+
+  Respuesta esperada:
+    - El panel muestra un mensaje de éxito.
+    - La próxima vez que "admin" ingrese, debe usar la nueva contraseña.
+    - El token actual de "admin" sigue válido hasta que expire (8 horas),
+      es decir: si "admin" ya estaba logueado, sigue logueado hasta cerrar
+      sesión o que el token expire.
+
+  Si algo falla:
+    - "Contraseña muy corta": el servidor exige 8 caracteres mínimo.
+      El panel muestra el error del servidor.
+    - Sin respuesta: verificar que el servidor esté corriendo.
+
+
+  A-2. CAMBIAR LA CONTRASEÑA DEL SUPERADMIN
+  ───────────────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN (cambia su propia contraseña).
+
+  Pasos: igual que A-1 pero seleccionando el usuario "superadmin".
+
+  PRECAUCIÓN: si olvidás la nueva contraseña, ver A-3.
+
+
+  A-3. QUÉ PASA SI OLVIDÁS LA CONTRASEÑA
+  ─────────────────────────────────────────
+  No hay recuperación automática (sin email de reset). Hay que resetear
+  directamente en la base de datos.
+
+  Pasos (requiere acceso al servidor):
+    1. Abrir una terminal en la PC del servidor.
+    2. Conectarse a MySQL:
+         mysql -u root -p
+         USE biblioteca_unasam;
+    3. Generar un hash bcrypt de la nueva contraseña. Opciones:
+         - Usar Python: python -c "from passlib.context import CryptContext; ctx=CryptContext(schemes=['bcrypt']); print(ctx.hash('NuevaContraseña123'))"
+         - O usar algún generador bcrypt online (cost factor 12).
+    4. Actualizar en la base:
+         UPDATE usuarios SET password_hash='$2b$12$...' WHERE username='admin';
+    5. Reiniciar el servidor (o no — el próximo login ya usará el nuevo hash).
+
+  Respuesta esperada:
+    - El usuario puede iniciar sesión con la nueva contraseña.
+
+
+───────────────────────────────────────────────────────────────────
+  B. GESTIÓN DE ALUMNOS Y ACCESO
+───────────────────────────────────────────────────────────────────
+
+  B-1. REGISTRAR UN ALUMNO NUEVO
+  ────────────────────────────────
+  Quién puede hacerlo: admin y superadmin (importar masivo: solo superadmin).
+
+  Opción 1 — Un alumno solo:
+    1. Ir a pestaña Base de Datos → Estudiantes.
+    2. Clic en "Nuevo".
+    3. Completar: DNI (8 dígitos), nombre, apellidos, código, facultad,
+       escuela.
+    4. Guardar.
+
+  Respuesta esperada:
+    - El alumno aparece en la lista de estudiantes.
+    - Puede usar una terminal inmediatamente.
+
+  Opción 2 — Importar desde Excel (masivo):
+    1. Preparar el Excel con columnas: dni, nombre, código, facultad,
+       escuela (ver el formato en el template que ofrece el panel).
+    2. Ir a Base de Datos → Estudiantes → Importar.
+    3. Subir el archivo.
+
+  Respuesta esperada:
+    - El panel muestra cuántos registros se importaron / cuántos fallaron.
+    - Los alumnos importados ya pueden usar las terminales.
+
+
+  B-2. BANEAR A UN ALUMNO
+  ─────────────────────────
+  Quién puede hacerlo: admin y superadmin.
+
+  Pasos:
+    1. Ir a pestaña Alertas → Baneados.
+    2. Clic en "Nuevo ban".
+    3. Escribir el DNI del alumno y el motivo.
+    4. Confirmar.
+
+  Respuesta esperada:
+    - El alumno aparece en la lista de baneados.
+    - Si intenta usar una terminal, el kiosco muestra: "DNI baneado.
+      Acérquese al módulo."
+    - Si ya tenía una sesión activa, no se cierra automáticamente
+      (el ban aplica al próximo intento de login).
+
+
+  B-3. LEVANTAR EL BAN DE UN ALUMNO
+  ────────────────────────────────────
+  Quién puede hacerlo: admin y superadmin.
+
+  Pasos:
+    1. Ir a Alertas → Baneados.
+    2. Buscar al alumno por DNI o nombre.
+    3. Clic en "Levantar ban".
+
+  Respuesta esperada:
+    - El alumno desaparece de la lista de baneados.
+    - Puede volver a usar las terminales de inmediato.
+
+
+  B-4. DESBLOQUEAR MANUALMENTE UNA PC PARA UN ALUMNO
+  ────────────────────────────────────────────────────
+  Caso de uso: el alumno no puede escribir su DNI (problema técnico) o
+  el admin quiere habilitar una PC para alguien en particular.
+
+  Pasos:
+    1. Ir a pestaña Nodos (monitoreo).
+    2. En la tarjeta de la PC a desbloquear, clic en "Desbloquear".
+    3. Se abre un modal: escribir el DNI del alumno y el motivo de uso.
+    4. Confirmar.
+
+  Respuesta esperada:
+    - El servidor valida al alumno (ban, existencia en el maestro).
+    - La PC muestra "Bienvenido, <nombre>" y se desbloquea.
+    - En el panel, la tarjeta de esa PC cambia de estado a "activo"
+      (indicador verde con el nombre del alumno).
+    - Se registra una sesión en el historial.
+
+  Si el DNI no existe en el maestro:
+    - El servidor devuelve error y la PC sigue bloqueada.
+    - El panel muestra el motivo del rechazo.
+
+
+───────────────────────────────────────────────────────────────────
+  C. CONTROL DE TERMINALES
+───────────────────────────────────────────────────────────────────
+
+  C-1. BLOQUEAR UNA PC DESDE EL PANEL
+  ──────────────────────────────────────
+  Pasos:
+    1. En Nodos, clic en "Bloquear" en la tarjeta de esa PC.
+    2. Confirmar en el diálogo.
+
+  Respuesta esperada:
+    - Si había sesión activa: se cierra (motivo "bloqueo_admin") y se
+      registra la hora de salida.
+    - El kiosco vuelve a la pantalla de login bloqueada.
+    - La tarjeta en el panel cambia a estado "bloqueado".
+    - El historial guarda la sesión con hora de inicio y hora de cierre.
+
+
+  C-2. APAGAR UNA PC DE FORMA REMOTA
+  ─────────────────────────────────────
+  Pasos:
+    1. En Nodos, clic en "Apagar" en la tarjeta de esa PC.
+    2. Confirmar.
+
+  Respuesta esperada:
+    - Se cierra la sesión activa (si había una).
+    - La PC ejecuta apagado de Windows.
+    - La tarjeta desaparece del mapa de PCs (pasa a "offline").
+    - NOTA: si la PC no está conectada al servidor, el comando no llega
+      y la PC no se apaga (no hay magia sin conexión).
+
+
+  C-3. BLOQUEAR TODAS LAS PCS A LA VEZ
+  ──────────────────────────────────────
+  Pasos:
+    1. En Nodos, buscar el botón "Bloquear sala" (bloqueo global).
+    2. Confirmar (pide confirmación por ser una acción masiva).
+
+  Respuesta esperada:
+    - Se cierran todas las sesiones activas con hora de salida actual.
+    - Se envía la orden de bloqueo a TODAS las terminales conectadas.
+    - Las tarjetas del panel cambian a "bloqueado".
+    - El historial registra el cierre de todas las sesiones.
+    - NOTA: las PCs offline (desconectadas) no reciben la orden; se
+      bloquearán al reconectarse.
+
+  PENDIENTE: no hay botón de "Apagar todas" todavía (ver FLUJO_ADMIN.txt).
+
+
+  C-4. QUÉ PASA SI UNA PC SE DESCONECTA
+  ──────────────────────────────────────────
+  Desconexión con sesión activa:
+    - El servidor detecta la caída del WebSocket.
+    - Cierra la sesión (motivo "desconexion_red") y registra la hora.
+    - Marca la terminal como "offline" en el panel.
+
+  El kiosco del lado cliente:
+    - Muestra un contador de 3 minutos intentando reconectar.
+    - Si reconecta antes: reanuda la sesión (si estaba en modo offline).
+    - Si no reconecta en 3 min: bloquea la pantalla.
+
+  En el panel:
+    - La tarjeta de esa PC aparece en estado "offline" (gris).
+    - Cuando la PC vuelve a conectarse, el servidor la actualiza a
+      "bloqueado" y la tarjeta vuelve al mapa.
+
+
+───────────────────────────────────────────────────────────────────
+  D. HISTORIAL Y SESIONES
+───────────────────────────────────────────────────────────────────
+
+  D-1. BUSCAR LAS SESIONES DE UN ALUMNO
+  ──────────────────────────────────────
+  Pasos:
+    1. Ir a pestaña Historial.
+    2. En el buscador, escribir el DNI o el nombre del alumno.
+    3. Aplicar filtro de período si querés acotar (hoy / este mes /
+       este año / todo).
+
+  Respuesta esperada:
+    - La tabla muestra todas las sesiones de ese alumno que coinciden
+      con los filtros: PC usada, hora de entrada, hora de salida,
+      motivo de uso, duración.
+
+
+  D-2. CERRAR UNA SESIÓN QUE QUEDÓ ABIERTA POR ERROR
+  ──────────────────────────────────────────────────────
+  Puede pasar si la PC se apagó de golpe y el servidor no detectó la
+  desconexión correctamente.
+
+  Opción 1 — Desde Nodos:
+    1. Localizar la PC en el mapa (puede aparecer como "activo" aunque
+       esté físicamente apagada).
+    2. Clic en "Bloquear".
+    3. El servidor cierra la sesión con la hora actual como salida.
+
+  Opción 2 — Reiniciar el servidor:
+    - Al arrancar, el servidor cierra todas las sesiones que estaban
+      marcadas como "activa" y pone todas las terminales en "offline".
+    - server/main.py (cerrar_todas_sesiones al startup).
+
+  Respuesta esperada:
+    - La sesión aparece en el historial con hora de salida.
+
+
+  D-3. EXPORTAR EL HISTORIAL A EXCEL
+  ────────────────────────────────────
+  Pasos:
+    1. Ir a Historial.
+    2. Aplicar los filtros deseados (período, búsqueda, etc.).
+    3. Clic en "Exportar Excel" (o "Exportar PDF").
+
+  Respuesta esperada:
+    - Se descarga un archivo con las sesiones que coinciden con los
+      filtros aplicados (no todo el historial completo si hay filtros).
+    - El Excel incluye: alumno, DNI, código, PC, fecha, hora entrada,
+      hora salida, duración, motivo.
+
+
+  D-4. POR QUÉ NO APARECE UNA SESIÓN EN EL HISTORIAL
+  ──────────────────────────────────────────────────────
+  Causas posibles:
+
+    1. Filtro de período incorrecto: verificar que el período seleccionado
+       incluye la fecha de la sesión.
+
+    2. La sesión fue modo offline y la sincronización falló: buscar en
+       el "Flujo de Actividad" si hay eventos de esa PC/alumno en esa fecha.
+
+    3. La sesión nunca se confirmó (sesión fantasma): el alumno puso el DNI
+       pero la PC se desconectó antes de que el kiosco enviara "unlock_confirmed".
+       El servidor cancela estas sesiones a los 10s.
+
+    4. Diferencia horaria: si el servidor y la PC kiosco tienen zonas horarias
+       distintas, la fecha de la sesión puede quedar un día antes o después.
+       El servidor usa su propia hora local para fecha_uso (corregido en v4.37+).
+
+
+───────────────────────────────────────────────────────────────────
+  E. ACTIVIDAD Y SOSPECHAS
+───────────────────────────────────────────────────────────────────
+
+  E-1. VER QUÉ HIZO UN ALUMNO DURANTE SU SESIÓN
+  ────────────────────────────────────────────────
+  Pasos:
+    1. Ir a pestaña Eventos (Flujo de Actividad).
+    2. Escribir el DNI del alumno en el filtro "DNI alumno".
+    3. Opcional: filtrar por fecha si querés una sesión específica.
+
+  Respuesta esperada:
+    - Lista cronológica de eventos: qué programas abrió, qué descargó.
+    - Eventos en rojo = nivel "sospechoso" (cmd, powershell, ejecutables
+      descargados, etc.).
+    - Eventos en gris = nivel normal (Word, Chrome, documentos).
+    - NOTA: los procesos "ignorados" están ocultos por defecto. Para verlos
+      todos, clic en "Ver ignorados".
+
+
+  E-2. INVESTIGAR UNA SOSPECHA
+  ──────────────────────────────
+  Pasos:
+    1. Ir a pestaña Alertas → Sospechas.
+    2. Ver la lista de sospechas pendientes.
+    3. Clic en "Ver" en la sospecha que querés investigar.
+       → Esto abre Eventos con el filtro activado para ese alumno,
+         mostrando TODOS los eventos (incluso los ignorados).
+    4. Revisar el contexto. Luego volver a Alertas.
+    5. Decidir:
+       - "Aprobar" → crea una incidencia leve contra el alumno.
+       - "Descartar" → la sospecha queda marcada como descartada (no
+         crea incidencia).
+
+  Respuesta esperada:
+    - Aprobar: la sospecha desaparece de "pendientes", aparece una
+      incidencia leve en Alertas → Incidencias para ese alumno.
+    - Descartar: la sospecha desaparece de "pendientes", no queda nada
+      en incidencias.
+
+
+  E-3. CREAR UNA INCIDENCIA MANUALMENTE
+  ────────────────────────────────────────
+  Caso de uso: el admin quiere registrar una falta que no fue detectada
+  automáticamente (ej: comportamiento inadecuado presencial).
+
+  Pasos:
+    1. Ir a Alertas → Incidencias.
+    2. Clic en "Nueva incidencia".
+    3. Completar: DNI del alumno, tipo (leve / grave), descripción.
+    4. Guardar.
+
+  Respuesta esperada:
+    - La incidencia aparece en la lista para ese alumno.
+    - Sistema de acumulación automático:
+      * 3 incidencias leves activas → alerta de posible baneo.
+      * 1 incidencia grave → recomendación de baneo.
+      (El baneo no es automático; el admin lo hace manualmente en B-2.)
+
+
+  E-4. IGNORAR UN PROCESO DEL SISTEMA (ELIMINAR RUIDO)
+  ──────────────────────────────────────────────────────
+  Caso de uso: el panel está llenándose de eventos de un proceso del SO
+  (ej: "antivirus.exe") que no son relevantes.
+
+  Pasos:
+    1. Ir a Eventos.
+    2. Encontrar un evento de ese proceso.
+    3. Clic en "Ignorar" en ese evento.
+
+  Respuesta esperada:
+    - Ese ejecutable queda en la lista de "ignorados".
+    - Ya NO aparece más en la vista limpia de Eventos en NINGUNA PC.
+    - PERO: si el nivel del evento era "sospechoso", SIEMPRE se muestra
+      (los ignorados sospechosos nunca se ocultan).
+    - El registro en la base de datos NO se borra: sigue guardado para
+      evidencia futura.
+
+  Para revertirlo:
+    1. En Eventos, clic en "Lista".
+    2. Buscar el proceso en la lista de ignorados.
+    3. Clic en "Quitar" → vuelve a mostrarse en la vista.
+
+
+───────────────────────────────────────────────────────────────────
+  F. MANTENIMIENTO DEL SISTEMA
+───────────────────────────────────────────────────────────────────
+
+  F-1. ACTUALIZAR EL CLIENTE KIOSCO EN TODAS LAS PCS
+  ────────────────────────────────────────────────────
+  Cómo funciona el sistema de auto-actualización:
+    - Cada vez que el kiosco arranca, consulta GET /api/version.
+    - El servidor devuelve la versión del archivo C:\WinSysCache\version.txt.
+    - El kiosco compara con su versión local (version.local en su carpeta).
+    - Si son distintas, descarga el nuevo .exe desde GET /api/descargar-cliente,
+      lo guarda, y se reinicia solo.
+
+  Pasos para publicar una nueva versión:
+    1. Compilar el cliente:
+         dotnet clean
+         dotnet publish -c Release -r win-x64 --self-contained true
+                        /p:PublishSingleFile=true -o publish\
+       (desde la carpeta client/)
+    2. Copiar el .exe compilado a la carpeta de distribución del servidor
+       (la configurada en el panel → Configuración → Ruta de distribución).
+       Por defecto: C:\WinSysCache\
+    3. Editar C:\WinSysCache\version.txt y escribir el nuevo número de versión
+       (ej: "4.38"). Solo el número, sin "v" ni espacios extra.
+    4. Reiniciar el servidor (para que lea el nuevo version.txt).
+
+  Respuesta esperada al reiniciar cada kiosco:
+    - El kiosco detecta que la versión del servidor es mayor a la local.
+    - Descarga el nuevo .exe automáticamente.
+    - Se reinicia y muestra la nueva versión en la pantalla de login (ej: "v4.38").
+    - NOTA: si el kiosco ya estaba corriendo y no se reinicia, la
+      actualización ocurre en el próximo reinicio.
+
+  Si un kiosco no se actualiza:
+    - Verificar que el servidor esté corriendo y accesible desde esa PC.
+    - Revisar que version.txt tenga el número correcto (sin espacios ni BOM).
+    - El kiosco escribe en su log (App.log en su carpeta) si la actualización
+      falla.
+
+
+  F-2. HACER UN BACKUP DE LA BASE DE DATOS
+  ──────────────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN.
+
+  Pasos:
+    1. Ir a Configuración (pestaña en el panel).
+    2. Buscar la sección de Backup SQL.
+    3. Clic en "Descargar backup".
+
+  Respuesta esperada:
+    - El servidor ejecuta mysqldump y genera un archivo .sql.
+    - Se descarga el archivo en el navegador.
+    - El archivo contiene toda la base de datos: alumnos, sesiones,
+      actividad, usuarios, etc.
+
+  Si falla:
+    - El servidor no encuentra mysqldump en el PATH.
+    - Solución: instalar MySQL client tools, o configurar la ruta de
+      mysqldump en server/.env (ver VULNERABILIDADES.txt A-6).
+
+
+  F-3. QUÉ HACER SI EL SERVIDOR NO ARRANCA
+  ──────────────────────────────────────────
+  Síntomas: el panel no carga, los kioscos quedan en "offline".
+
+  Pasos de diagnóstico:
+    1. En la PC del servidor, abrir la terminal donde corre el servidor.
+       El error suele estar en los últimos mensajes.
+    2. Causas comunes:
+       - MySQL no está corriendo: iniciar el servicio MySQL/XAMPP.
+       - Puerto 8000 ocupado: cerrar el proceso que lo usa o cambiar el
+         puerto en el comando de arranque.
+       - Error en .env: verificar que las credenciales de la BD sean
+         correctas.
+       - Dependencias faltantes: correr "pip install -r requirements.txt"
+         dentro del entorno virtual (server/).
+    3. Arrancar de nuevo:
+         cd server
+         .venv\Scripts\activate
+         uvicorn main:app --host 0.0.0.0 --port 8000
+
+  Respuesta esperada al reiniciar el servidor:
+    - El servidor imprime: "Application startup complete."
+    - AUTOMÁTICAMENTE: cierra todas las sesiones que estaban abiertas
+      y pone todas las terminales en "offline".
+    - Las PCs kiosco reconectan solas (tienen reconexión automática).
+
+
+  F-4. CÓMO AGREGAR UNA TERMINAL NUEVA
+  ──────────────────────────────────────
+  (PC nueva donde instalar el kiosco)
+
+  Pasos:
+    1. Copiar el archivo ControlBiblioteca.Client.exe a la PC nueva.
+       (desde C:\WinSysCache\ del servidor, o el archivo publicado)
+    2. Crear en la misma carpeta el archivo kiosco.config.json:
+         {"ServidorUrl": "http://<IP_DEL_SERVIDOR>:8000"}
+       Reemplazar <IP_DEL_SERVIDOR> con la IP real de la PC del servidor.
+    3. Ejecutar el .exe como Administrador (necesario para bloquear la
+       pantalla y monitorear procesos del sistema).
+
+  Respuesta esperada:
+    - El kiosco se conecta al servidor.
+    - En el panel (Nodos), aparece una tarjeta nueva con el nombre de
+      esa PC y estado "bloqueado".
+    - La terminal se registra automáticamente en la base de datos.
+    - NOTA: el nombre que aparece en el panel es el hostname de Windows
+      de esa PC (el servidor no permite que la PC elija su propio nombre
+      para evitar suplantaciones — usa la IP real de la conexión).
+
+
+───────────────────────────────────────────────────────────────────
+  RESPUESTAS DE ERROR COMUNES Y QUÉ SIGNIFICAN
+───────────────────────────────────────────────────────────────────
+
+  En el kiosco (pantalla del alumno):
+    "DNI inválido"              → no tiene 8 dígitos numéricos.
+    "Alumno no registrado /     → el DNI no existe en la base de datos
+     Acérquese al módulo"         local de alumnos. Hay que registrarlo.
+    "DNI baneado"               → el alumno tiene un ban activo.
+    "Sin conexión al servidor"  → la PC no puede llegar al servidor.
+                                  Verificar red y que el servidor esté
+                                  corriendo.
+
+  En el panel admin:
+    "401 Unauthorized"          → el token expiró (después de 8 horas).
+                                  Cerrar sesión y volver a iniciar sesión.
+    "403 Forbidden"             → la acción requiere superadmin y estás
+                                  logueado como admin.
+    "Terminal no encontrada"    → la PC ya no está conectada al servidor.
+    Sin respuesta del servidor  → el servidor no está corriendo o no hay
+                                  conexión de red entre el navegador y el
+                                  servidor.
+
+  Al cambiar contraseña:
+    "Contraseña muy corta"      → el servidor exige mínimo 8 caracteres.
+                                  NOTA: el panel solo valida 6 caracteres,
+                                  lo que puede causar confusión (bug conocido).
+                                  Usar siempre 8+ caracteres para evitarlo.

@@ -994,38 +994,20 @@
                             </div>
                             <p id="cfg-ruta-status" class="text-xs min-h-4"></p>
 
-                            <div class="mt-6 p-4 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/10">
-                                <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
-                                    <i class="ph ph-upload-simple text-indigo-500"></i> Publicar nueva versión
+                            <!-- Instructivo de actualización manual -->
+                            <div class="mt-6 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/40">
+                                <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-2 flex items-center gap-2">
+                                    <i class="ph ph-info text-zinc-500"></i> Cómo publicar una actualización
                                 </h3>
-                                <p class="text-xs text-zinc-400 dark:text-zinc-500 mb-3">
-                                    Subí el <code>ControlBiblioteca.Client.exe</code> y la versión nueva. El servidor lo escribe atómicamente en la ruta de distribución y los kioskos lo aplican al próximo reinicio.
+                                <ol class="text-xs text-zinc-500 dark:text-zinc-400 space-y-2 list-decimal list-inside">
+                                    <li>Compilá el cliente en Visual Studio y obtené el archivo <code>ControlBiblioteca.Client.exe</code>.</li>
+                                    <li>Copiá el <code>.exe</code> compilado a la carpeta de distribución indicada arriba, reemplazando el archivo anterior.</li>
+                                    <li>Editá el archivo <code>version.txt</code> en esa misma carpeta y escribí el nuevo número de versión (ej: <code>4.23</code>). Debe ser mayor al anterior o las PCs no se actualizarán.</li>
+                                    <li>Los kioskos detectarán la nueva versión <strong>al reiniciarse</strong> y se actualizarán automáticamente.</li>
+                                </ol>
+                                <p class="text-xs text-zinc-400 dark:text-zinc-500 mt-3">
+                                    La carpeta de compilacion suele estar en <code>client\bin\Release\net8.0-windows\win-x64\publish\</code> dentro del proyecto.
                                 </p>
-
-                                <div class="space-y-2">
-                                    <div>
-                                        <label class="text-xs text-zinc-500 dark:text-zinc-400 block mb-1">Versión nueva (ej: 4.1)</label>
-                                        <input id="cfg-publicar-version" type="text" placeholder="4.1"
-                                            class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-zinc-800 font-mono">
-                                    </div>
-                                    <div>
-                                        <label class="text-xs text-zinc-500 dark:text-zinc-400 block mb-1">Archivo .exe del cliente</label>
-                                        <input id="cfg-publicar-archivo" type="file" accept=".exe"
-                                            class="w-full text-xs file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-500 file:text-white file:cursor-pointer hover:file:bg-indigo-600 text-zinc-500 dark:text-zinc-400">
-                                    </div>
-                                    <div class="flex items-center gap-3 pt-1">
-                                        <button id="cfg-publicar-btn" onclick="publicarCliente()"
-                                            class="db-btn db-btn-new flex items-center gap-2 whitespace-nowrap">
-                                            <i class="ph ph-cloud-arrow-up"></i> Publicar
-                                        </button>
-                                        <div id="cfg-publicar-progress" class="flex-1 hidden">
-                                            <div class="w-full bg-zinc-200 dark:bg-zinc-700 rounded-full h-2 overflow-hidden">
-                                                <div id="cfg-publicar-bar" class="bg-indigo-500 h-full transition-all" style="width:0%"></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <p id="cfg-publicar-status" class="text-xs min-h-4"></p>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -1113,15 +1095,15 @@
 
                             </div><!-- fin grid mensajes -->
 
-                        <div class="max-w-xl">
-                            <!-- ── Atajo de Mantenimiento ── -->
+                        <!-- ── Atajo de Mantenimiento (solo superadmin) ── -->
+                        <div class="max-w-xl" id="seccion-mantenimiento-backdoor">
                             <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
                                 <i class="ph ph-keyboard text-indigo-500"></i> Atajo de Mantenimiento
                             </h3>
                             <p class="text-xs text-zinc-400 dark:text-zinc-500 mb-4">
-                                Configura la combinación de teclas y el PIN requerido para desbloquear la terminal de forma silenciosa.
+                                Combinación de teclas y PIN para salir del kiosco al escritorio de Windows. Solo visible para superadmin.
                             </p>
-                            
+
                             <div class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm mb-5">
                                 <div class="flex flex-col gap-4">
                                     <div>
@@ -1141,7 +1123,6 @@
                                     <div>
                                         <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">Tecla Principal</label>
                                         <select id="cfg-backdoor-key" class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
-                                            <!-- Teclas F1-F24 -->
                                             <option value="112">F1</option>
                                             <option value="113">F2</option>
                                             <option value="114">F3</option>
@@ -1154,13 +1135,12 @@
                                             <option value="121">F10</option>
                                             <option value="122">F11</option>
                                             <option value="123">F12</option>
-                                            <!-- Otras teclas usuales -->
                                             <option value="77">M</option>
                                             <option value="80">P</option>
                                         </select>
                                     </div>
                                     <div>
-                                        <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">PIN de Desbloqueo</label>
+                                        <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">PIN de Mantenimiento</label>
                                         <input id="cfg-backdoor-pin" type="text" placeholder="Ej: UNASAM2025"
                                             class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
                                     </div>
@@ -1171,6 +1151,66 @@
                                     </button>
                                 </div>
                                 <p id="cfg-backdoor-status" class="text-xs min-h-4 mt-2 text-right"></p>
+                            </div>
+                        </div>
+
+                        <!-- ── Atajo de Modo Offline (admin y superadmin) ── -->
+                        <div class="max-w-xl mt-4">
+                            <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
+                                <i class="ph ph-wifi-slash text-amber-500"></i> Modo Offline de Emergencia
+                            </h3>
+                            <p class="text-xs text-zinc-400 dark:text-zinc-500 mb-4">
+                                Permite desbloquear una terminal cuando el servidor no es alcanzable por red. El atajo <strong>Ctrl+Alt+F11</strong> solo se activa cuando el kiosco detecta que no hay conexion. El alumno registra su DNI y razon de uso; al recuperar la red, el sistema verifica si puede continuar.
+                            </p>
+
+                            <div class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm mb-5">
+                                <div class="flex flex-col gap-4">
+                                    <div>
+                                        <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">Modificadores (puedes seleccionar varios)</label>
+                                        <div class="flex gap-4">
+                                            <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                                                <input type="checkbox" id="cfg-offline-ctrl" class="rounded border-zinc-300 dark:border-zinc-600 text-indigo-500 focus:ring-indigo-500"> Ctrl
+                                            </label>
+                                            <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                                                <input type="checkbox" id="cfg-offline-alt" class="rounded border-zinc-300 dark:border-zinc-600 text-indigo-500 focus:ring-indigo-500"> Alt
+                                            </label>
+                                            <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                                                <input type="checkbox" id="cfg-offline-shift" class="rounded border-zinc-300 dark:border-zinc-600 text-indigo-500 focus:ring-indigo-500"> Shift
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">Tecla Principal</label>
+                                        <select id="cfg-offline-key" class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                                            <option value="112">F1</option>
+                                            <option value="113">F2</option>
+                                            <option value="114">F3</option>
+                                            <option value="115">F4</option>
+                                            <option value="116">F5</option>
+                                            <option value="117">F6</option>
+                                            <option value="118">F7</option>
+                                            <option value="119">F8</option>
+                                            <option value="120">F9</option>
+                                            <option value="121">F10</option>
+                                            <option value="122">F11</option>
+                                            <option value="123">F12</option>
+                                            <option value="77">M</option>
+                                            <option value="80">P</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2">PIN Offline del Encargado</label>
+                                        <input id="cfg-offline-pin" type="text" placeholder="Ej: UNASAM"
+                                            class="w-full border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                                        <p class="text-xs text-zinc-400 dark:text-zinc-500 mt-1">Debe ser diferente al PIN de mantenimiento.</p>
+                                    </div>
+                                </div>
+                                <div class="mt-5 text-right">
+                                    <button onclick="guardarConfigOffline()" class="db-btn db-btn-new inline-flex items-center gap-2">
+                                        <i class="ph ph-floppy-disk"></i> Guardar
+                                    </button>
+                                </div>
+                                <p id="cfg-offline-status" class="text-xs min-h-4 mt-2 text-right"></p>
                             </div>
                         </div>
                     </div>
@@ -1387,7 +1427,7 @@
 </div>
 
 
-<script src="static/js/app.js?v=17"></script>
+<script src="static/js/app.js?v=22"></script>
 <script>
 // Tema
 (function() {
@@ -1530,8 +1570,9 @@ function switchSubtabCfg(sub) {
     if (sub === 'aplicacion'      && typeof _cargarCamposConfigApp === 'function') _cargarCamposConfigApp();
     if (sub === 'actualizaciones' && typeof cargarRutaDistribucion === 'function') cargarRutaDistribucion();
     if (sub === 'backdoor') {
-        if (typeof cargarConfigBackdoor === 'function') cargarConfigBackdoor();
-        if (typeof cargarMensajes       === 'function') cargarMensajes();
+        if (_rolServidor === 'superadmin' && typeof cargarConfigBackdoor === 'function') cargarConfigBackdoor();
+        if (typeof cargarConfigOffline === 'function') cargarConfigOffline();
+        if (typeof cargarMensajes      === 'function') cargarMensajes();
     }
 }
 

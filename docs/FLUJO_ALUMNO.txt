@@ -1,0 +1,192 @@
+═══════════════════════════════════════════════════════════════════
+  FLUJO DEL ALUMNO — Control Biblioteca UNASAM
+  Cómo un alumno usa una terminal (kiosco), paso a paso.
+  Verificado contra el código. Actualizado: 2026-06-04
+═══════════════════════════════════════════════════════════════════
+
+Resumen en una línea:
+  El kiosco arranca bloqueado → el alumno escribe su DNI → el servidor lo
+  valida → desbloquea la PC → mientras usa la PC se monitorea su actividad →
+  al terminar (o desconectarse) la sesión se cierra y la PC se bloquea.
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 0 — ARRANCA EL KIOSCO (antes de que llegue el alumno)
+───────────────────────────────────────────────────────────────────
+  - La app del cliente (WPF) arranca y BLOQUEA la pantalla.
+    client/UI/MainWindow.xaml.cs:58-59
+  - Lee su configuración (IP del servidor) de kiosco.config.json.
+    client/Services/KioscoConfig.cs
+  - Se conecta por WebSocket al servidor: ws://<servidor>:8000/ws/terminal/<ip>
+    client/UI/MainWindow.xaml.cs:66
+  - Envía un saludo inicial "hello" con su hostname (nombre de la PC).
+    client/Services/WebSocketService.cs (InitialGreeting)
+  - Manda un "heartbeat" (latido) cada 3 segundos para avisar que sigue viva.
+  - El servidor registra la terminal en la base de datos como "bloqueado".
+    server/main.py:701-733
+    SEGURIDAD (B-2): el servidor usa la IP REAL de la conexión, no la de la URL,
+    para que una PC no pueda hacerse pasar por otra.
+
+  EN PANTALLA: pantalla de login bloqueada. Pide DNI y motivo de uso.
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 1 — EL ALUMNO PONE SUS CREDENCIALES
+───────────────────────────────────────────────────────────────────
+  El alumno escribe:
+    - DNI: exactamente 8 dígitos.
+    - Motivo de uso: elige de una lista (Investigación, Tarea, etc.).
+      Si elige "Otros", debe escribir el motivo.
+
+  El cliente valida primero localmente (formato del DNI, motivo no vacío).
+    client/UI/MainWindow.xaml.cs:186-219
+  Si todo está bien y hay conexión, envía al servidor:
+    {"tipo":"login_request", "codigo": DNI, "razon": motivo, "motivo_id": id}
+    client/UI/MainWindow.xaml.cs:229-235
+  Muestra "Validando..." y espera respuesta (timeout 10s).
+
+  EN PANTALLA: "Validando..."
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 2 — EL SERVIDOR VALIDA AL ALUMNO
+───────────────────────────────────────────────────────────────────
+  El servidor revisa, en orden (server/main.py:868-1014):
+    1. Formato del DNI (8 dígitos). Si falla 3 veces, bloquea la terminal 5 min.
+    2. ¿Está BANEADO? Consulta la tabla de bans. Si tiene ban activo, rechaza.
+    3. ¿Existe en la base de datos local (AlumnoMaestro)? Esta base se carga
+       previamente desde el SGA de la UNASAM. Si NO existe → rechaza con
+       "Acérquese al módulo para tramitar su carnet".
+    4. ¿Ya tiene una sesión activa en OTRA PC? Si sí, cierra la anterior
+       (motivo "desplazado_por_nuevo_login") y bloquea esa otra PC.
+
+  Si TODO está bien:
+    5. Crea la sesión en la base de datos (estado="activa", confirmada=FALSE).
+       server/main.py:981-993
+    6. Marca la terminal como "activo".
+    7. Envía al kiosco la orden de desbloquear, con los datos del alumno:
+       {"tipo":"desbloquear", "alumno":{codigo, nombres, apellidos}}
+
+  Si es RECHAZADO: el kiosco muestra el motivo y vuelve a pedir el DNI.
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 3 — SE DESBLOQUEA LA PC Y SE CONFIRMA LA SESIÓN
+───────────────────────────────────────────────────────────────────
+  El cliente, al recibir "desbloquear" (client/UI/MainWindow.xaml.cs:535-572):
+    - Muestra "Bienvenido, <nombre>" y oculta el login.
+    - Desbloquea el escritorio de Windows.
+    - Arranca el monitoreo de actividad (ActivityMonitor.Iniciar()).
+    - Envía de vuelta {"tipo":"unlock_confirmed"} para confirmar.
+
+  El servidor, al recibir "unlock_confirmed" (server/main.py:1016-1040):
+    - Marca la sesión como confirmada=TRUE.
+    - Reintenta hasta 5 veces (2s) por si el mensaje llegó muy rápido.
+
+  PREVENCIÓN DE "SESIÓN FANTASMA" (server/main.py:297-327):
+    - Una tarea revisa cada 10s las sesiones activas SIN confirmar.
+    - Si una lleva más de 10s sin confirmarse (porque el cliente se cayó o se
+      apagó justo después del login), la cancela y bloquea la PC.
+    - Esto evita que queden sesiones "abiertas" sin nadie usándolas.
+
+  EN PANTALLA: pantalla de sesión activa con el nombre del alumno + botón
+  "Cerrar Sesión". El escritorio de Windows queda usable.
+  * falta implementar el cerrar sesion por parte del estudiante o usuario,
+  no pueden cerrar sesion, a no ser que apaguen la computadora *
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 4 — SESIÓN ACTIVA: MONITOREO EN VIVO
+───────────────────────────────────────────────────────────────────
+  Mientras el alumno usa la PC, el cliente monitorea (sin que el alumno lo note).
+  client/Services/ActivityMonitor.cs
+
+  QUÉ DETECTA:
+    A) PROGRAMAS que abre (sondeo cada 1.5 segundos):
+       - Ignora el "ruido" del sistema operativo (svchost, explorer, etc.).
+       - Apps normales (Word, Chrome): se registran UNA vez por sesión
+         (aunque abran varios procesos). Nivel: normal.
+       - Herramientas peligrosas (cmd, powershell, regedit, etc.): se registran
+         SIEMPRE, cada vez que se abren. Nivel: sospechoso. Incluye la línea de
+         comando completa.
+    B) DESCARGAS en la carpeta Downloads:
+       - Ignora archivos temporales (.crdownload, .part).
+       - Ejecutables (.exe, .msi, .bat...): nivel sospechoso.
+       - Documentos (.pdf, .docx...): nivel normal.
+       - Etiqueta el navegador de origen (Chrome, Firefox...).
+
+  CÓMO LO ENVÍA: por WebSocket al servidor:
+    {"tipo":"actividad", "evento":..., "descripcion":..., "nivel":...,
+     "proceso_exe":...}
+
+  QUÉ HACE EL SERVIDOR (server/main.py:1042-1118):
+    - Asocia el evento al alumno de la sesión activa.
+    - Lo guarda SIEMPRE en la tabla actividad_logs (incluso si es un proceso
+      "ignorado" por el admin — para no perder evidencia).
+    - Si el nivel es "sospechoso", crea automáticamente una SOSPECHA y avisa al
+      panel del admin en tiempo real.
+
+  EN PANTALLA: el alumno no ve nada distinto; usa la PC normalmente.
+
+
+───────────────────────────────────────────────────────────────────
+  PASO 5 — SE CIERRA LA SESIÓN
+───────────────────────────────────────────────────────────────────
+  Hay varias formas en que termina la sesión:
+
+  5A. El alumno pulsa "Cerrar Sesión":
+      - Cliente envía {"tipo":"logout"} y vuelve al login.
+      - Servidor cierra la sesión (motivo "logout") y bloquea la terminal.
+      server/main.py:1120-1135
+
+  5B. Se pierde la conexión de red:
+      - El servidor detecta la desconexión y cierra la sesión
+        (motivo "desconexion_red"). server/main.py:1137-1160
+      - El cliente muestra una ventana con cuenta regresiva de 3 minutos; si no
+        reconecta, se bloquea solo. client/UI/MainWindow.xaml.cs:685-728
+
+  5C. Apagón / corte de energía:
+      - Al reiniciar el servidor, cierra todas las sesiones que quedaron
+        "abiertas" y pone todas las terminales en "offline".
+      server/main.py:330-354
+
+  5D. El admin bloquea la PC (desde el panel):
+      - Servidor cierra la sesión (motivo "bloqueo_admin") y manda bloquear.
+
+  5E. El admin apaga la PC (desde el panel):
+      - Servidor envía {"tipo":"remote_command","action":"shutdown"}.
+      - El cliente cierra la sesión y ejecuta el apagado de Windows.
+
+  EN PANTALLA: vuelve a la pantalla de login bloqueada (o se apaga).
+
+
+───────────────────────────────────────────────────────────────────
+  DIAGRAMA RÁPIDO
+───────────────────────────────────────────────────────────────────
+  Arranca kiosco (bloqueado)
+        │  hello + heartbeat
+        ▼
+  Alumno escribe DNI + motivo  ──login_request──►  Servidor valida
+        │                                          (formato, ban, maestro,
+        │                                           sesión única)
+        ▼                                                 │
+  Recibe "desbloquear" ◄───────────────────────────── crea Sesión
+        │  unlock_confirmed
+        ▼
+  PC desbloqueada + monitoreo activo  ──actividad──►  guarda en actividad_logs
+        │                                              (+ sospecha si aplica)
+        ▼
+  Cierra sesión (logout / desconexión / apagado)  ──►  Sesión cerrada, PC bloqueada
+
+
+───────────────────────────────────────────────────────────────────
+  ARCHIVOS CLAVE
+───────────────────────────────────────────────────────────────────
+  Cliente (kiosco):
+    client/UI/MainWindow.xaml.cs        — pantalla, login, desbloqueo, bloqueo
+    client/Services/WebSocketService.cs — conexión y reconexión
+    client/Services/ActivityMonitor.cs  — monitoreo de procesos y descargas
+    client/Services/KioscoConfig.cs     — IP del servidor (kiosco.config.json)
+  Servidor:
+    server/main.py:701-1160 — handlers del WebSocket de terminal
+    server/main.py:297-354  — limpieza de sesiones fantasma y de arranque

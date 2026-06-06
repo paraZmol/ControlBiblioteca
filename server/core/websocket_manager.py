@@ -32,7 +32,7 @@ class ConnectionManager:
         self.terminal_ips.pop(old_id, None)
         if ip:
             self.terminal_ips[new_id] = ip
-        logger.info(f"Terminal re-identificada: {old_id} → {new_id}")
+        logger.info(f"Terminal re-identificada: {old_id} -> {new_id}")
 
     def desconectar(self, terminal_id: str):
         self.conexiones_activas.pop(terminal_id, None)
@@ -43,7 +43,7 @@ class ConnectionManager:
         ws = self.conexiones_activas.get(terminal_ip)
         if ws:
             await ws.send_json(comando)
-            logger.info(f"Comando {comando.get('tipo')} → {terminal_ip}")
+            logger.info(f"Comando {comando.get('tipo')} -> {terminal_ip}")
             return True
         logger.warning(f"Terminal {terminal_ip} no conectada")
         return False

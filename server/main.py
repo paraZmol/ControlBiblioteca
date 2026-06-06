@@ -1,6 +1,7 @@
 # main.py - Punto de entrada del servidor FastAPI
 import logging
 import os
+import re
 import socket
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -9,7 +10,7 @@ import asyncio
 
 import hashlib
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, delete
@@ -55,6 +56,48 @@ _SGA_TIMEOUT = float(os.getenv("SGA_TIMEOUT_SECONDS", "6"))
 # Verificación SSL al consultar el SGA. True por defecto (seguro). Solo se
 # desactiva si SGA_SSL_VERIFY es explícitamente "false"/"0"/"no" en .env.
 _SGA_VERIFY_SSL = os.getenv("SGA_SSL_VERIFY", "true").strip().lower() not in ("false", "0", "no")
+
+# Contraseña inicial para los usuarios por defecto (solo se usa al crearlos por
+# primera vez). Se lee de .env; si no está, cae a un valor temporal y se avisa.
+# NUNCA se registra en logs en claro. Cambiar tras el primer login.
+_DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "").strip() or "admin123"
+
+
+# ── B-8: enmascarado de PII para los logs ──────────────────────────────
+# Evita escribir DNIs y nombres completos en claro en los logs operativos.
+# Para auditoría puntual se puede desactivar con LOG_PII_CLARO=true en .env.
+_LOG_PII_CLARO = os.getenv("LOG_PII_CLARO", "false").strip().lower() in ("true", "1", "yes")
+
+def _mask_dni(dni) -> str:
+    """71396514 -> ****6514. Conserva los últimos 4 para poder correlacionar."""
+    s = str(dni or "")
+    if _LOG_PII_CLARO:
+        return s
+    if len(s) <= 4:
+        return "****"
+    return "****" + s[-4:]
+
+def _mask_nombre(nombre) -> str:
+    """'Juan Carlos Pérez' -> 'J.C.P.'. Solo iniciales."""
+    s = str(nombre or "").strip()
+    if _LOG_PII_CLARO:
+        return s
+    if not s:
+        return "—"
+    iniciales = ".".join(p[0].upper() for p in s.split() if p)
+    return (iniciales + ".") if iniciales else "—"
+
+
+# B-9: complejidad mínima de contraseñas de los usuarios admin/superadmin.
+# Devuelve None si es válida, o un mensaje de error describiendo qué falta.
+def _validar_complejidad_password(pwd: str) -> Optional[str]:
+    if not pwd or len(pwd) < 8:
+        return "La contraseña debe tener al menos 8 caracteres"
+    if not any(c.isupper() for c in pwd):
+        return "La contraseña debe incluir al menos una letra mayúscula"
+    if not any(c.isdigit() for c in pwd):
+        return "La contraseña debe incluir al menos un número"
+    return None
 
 
 # ── Funciones helper para get_or_create ────────────────────────────────
@@ -111,7 +154,7 @@ async def consultar_sga(dni: str) -> Optional[dict]:
         async with httpx.AsyncClient(timeout=_SGA_TIMEOUT, verify=_SGA_VERIFY_SSL) as client:
             resp = await client.get(url)
 
-        logger.info(f"[SGA] HTTP {resp.status_code} para DNI={dni}")
+        logger.info(f"[SGA] HTTP {resp.status_code} para DNI={_mask_dni(dni)}")
         if resp.status_code != 200:
             return None
 
@@ -143,7 +186,7 @@ async def consultar_sga(dni: str) -> Optional[dict]:
         if not codigo_matricula:
             codigo_matricula = dni_real  # fallback si el SGA no devuelve código
 
-        logger.info(f"[SGA] Alumno: {nombres} {apellidos} | código={codigo_matricula} | DNI={dni_real}")
+        logger.info(f"[SGA] Alumno: {_mask_nombre(nombres + ' ' + apellidos)} | DNI={_mask_dni(dni_real)}")
         return {
             "codigo":    codigo_matricula,
             "dni":       dni_real,
@@ -154,7 +197,7 @@ async def consultar_sga(dni: str) -> Optional[dict]:
         }
 
     except httpx.TimeoutException:
-        logger.warning(f"[SGA] Timeout para DNI={dni}")
+        logger.warning(f"[SGA] Timeout para DNI={_mask_dni(dni)}")
         return None
     except Exception as exc:
         logger.error(f"[SGA] Error: {exc}")
@@ -432,24 +475,32 @@ async def lifespan(_app: FastAPI):
         else:
             db.add(Usuario(
                 username="superadmin",
-                hashed_password=hashear_password("admin123"),
+                hashed_password=hashear_password(_DEFAULT_ADMIN_PASSWORD),
                 nombre_completo="Super Administrador",
                 rol="superadmin"
             ))
             await db.commit()
-            logger.info("Usuario superadmin creado (superadmin/admin123)")
+            # NO registrar la contraseña en el log (A-5). Avisar que se use la
+            # de .env y se cambie tras el primer inicio.
+            logger.warning(
+                "Usuario 'superadmin' creado con la contraseña inicial por defecto. "
+                "Inicie sesión y CÁMBIELA cuanto antes (configure DEFAULT_ADMIN_PASSWORD en .env)."
+            )
 
         # Admin: crear si no existe con rol 'admin'
         res_a = await db.execute(select(Usuario).where(Usuario.rol == "admin"))
         if not res_a.scalar_one_or_none():
             db.add(Usuario(
                 username="admin",
-                hashed_password=hashear_password("admin123"),
+                hashed_password=hashear_password(_DEFAULT_ADMIN_PASSWORD),
                 nombre_completo="Administrador",
                 rol="admin"
             ))
             await db.commit()
-            logger.info("Usuario admin creado (admin/admin123)")
+            logger.warning(
+                "Usuario 'admin' creado con la contraseña inicial por defecto. "
+                "Inicie sesión y CÁMBIELA cuanto antes."
+            )
 
     tarea_limpieza   = asyncio.create_task(_limpiar_sesiones_fantasma())
     tarea_scheduler  = asyncio.create_task(_scheduler_mensajes())
@@ -478,6 +529,24 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+# B-4: Headers de seguridad HTTP en todas las respuestas.
+# NO se incluye HSTS porque el sistema corre en HTTP (red local, sin TLS):
+# HSTS forzaría HTTPS y rompería el acceso. Tampoco una CSP estricta, porque el
+# panel carga Tailwind/Phosphor desde CDN y se romperían los estilos.
+@app.middleware("http")
+async def agregar_headers_seguridad(request, call_next):
+    response = await call_next(request)
+    # Evita que el panel se embeba en un <iframe> de otro sitio (clickjacking).
+    response.headers["X-Frame-Options"] = "DENY"
+    # Evita que el navegador "adivine" tipos MIME (MIME sniffing).
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # No filtrar la URL completa como referer hacia otros orígenes.
+    response.headers["Referrer-Policy"] = "same-origin"
+    # Limitar APIs sensibles del navegador que el panel no usa.
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    return response
 
 # Registrar rutas API
 app.include_router(api_router)
@@ -559,8 +628,9 @@ async def actualizar_usuario(
 
     # Cambio de contraseña para ambos roles
     if datos.nueva_password:
-        if len(datos.nueva_password) < 6:
-            raise HTTPException(status_code=422, detail="La contraseña debe tener al menos 6 caracteres")
+        error_pwd = _validar_complejidad_password(datos.nueva_password)
+        if error_pwd:
+            raise HTTPException(status_code=422, detail=error_pwd)
         usuario.hashed_password = hashear_password(datos.nueva_password)
 
     if not datos.nuevo_username and not datos.nueva_password:
@@ -575,11 +645,18 @@ class _ConfiguracionKioscoReq(_BaseModel):
     backdoor_key: int
     backdoor_pin: str
 
+class _ConfiguracionOfflineReq(_BaseModel):
+    offline_modifiers: int
+    offline_key: int
+    offline_pin: str
+
 @app.get("/api/config/backdoor")
 async def obtener_config_backdoor(
     admin: Usuario = Depends(obtener_usuario_actual),
     db: AsyncSession = Depends(get_db)
 ):
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede ver la configuración de mantenimiento.")
     from models import ConfiguracionKiosco
     res = await db.execute(select(ConfiguracionKiosco).limit(1))
     cfg = res.scalar_one_or_none()
@@ -600,6 +677,8 @@ async def actualizar_config_backdoor(
     admin: Usuario = Depends(obtener_usuario_actual),
     db: AsyncSession = Depends(get_db)
 ):
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede modificar la configuración de mantenimiento.")
     from models import ConfiguracionKiosco
     res = await db.execute(select(ConfiguracionKiosco).limit(1))
     cfg = res.scalar_one_or_none()
@@ -616,7 +695,54 @@ async def actualizar_config_backdoor(
         "backdoor_key": cfg.backdoor_key,
         "backdoor_pin": cfg.backdoor_pin
     })
-    return {"mensaje": "Configuración de Kiosco actualizada correctamente"}
+    return {"mensaje": "Configuración de mantenimiento actualizada correctamente"}
+
+
+@app.get("/api/config/offline-pin")
+async def obtener_config_offline(
+    admin: Usuario = Depends(obtener_usuario_actual),
+    db: AsyncSession = Depends(get_db)
+):
+    from models import ConfiguracionKiosco
+    res = await db.execute(select(ConfiguracionKiosco).limit(1))
+    cfg = res.scalar_one_or_none()
+    if not cfg:
+        cfg = ConfiguracionKiosco()
+        db.add(cfg)
+        await db.commit()
+        await db.refresh(cfg)
+    return {
+        "offline_modifiers": cfg.offline_modifiers,
+        "offline_key": cfg.offline_key,
+        "offline_pin": cfg.offline_pin
+    }
+
+@app.put("/api/config/offline-pin")
+async def actualizar_config_offline(
+    datos: _ConfiguracionOfflineReq,
+    admin: Usuario = Depends(obtener_usuario_actual),
+    db: AsyncSession = Depends(get_db)
+):
+    from models import ConfiguracionKiosco
+    res = await db.execute(select(ConfiguracionKiosco).limit(1))
+    cfg = res.scalar_one_or_none()
+    if not cfg:
+        cfg = ConfiguracionKiosco()
+        db.add(cfg)
+    # Validar que el PIN offline no sea igual al PIN de mantenimiento
+    if datos.offline_pin == cfg.backdoor_pin:
+        raise HTTPException(status_code=422, detail="El PIN offline no puede ser igual al PIN de mantenimiento.")
+    cfg.offline_modifiers = datos.offline_modifiers
+    cfg.offline_key = datos.offline_key
+    cfg.offline_pin = datos.offline_pin
+    await db.commit()
+    await manager.broadcast({
+        "tipo": "config_offline_update",
+        "offline_modifiers": cfg.offline_modifiers,
+        "offline_key": cfg.offline_key,
+        "offline_pin": cfg.offline_pin
+    })
+    return {"mensaje": "Configuración offline actualizada correctamente"}
 
 
 # ── Endpoint de limpieza y mantenimiento ───────────────────────────
@@ -659,7 +785,7 @@ async def limpiar_todo(
         return {"estado": "ok", "mensaje": "Sistema limpiado completamente", "ejecutado_por": admin.username}
     except Exception as e:
         logger.error(f"[LIMPIEZA] Error durante limpieza: {e}")
-        return {"estado": "error", "mensaje": str(e)}, 500
+        return {"estado": "error", "mensaje": "Error durante la limpieza. Revise los logs del servidor."}, 500
 
 
 # ── Helpers internos WebSocket ─────────────────────────────────────
@@ -688,6 +814,21 @@ def _cerrar_sesion(sesion: Sesion, motivo: str):
 @app.websocket("/ws/terminal/{terminal_ip}")
 async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
     """Conexión WebSocket persistente con cada terminal cliente."""
+
+    # ── B-2 / E-1: anti-suplantación de terminal ──
+    # La IP del path ({terminal_ip}) la controla el cliente y NO es confiable:
+    # cualquiera en la red podría poner la IP de otra PC. Usamos como identidad
+    # la IP REAL de la conexión TCP (websocket.client.host), que no se puede
+    # falsificar en una conexión ya establecida. La IP del path se conserva solo
+    # para diagnóstico (algunas PCs multi-interfaz reportan una IP distinta a la
+    # de su ruta real al servidor — por eso NO exigimos que coincidan, solo lo
+    # registramos). La identidad canónica definitiva sigue siendo el hostname
+    # que llega en el mensaje 'hello'.
+    ip_path = terminal_ip
+    ip_real = (websocket.client.host if websocket.client else "") or terminal_ip
+    if ip_real != ip_path:
+        logger.info(f"[WS] Terminal: IP path='{ip_path}' difiere de IP real='{ip_real}' (multi-interfaz). Se usa la real.")
+    terminal_ip = ip_real  # identidad de confianza para todo el handler
 
     # Usar IP como identificador inicial (se actualiza si llega hello con hostname)
     terminal_id = terminal_ip
@@ -740,7 +881,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
             if not tipo:
                 tipo = data.get("type", "") # Soporte para "type" en lugar de "tipo"
             
-            logger.info(f"[WS] {terminal_id} → tipo={tipo!r}")
+            logger.info(f"[WS] {terminal_id} -> tipo={tipo!r}")
 
             if tipo == "error_report":
                 msg = data.get("message", "Error sin detalle")
@@ -759,11 +900,12 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     continue
 
                 cliente_desbloqueado = bool(data.get("desbloqueado", False))
+                cliente_modo_offline = bool(data.get("modo_offline", False))
 
                 old_id = terminal_id
                 terminal_id = hostname
                 manager.actualizar_id(old_id, terminal_id, ip=terminal_ip)
-                logger.info(f"[WS] Terminal re-identificada: {old_id} → {terminal_id} (hostname={hostname}, desbloqueado={cliente_desbloqueado})")
+                logger.info(f"[WS] Terminal re-identificada: {old_id} -> {terminal_id} (hostname={hostname}, desbloqueado={cliente_desbloqueado})")
 
                 # Sincronizar DB: nombre (hostname) ↔ IP de forma atómica
                 async with async_session() as db:
@@ -774,9 +916,13 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     res2 = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
                     t_by_ip = res2.scalar_one_or_none()
 
+                    # En modo offline el cliente ya tiene sesión activa — no pisar estado
+                    estado_inicial = "activa" if cliente_modo_offline else "bloqueado"
+
                     if t:
                         t.ip = terminal_ip
-                        t.estado = "bloqueado"
+                        if not cliente_modo_offline:
+                            t.estado = estado_inicial
                         t.ultima_conexion = datetime.utcnow()
                         if t_by_ip and t_by_ip.id != t.id:
                             await db.delete(t_by_ip)
@@ -784,14 +930,15 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         logger.info(f"[WS] Terminal '{hostname}' actualizada con IP={terminal_ip}")
                     elif t_by_ip:
                         t_by_ip.nombre_red = hostname
-                        t_by_ip.estado = "bloqueado"
+                        if not cliente_modo_offline:
+                            t_by_ip.estado = estado_inicial
                         t_by_ip.ultima_conexion = datetime.utcnow()
                         logger.info(f"[WS] Terminal IP={terminal_ip} sincronizada con nombre '{hostname}'")
                     else:
                         db.add(Terminal(
                             nombre_red=hostname,
                             ip=terminal_ip,
-                            estado="bloqueado",
+                            estado=estado_inicial,
                             ultima_conexion=datetime.utcnow()
                         ))
                         logger.info(f"[WS] Nueva terminal '{hostname}' registrada con IP={terminal_ip}")
@@ -808,17 +955,24 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     backdoor_modifiers = cfg.backdoor_modifiers
                     backdoor_key = cfg.backdoor_key
                     backdoor_pin = cfg.backdoor_pin
+                    offline_modifiers = cfg.offline_modifiers
+                    offline_key = cfg.offline_key
+                    offline_pin = cfg.offline_pin
 
                 await websocket.send_json({
                     "tipo": "hello_ack",
                     "hostname": hostname,
                     "backdoor_modifiers": backdoor_modifiers,
                     "backdoor_key": backdoor_key,
-                    "backdoor_pin": backdoor_pin
+                    "backdoor_pin": backdoor_pin,
+                    "offline_modifiers": offline_modifiers,
+                    "offline_key": offline_key,
+                    "offline_pin": offline_pin
                 })
 
                 # ── Si el cliente dice estar desbloqueado, verificar que haya sesión activa ──
-                if cliente_desbloqueado:
+                # En modo offline el cliente maneja su propia sincronización — no forzar bloqueo
+                if cliente_desbloqueado and not cliente_modo_offline:
                     async with async_session() as db:
                         res_t = await db.execute(select(Terminal).where(Terminal.nombre_red == hostname))
                         t_check = res_t.scalar_one_or_none()
@@ -848,7 +1002,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             motivo_id = None
                     except ValueError:
                         motivo_id = None
-                logger.info(f"[WS] {terminal_id} login_request: codigo={codigo!r} razon={razon!r} motivo_id={motivo_id}")
+                logger.info(f"[WS] {terminal_id} login_request: codigo={_mask_dni(codigo)} razon={razon!r} motivo_id={motivo_id}")
 
                 try:
                     async with async_session() as db:
@@ -866,7 +1020,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                                 if t.intentos_fallidos >= 3:
                                     t.bloqueada_hasta = datetime.now() + timedelta(minutes=5)
                                 await db.commit()
-                            logger.warning(f"[WS] {terminal_id} DNI con formato invalido: {codigo!r}")
+                            logger.warning(f"[WS] {terminal_id} DNI con formato invalido: {_mask_dni(codigo)}")
                             await websocket.send_json({"tipo": "login_rechazado", "motivo": "El DNI debe tener exactamente 8 digitos"})
                             continue
 
@@ -881,7 +1035,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         if ban_activo:
                             motivo_ban = ban_activo.motivo or "Acceso restringido"
                             fecha_fin_ban = ban_activo.fecha_fin.strftime("%d/%m/%Y") if ban_activo.fecha_fin else "indefinido"
-                            logger.warning(f"[WS] {terminal_id} DNI={codigo} BANEADO — {motivo_ban}")
+                            logger.warning(f"[WS] {terminal_id} DNI={_mask_dni(codigo)} BANEADO — {motivo_ban}")
                             await websocket.send_json({"tipo": "login_rechazado", "motivo": f"Acceso denegado. {motivo_ban}. Expira: {fecha_fin_ban}"})
                             continue
 
@@ -904,7 +1058,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                                 "nombres":   nombres_m,
                                 "apellidos": apellidos_m,
                             }
-                            logger.info(f"[MAESTRO] Alumno encontrado: {maestro.nombre} | DNI={codigo}")
+                            logger.info(f"[MAESTRO] Alumno encontrado: {_mask_nombre(maestro.nombre)} | DNI={_mask_dni(codigo)}")
                         else:
                             # ── Solo BD local — sin SGA ──
                             if t:
@@ -912,7 +1066,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                                 if t.intentos_fallidos >= 3:
                                     t.bloqueada_hasta = datetime.now() + timedelta(minutes=5)
                                 await db.commit()
-                            logger.warning(f"[WS] {terminal_id} DNI={codigo} no en maestro — acceso denegado")
+                            logger.warning(f"[WS] {terminal_id} DNI={_mask_dni(codigo)} no en maestro — acceso denegado")
                             await websocket.send_json({"tipo": "login_rechazado", "motivo": "Usuario no registrado. Acerquese al modulo para tramitar su carnet de biblioteca"})
                             continue
 
@@ -928,7 +1082,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             db.add(alumno)
                             await db.flush()
 
-                        logger.info(f"[WS] {terminal_id} alumno OK: {datos_alumno['nombres']} {datos_alumno['apellidos']} | DNI={codigo}")
+                        logger.info(f"[WS] {terminal_id} alumno OK: {_mask_nombre(datos_alumno['nombres'] + ' ' + datos_alumno['apellidos'])} | DNI={_mask_dni(codigo)}")
 
                         # ── Sesión única: cerrar sesión activa previa del mismo alumno ──
                         res_dup = await db.execute(
@@ -946,7 +1100,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             if t_prev:
                                 t_prev.estado = "bloqueado"
                                 await manager.forzar_cierre_sesion(t_prev.nombre_red)
-                                logger.warning(f"[WS] Sesión duplicada cerrada: alumno {alumno.dni} en {t_prev.nombre_red}")
+                                logger.warning(f"[WS] Sesión duplicada cerrada: alumno {_mask_dni(alumno.dni)} en {t_prev.nombre_red}")
 
                         t = await _buscar_terminal(db, terminal_id, terminal_ip)
 
@@ -973,8 +1127,8 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             "apellidos": datos_alumno["apellidos"],
                         })
                         logger.info(f"[WS] {terminal_id} respuesta enviada OK")
-                        await manager.notificar_evento(f"🟢 ENTRADA: {nombre_display} en {terminal_id}", "login")
-                        await manager.enviar_log("activity", f"👤 Acceso: {nombre_display} en {terminal_id}")
+                        await manager.notificar_evento(f"ENTRADA: {nombre_display} en {terminal_id}", "login")
+                        await manager.enviar_log("activity", f"Acceso: {nombre_display} en {terminal_id}")
 
                     await manager.notificar_admins()
 
@@ -1003,7 +1157,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                                 sesion.confirmada = True
                                 await db.commit()
                                 logger.info(f"[WS] Sesión #{sesion.id} confirmada por {terminal_id}")
-                                await manager.notificar_evento(f"✅ Desbloqueo confirmado en {terminal_id}", "login")
+                                await manager.notificar_evento(f"Desbloqueo confirmado en {terminal_id}", "login")
                                 confirmada_ok = True
                                 break
                     await asyncio.sleep(0.4)  # esperar a que el commit de la sesión aterrice
@@ -1039,6 +1193,16 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     proceso_exe= str(data.get("proceso_exe", "") or "").strip()
                     if nivel not in ("normal", "sospechoso"):
                         nivel = "normal"
+                    # E-13: whitelist del tipo de evento. El cliente solo emite
+                    # estos tres; cualquier otro valor (entrada manipulada) se
+                    # normaliza a "proceso" en vez de guardarse tal cual.
+                    if tipo_ev not in ("proceso", "comando", "archivo"):
+                        tipo_ev = "proceso"
+                    # E-13: sanear proceso_exe — solo caracteres válidos de un
+                    # nombre de ejecutable (letras, dígitos, . _ - espacio).
+                    # Defensa en profundidad: el panel ya escapa HTML al mostrar.
+                    if proceso_exe:
+                        proceso_exe = re.sub(r"[^\w.\- ]", "", proceso_exe)[:120]
 
                     # NOTA: ya NO descartamos los procesos ignorados aquí.
                     # Se guarda TODO siempre (evidencia forense intacta); los
@@ -1072,11 +1236,11 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         await manager._broadcast_admins({
                             "tipo":    "sospecha",
                             "nivel":   "alerta",
-                            "mensaje": f"⚠ {alumno.nombre} ({alumno.dni}) en {t.nombre_red}: {descripcion}",
+                            "mensaje": f"ALERTA: {alumno.nombre} ({alumno.dni}) en {t.nombre_red}: {descripcion}",
                         })
 
                     await db.commit()
-                    logger.info(f"[ACT] {t.nombre_red} | {alumno.dni} | {tipo_ev} | {nivel} | {descripcion}")
+                    logger.info(f"[ACT] {t.nombre_red} | {_mask_dni(alumno.dni)} | {tipo_ev} | {nivel} | {descripcion}")
 
                     # Notificar al panel admin en tiempo real
                     await manager._broadcast_admins({
@@ -1126,7 +1290,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         ahora = _cerrar_sesion(sesion, "desconexion_red")
                         logger.info(f"[WS] Sesión cerrada por desconexión en {terminal_id}: {ahora.strftime('%I:%M:%S %p')}")
                     await db.commit()
-            await manager.notificar_evento(f"⚠️ Terminal '{terminal_id}' perdió conexión", "offline")
+            await manager.notificar_evento(f"Terminal '{terminal_id}' perdió conexión", "offline")
             await manager.notificar_admins()
         except Exception as cleanup_exc:
             logger.error(f"[WS] Error en cleanup de {terminal_id}: {cleanup_exc}")
@@ -1135,12 +1299,26 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
 # ── WebSocket para panel admin ──────────────────────────────────────
 
 @app.websocket("/ws/admin")
-async def websocket_admin(websocket: WebSocket, token: str = Query(default="")):
+async def websocket_admin(websocket: WebSocket):
     """WebSocket bidireccional: recibe comandos del admin y envía push de estado."""
     # Aceptar primero (Starlette requiere accept() antes de close() con código custom)
     await websocket.accept()
 
-    # ── Validar JWT ──
+    # ── Autenticación por MENSAJE INICIAL (A-8) ──
+    # El token NO viaja en la URL (quedaría en logs/historial). El cliente debe
+    # enviar como PRIMER mensaje: {"tipo": "auth", "token": "<jwt>"}.
+    # Se espera ese mensaje con un timeout corto; si no llega o es inválido,
+    # se cierra la conexión sin entrar al loop principal.
+    try:
+        auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+    except (asyncio.TimeoutError, WebSocketDisconnect, Exception):
+        await websocket.close(code=4001, reason="Auth requerido")
+        return
+
+    token = ""
+    if isinstance(auth_msg, dict) and auth_msg.get("tipo") == "auth":
+        token = str(auth_msg.get("token", "")).strip()
+
     if not token:
         await websocket.close(code=4001, reason="Token requerido")
         return
@@ -1242,7 +1420,7 @@ async def websocket_admin(websocket: WebSocket, token: str = Query(default="")):
                         alumno = res_a2.scalar_one_or_none()
 
                     if alumno is None:
-                        logger.warning(f"[WS-Admin] DNI={dni_param} no en maestro — acceso denegado")
+                        logger.warning(f"[WS-Admin] DNI={_mask_dni(dni_param)} no en maestro — acceso denegado")
                         await websocket.send_json({"tipo": "error", "motivo": f"El DNI {dni_param} no esta registrado en la base de datos local"})
                         continue
 
@@ -1278,7 +1456,7 @@ async def websocket_admin(websocket: WebSocket, token: str = Query(default="")):
                     terminal_db.estado = "activo"
                     db.add(sesion)
                     await db.commit()
-                    logger.info(f"[WS-Admin] Sesión creada id={sesion.id} para {alumno.nombre}")
+                    logger.info(f"[WS-Admin] Sesión creada id={sesion.id} para {_mask_nombre(alumno.nombre)}")
 
                     # PASO 2: Ahora sí, enviar el comando de desbloqueo a la PC.
                     ok = await manager.desbloquear_terminal(tid, {
@@ -1349,7 +1527,7 @@ async def websocket_admin(websocket: WebSocket, token: str = Query(default="")):
 
                 # Enviar comando "bloquear" solo a los kioscos conectados
                 await manager.bloquear_todas()
-                await manager.notificar_evento(f"🔒 BLOQUEO GLOBAL: {cerradas} sesión(es) cerrada(s) ({len(ids_conectados)} terminal(es) conectada(s))", "warning")
+                await manager.notificar_evento(f"BLOQUEO GLOBAL: {cerradas} sesión(es) cerrada(s) ({len(ids_conectados)} terminal(es) conectada(s))", "warning")
                 await websocket.send_json({"tipo": "ok", "mensaje": f"Terminales conectadas bloqueadas ({cerradas} sesión(es) cerrada(s))"})
                 await manager.notificar_admins()
 
@@ -1366,6 +1544,111 @@ class _MensajeReq(_BaseModel):
     hora_envio: str    # "HH:MM"
     tipo:       str = "extra"   # "cierre" | "extra"
     fecha_envio: str = ""       # "YYYY-MM-DD" para extras, vacío para cierre
+
+
+class _OfflineSyncReq(_BaseModel):
+    dni:         str
+    razon:       str
+    hora_inicio: str
+    hora_fin:    str
+    terminal:    str
+
+
+@app.post("/api/offline-sync")
+async def offline_sync(datos: _OfflineSyncReq, db: AsyncSession = Depends(get_db)):
+    """
+    Recibe una sesión offline al reconectar.
+    Verifica si el alumno existe y no está baneado.
+    Si todo está bien, registra la sesión en el historial con hora retroactiva.
+    No requiere autenticación de admin — lo llama el kiosco directamente.
+    """
+    dni = datos.dni.strip()
+
+    # Verificar existencia
+    alumno = await db.get(AlumnoMaestro, dni)
+    if alumno is None:
+        return {"estado": "not_found", "motivo": "El DNI no está registrado en el sistema."}
+
+    # Verificar ban activo
+    res_ban = await db.execute(
+        select(Ban).where(
+            Ban.dni_alumno == dni,
+            (Ban.fecha_fin == None) | (Ban.fecha_fin > datetime.now())
+        )
+    )
+    ban = res_ban.scalar_one_or_none()
+    if ban:
+        return {"estado": "baneado", "motivo": f"Acceso restringido: {ban.motivo}"}
+
+    # Buscar terminal por nombre
+    res_t = await db.execute(select(Terminal).where(Terminal.nombre_red == datos.terminal))
+    terminal = res_t.scalar_one_or_none()
+    if terminal is None:
+        # Crear terminal si no existe (puede ocurrir si nunca conectó antes)
+        terminal = Terminal(
+            nombre_red=datos.terminal,
+            ip="offline",
+            estado="activa",
+            ultima_conexion=datetime.now()
+        )
+        db.add(terminal)
+        await db.flush()
+
+    # Parsear horas
+    try:
+        hora_inicio = datetime.strptime(datos.hora_inicio, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        hora_inicio = datetime.now()
+
+    # Registrar sesión activa con hora de entrada retroactiva.
+    # fecha_uso usa la fecha del servidor (no del cliente) para que los filtros
+    # de historial por día/mes/año funcionen correctamente independiente
+    # de la zona horaria del kiosco.
+    sesion = Sesion(
+        dni_alumno   = dni,
+        id_terminal  = terminal.id,
+        hora_entrada = hora_inicio,
+        razon_uso    = datos.razon,
+        estado       = "activa",
+        confirmada   = True,
+        fecha_uso    = datetime.now().date(),
+    )
+    db.add(sesion)
+    terminal.estado = "activa"
+    terminal.ultima_conexion = datetime.now()
+    await db.commit()
+    await db.refresh(sesion)
+
+    logger.info(f"[OfflineSync] Sesión offline sincronizada: DNI={dni} terminal={datos.terminal} inicio={datos.hora_inicio}")
+
+    # Notificar al kiosco que la sesión fue confirmada — le pasa el nombre del alumno
+    # para que la UI se actualice con la bienvenida normal
+    await manager.enviar_comando(terminal.ip, {
+        "tipo":   "sesion_sync_ok",
+        "dni":    dni,
+        "nombre": alumno.nombre,
+        "razon":  datos.razon,
+    })
+    await manager.notificar_admins()
+
+    return {"estado": "ok", "motivo": f"Sesión registrada para {alumno.nombre}"}
+
+
+@app.get("/api/descargar-cliente")
+async def descargar_cliente(db: AsyncSession = Depends(get_db)):
+    """Sirve el exe del kiosco para auto-actualización. No requiere auth — el kiosco lo llama al arrancar."""
+    import pathlib
+    from fastapi.responses import FileResponse
+    from api.endpoints import _obtener_ruta_distribucion
+    ruta = await _obtener_ruta_distribucion(db)
+    exe = pathlib.Path(ruta) / "ControlBiblioteca.Client.exe"
+    if not exe.exists():
+        raise HTTPException(status_code=404, detail=f"Ejecutable no encontrado en {ruta}")
+    return FileResponse(
+        path=str(exe),
+        media_type="application/octet-stream",
+        filename="ControlBiblioteca.Client.exe",
+    )
 
 
 @app.get("/api/mensajes")

@@ -99,7 +99,18 @@
       "Bash(.venv/Scripts/python.exe -c ' *)",
       "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); print\\('Sintaxis main.py OK'\\)\")",
       "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('Sintaxis endpoints.py OK'\\)\")",
-      "Bash(.venv/Scripts/python.exe -c \"from dotenv import load_dotenv; load_dotenv\\(\\); import api.endpoints; print\\('api.endpoints importa OK — sin referencias rotas'\\)\")"
+      "Bash(.venv/Scripts/python.exe -c \"from dotenv import load_dotenv; load_dotenv\\(\\); import api.endpoints; print\\('api.endpoints importa OK — sin referencias rotas'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('Sintaxis OK'\\)\")",
+      "PowerShell($cmd = Get-Command mysqldump -ErrorAction SilentlyContinue; if \\($cmd\\) { Write-Output \"mysqldump SI esta en el PATH de Windows:\"; Write-Output $cmd.Source } else { Write-Output \"mysqldump NO esta en el PATH de Windows\" }; Write-Output \"---\"; $cmd2 = Get-Command mysql -ErrorAction SilentlyContinue; if \\($cmd2\\) { Write-Output \"mysql \\(cliente\\) SI esta en PATH:\"; Write-Output $cmd2.Source } else { Write-Output \"mysql NO esta en PATH\" })",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\nunes\\\\StudioProjects\\\\control\\\\server\" -Recurse -File -Include \"*.py\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8098 --log-level warning)",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); print\\('Sintaxis OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8097 --log-level warning)",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('Sintaxis main.py + endpoints.py OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from dotenv import load_dotenv; load_dotenv\\(\\); import main; import api.endpoints; print\\('main.py + endpoints.py importan OK — sin errores'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('core/rate_limit.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK sintaxis'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK sintaxis endpoints.py'\\)\")"
     ],
     "additionalDirectories": [
       "\\tmp",

@@ -1,72 +1,170 @@
-2026-05-30 23:20:19.685 [App] === INICIO proceso PID=8456 ===
-2026-05-30 23:20:19.696 [App] Security.Bloquear() OK
-2026-05-30 23:20:19.696 [App] Mutex createdNew=True
-2026-05-30 23:20:19.803 [App] InstaladorKiosco.EsNecesario()=False
-2026-05-30 23:20:19.803 [App] Modo kiosco normal. Aplicando optimizaciones...
-2026-05-30 23:20:19.804 [App] Manejadores de error registrados.
-2026-05-30 23:20:19.839 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName=''
-2026-05-30 23:21:19.219 [App] === INICIO proceso PID=5132 ===
-2026-05-30 23:21:20.124 [App] Security.Bloquear() OK
-2026-05-30 23:21:20.130 [App] Mutex createdNew=True
-2026-05-30 23:21:22.154 [App] InstaladorKiosco.EsNecesario()=False
-2026-05-30 23:21:22.154 [App] Modo kiosco normal. Aplicando optimizaciones...
-2026-05-30 23:21:22.156 [App] Manejadores de error registrados.
-2026-05-30 23:21:22.387 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='REZE'
-2026-05-30 23:21:22.388 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
-2026-05-30 23:21:25.899 [App] Servicios internos iniciados.
-2026-05-30 23:21:26.588 [App] Cerrando splash, creando MainWindow...
-2026-05-30 23:21:26.632 [App] new MainWindow() — inicio
-2026-05-30 23:21:26.821 [App] new MainWindow() — OK, llamando Show()
-2026-05-30 23:21:26.835 [App] MainWindow.Show() — OK
-2026-05-30 23:22:10.929 [App] === INICIO proceso PID=10568 ===
-2026-05-30 23:22:10.942 [App] Security.Bloquear() OK
-2026-05-30 23:22:10.943 [App] Mutex createdNew=True
-2026-05-30 23:22:11.002 [App] InstaladorKiosco.EsNecesario()=False
-2026-05-30 23:22:11.003 [App] Modo kiosco normal. Aplicando optimizaciones...
-2026-05-30 23:22:11.004 [App] Manejadores de error registrados.
-2026-05-30 23:22:11.040 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='REZE'
-2026-05-30 23:22:11.040 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
-2026-05-30 23:22:11.172 [App] Servicios internos iniciados.
-2026-05-30 23:22:11.523 [App] Cerrando splash, creando MainWindow...
-2026-05-30 23:22:11.553 [App] new MainWindow() — inicio
-2026-05-30 23:22:11.656 [App] new MainWindow() — OK, llamando Show()
-2026-05-30 23:22:11.656 [App] MainWindow.Show() — OK
-2026-05-30 23:23:10.865 [App] === INICIO proceso PID=2588 ===
-2026-05-30 23:23:10.875 [App] Security.Bloquear() OK
-2026-05-30 23:23:10.876 [App] Mutex createdNew=True
-2026-05-30 23:23:10.919 [App] InstaladorKiosco.EsNecesario()=False
-2026-05-30 23:23:10.920 [App] Modo kiosco normal. Aplicando optimizaciones...
-2026-05-30 23:23:10.921 [App] Manejadores de error registrados.
-2026-05-30 23:23:10.952 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='REZE'
-2026-05-30 23:23:10.953 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
-2026-05-30 23:23:11.037 [App] Servicios internos iniciados.
-2026-05-30 23:23:11.355 [App] Cerrando splash, creando MainWindow...
-2026-05-30 23:23:11.383 [App] new MainWindow() — inicio
-2026-05-30 23:23:11.479 [App] new MainWindow() — OK, llamando Show()
-2026-05-30 23:23:11.479 [App] MainWindow.Show() — OK
-2026-05-30 23:24:10.887 [App] === INICIO proceso PID=1936 ===
-2026-05-30 23:24:10.904 [App] Security.Bloquear() OK
-2026-05-30 23:24:10.905 [App] Mutex createdNew=True
-2026-05-30 23:24:10.973 [App] InstaladorKiosco.EsNecesario()=False
-2026-05-30 23:24:10.974 [App] Modo kiosco normal. Aplicando optimizaciones...
-2026-05-30 23:24:10.975 [App] Manejadores de error registrados.
-2026-05-30 23:24:11.022 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='REZE'
-2026-05-30 23:24:11.023 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
-2026-05-30 23:24:11.124 [App] Servicios internos iniciados.
-2026-05-30 23:24:11.455 [App] Cerrando splash, creando MainWindow...
-2026-05-30 23:24:11.488 [App] new MainWindow() — inicio
-2026-05-30 23:24:11.637 [App] new MainWindow() — OK, llamando Show()
-2026-05-30 23:24:11.639 [App] MainWindow.Show() — OK
-2026-05-30 23:25:10.963 [App] === INICIO proceso PID=6356 ===
-2026-05-30 23:25:10.975 [App] Security.Bloquear() OK
-2026-05-30 23:25:10.977 [App] Mutex createdNew=True
-2026-05-30 23:25:11.025 [App] InstaladorKiosco.EsNecesario()=False
-2026-05-30 23:25:11.025 [App] Modo kiosco normal. Aplicando optimizaciones...
-2026-05-30 23:25:11.026 [App] Manejadores de error registrados.
-2026-05-30 23:25:11.060 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='REZE'
-2026-05-30 23:25:11.060 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
-2026-05-30 23:25:11.148 [App] Servicios internos iniciados.
-2026-05-30 23:25:11.462 [App] Cerrando splash, creando MainWindow...
-2026-05-30 23:25:11.495 [App] new MainWindow() — inicio
-2026-05-30 23:25:11.594 [App] new MainWindow() — OK, llamando Show()
-2026-05-30 23:25:11.595 [App] MainWindow.Show() — OK
+2026-06-06 04:31:51.698 [App] === INICIO proceso PID=7024 ===
+2026-06-06 04:31:51.713 [App] Security.Bloquear() OK
+2026-06-06 04:31:51.715 [App] Mutex createdNew=True
+2026-06-06 04:31:53.715 [App] InstaladorKiosco.EsNecesario()=False
+2026-06-06 04:31:53.715 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-06-06 04:31:53.717 [App] Manejadores de error registrados.
+2026-06-06 04:31:53.786 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName=''
+2026-06-06 04:34:06.680 [App] === INICIO proceso PID=5844 ===
+2026-06-06 04:34:06.704 [App] Security.Bloquear() OK
+2026-06-06 04:34:06.704 [App] Mutex createdNew=True
+2026-06-06 04:34:06.852 [App] InstaladorKiosco.EsNecesario()=False
+2026-06-06 04:34:06.852 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-06-06 04:34:06.854 [App] Manejadores de error registrados.
+2026-06-06 04:34:06.907 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='BUBU'
+2026-06-06 04:34:06.908 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-06-06 04:34:07.165 [App] Servicios internos iniciados.
+2026-06-06 04:34:07.593 [App] Creando MainWindow...
+2026-06-06 04:34:07.594 [App] new MainWindow() — inicio
+2026-06-06 04:34:07.681 [App] new MainWindow() — OK, llamando Show()
+2026-06-06 04:34:07.857 [App] MainWindow.Show() — OK
+2026-06-06 04:34:07.858 [App] Cerrando splash...
+2026-06-06 04:34:07.943 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 04:35:30.928 [App] [Offline] Hotkey registrado (Mod:6 Key:114)
+2026-06-06 04:45:52.770 [App] !!! EscaparAExplorer — razón: ctrl_m_escape_5x
+2026-06-06 04:45:54.100 [App] === INICIO proceso PID=7020 ===
+2026-06-06 04:45:54.121 [App] Security.Bloquear() OK
+2026-06-06 04:45:54.121 [App] Mutex createdNew=True
+2026-06-06 04:45:54.202 [App] InstaladorKiosco.EsNecesario()=False
+2026-06-06 04:45:54.203 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-06-06 04:45:54.205 [App] Manejadores de error registrados.
+2026-06-06 04:45:54.402 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='BUBU'
+2026-06-06 04:45:54.403 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-06-06 04:45:54.829 [App] Servicios internos iniciados.
+2026-06-06 04:45:55.331 [App] Creando MainWindow...
+2026-06-06 04:45:55.331 [App] new MainWindow() — inicio
+2026-06-06 04:45:55.436 [App] new MainWindow() — OK, llamando Show()
+2026-06-06 04:45:55.584 [App] MainWindow.Show() — OK
+2026-06-06 04:45:55.584 [App] Cerrando splash...
+2026-06-06 04:45:55.658 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 04:47:42.958 [App] === INICIO proceso PID=4256 ===
+2026-06-06 04:47:43.920 [App] Security.Bloquear() OK
+2026-06-06 04:47:43.965 [App] Mutex createdNew=True
+2026-06-06 04:47:45.688 [App] InstaladorKiosco.EsNecesario()=False
+2026-06-06 04:47:45.689 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-06-06 04:47:45.690 [App] Manejadores de error registrados.
+2026-06-06 04:47:45.837 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='BUBU'
+2026-06-06 04:47:45.839 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-06-06 04:47:48.745 [App] Servicios internos iniciados.
+2026-06-06 04:47:49.666 [App] Creando MainWindow...
+2026-06-06 04:47:49.694 [App] new MainWindow() — inicio
+2026-06-06 04:47:49.824 [App] new MainWindow() — OK, llamando Show()
+2026-06-06 04:47:50.036 [App] MainWindow.Show() — OK
+2026-06-06 04:47:50.037 [App] Cerrando splash...
+2026-06-06 04:47:50.084 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 04:48:46.197 [App] [Offline] Hotkey registrado (Mod:6 Key:114)
+2026-06-06 04:49:08.199 [App] [Offline] Sesión iniciada — DNI:70234305 Razón:TEST
+2026-06-06 04:50:15.608 [App] [Offline] Hotkey desregistrado (conexión restaurada).
+2026-06-06 04:50:15.671 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 04:50:17.197 [App] [Offline] Sesión cerrada al reconectar — DNI:70234305 Estado:ok Motivo:Sesión registrada para Jorge Miller Nuñez Infantes
+2026-06-06 04:56:49.556 [App] === INICIO proceso PID=4592 ===
+2026-06-06 04:56:49.772 [App] Security.Bloquear() OK
+2026-06-06 04:56:49.774 [App] Mutex createdNew=True
+2026-06-06 04:56:50.944 [App] InstaladorKiosco.EsNecesario()=False
+2026-06-06 04:56:50.946 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-06-06 04:56:50.948 [App] Manejadores de error registrados.
+2026-06-06 04:56:51.280 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='BUBU'
+2026-06-06 04:56:51.281 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-06-06 04:56:55.004 [App] Servicios internos iniciados.
+2026-06-06 04:56:56.087 [App] Creando MainWindow...
+2026-06-06 04:56:56.109 [App] new MainWindow() — inicio
+2026-06-06 04:56:56.316 [App] new MainWindow() — OK, llamando Show()
+2026-06-06 04:56:56.683 [App] MainWindow.Show() — OK
+2026-06-06 04:56:56.686 [App] Cerrando splash...
+2026-06-06 04:56:56.854 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 05:15:57.750 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 05:16:04.545 [App] !!! EscaparAExplorer — razón: ctrl_m_escape_5x
+2026-06-06 05:16:49.867 [App] === INICIO proceso PID=4704 ===
+2026-06-06 05:16:50.762 [App] Security.Bloquear() OK
+2026-06-06 05:16:50.764 [App] Mutex createdNew=True
+2026-06-06 05:16:51.400 [App] InstaladorKiosco.EsNecesario()=False
+2026-06-06 05:16:51.425 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-06-06 05:16:51.475 [App] Manejadores de error registrados.
+2026-06-06 05:16:51.990 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='BUBU'
+2026-06-06 05:16:52.045 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-06-06 05:16:54.982 [App] Servicios internos iniciados.
+2026-06-06 05:16:55.670 [App] Creando MainWindow...
+2026-06-06 05:16:55.671 [App] new MainWindow() — inicio
+2026-06-06 05:16:55.802 [App] new MainWindow() — OK, llamando Show()
+2026-06-06 05:16:55.992 [App] MainWindow.Show() — OK
+2026-06-06 05:16:55.993 [App] Cerrando splash...
+2026-06-06 05:16:56.079 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 05:17:10.378 [App] !!! EscaparAExplorer — razón: ctrl_m_escape_5x
+2026-06-06 05:17:46.574 [App] === INICIO proceso PID=4728 ===
+2026-06-06 05:17:47.619 [App] Security.Bloquear() OK
+2026-06-06 05:17:47.622 [App] Mutex createdNew=True
+2026-06-06 05:17:49.596 [App] InstaladorKiosco.EsNecesario()=False
+2026-06-06 05:17:49.597 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-06-06 05:17:49.598 [App] Manejadores de error registrados.
+2026-06-06 05:17:51.276 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='BUBU'
+2026-06-06 05:17:51.277 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-06-06 05:17:55.752 [App] Servicios internos iniciados.
+2026-06-06 05:17:57.309 [App] Creando MainWindow...
+2026-06-06 05:17:57.309 [App] new MainWindow() — inicio
+2026-06-06 05:17:57.722 [App] new MainWindow() — OK, llamando Show()
+2026-06-06 05:17:58.112 [App] MainWindow.Show() — OK
+2026-06-06 05:17:58.150 [App] Cerrando splash...
+2026-06-06 05:17:58.423 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 05:18:57.438 [App] [Offline] Hotkey registrado (Mod:6 Key:114)
+2026-06-06 05:19:35.243 [App] [Offline] Sesión iniciada — DNI:70234305 Razón:TICTIC
+2026-06-06 05:20:26.854 [App] [Offline] Hotkey desregistrado (conexión restaurada).
+2026-06-06 05:20:26.927 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 05:20:28.473 [App] [Offline] Sesión cerrada al reconectar — DNI:70234305 Estado:ok Motivo:Sesión registrada para Jorge Miller Nuñez Infantes
+2026-06-06 05:29:14.714 [App] [Offline] Hotkey registrado (Mod:6 Key:114)
+2026-06-06 05:32:36.752 [App] === INICIO proceso PID=4188 ===
+2026-06-06 05:32:38.003 [App] Security.Bloquear() OK
+2026-06-06 05:32:38.004 [App] Mutex createdNew=True
+2026-06-06 05:32:40.712 [App] InstaladorKiosco.EsNecesario()=False
+2026-06-06 05:32:40.713 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-06-06 05:32:40.714 [App] Manejadores de error registrados.
+2026-06-06 05:32:41.090 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='BUBU'
+2026-06-06 05:32:41.091 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-06-06 05:32:44.252 [App] Servicios internos iniciados.
+2026-06-06 05:32:45.347 [App] Creando MainWindow...
+2026-06-06 05:32:45.348 [App] new MainWindow() — inicio
+2026-06-06 05:32:45.473 [App] new MainWindow() — OK, llamando Show()
+2026-06-06 05:32:45.770 [App] MainWindow.Show() — OK
+2026-06-06 05:32:45.770 [App] Cerrando splash...
+2026-06-06 05:32:45.916 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 05:43:34.170 [App] [Offline] Hotkey registrado (Mod:6 Key:114)
+2026-06-06 05:43:56.128 [App] [Offline] Sesión iniciada — DNI:70234305 Razón:123456DFS
+2026-06-06 05:44:13.862 [App] [Offline] Hotkey desregistrado (conexión restaurada).
+2026-06-06 05:44:13.916 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 05:44:15.454 [App] [Offline] Sesión cerrada al reconectar — DNI:70234305 Estado:ok Motivo:Sesión registrada para Jorge Miller Nuñez Infantes
+2026-06-06 05:50:51.254 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 05:53:12.858 [App] !!! EscaparAExplorer — razón: ctrl_m_escape_5x
+2026-06-06 05:53:01.543 [App] === INICIO proceso PID=4684 ===
+2026-06-06 05:53:02.492 [App] Security.Bloquear() OK
+2026-06-06 05:53:02.492 [App] Mutex createdNew=True
+2026-06-06 05:53:03.075 [App] InstaladorKiosco.EsNecesario()=False
+2026-06-06 05:53:03.105 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-06-06 05:53:03.106 [App] Manejadores de error registrados.
+2026-06-06 05:53:04.451 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='BUBU'
+2026-06-06 05:53:04.632 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-06-06 05:53:08.521 [App] Servicios internos iniciados.
+2026-06-06 05:53:10.048 [App] Creando MainWindow...
+2026-06-06 05:53:10.049 [App] new MainWindow() — inicio
+2026-06-06 05:53:10.170 [App] new MainWindow() — OK, llamando Show()
+2026-06-06 05:53:10.327 [App] MainWindow.Show() — OK
+2026-06-06 05:53:10.328 [App] Cerrando splash...
+2026-06-06 05:53:10.411 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 05:58:46.037 [App] === INICIO proceso PID=4488 ===
+2026-06-06 05:58:46.626 [App] Security.Bloquear() OK
+2026-06-06 05:58:46.627 [App] Mutex createdNew=True
+2026-06-06 05:58:48.483 [App] InstaladorKiosco.EsNecesario()=False
+2026-06-06 05:58:48.484 [App] Modo kiosco normal. Aplicando optimizaciones...
+2026-06-06 05:58:48.485 [App] Manejadores de error registrados.
+2026-06-06 05:58:48.975 [App] Config leída: ServerIp=192.168.1.33 ServerPort=8000 TerminalName='BUBU'
+2026-06-06 05:58:48.976 [App] Iniciando NetworkEnsurer, UIWatchdog y Backdoor...
+2026-06-06 05:58:51.975 [App] Servicios internos iniciados.
+2026-06-06 05:58:54.219 [App] Creando MainWindow...
+2026-06-06 05:58:54.219 [App] new MainWindow() — inicio
+2026-06-06 05:58:54.401 [App] new MainWindow() — OK, llamando Show()
+2026-06-06 05:58:54.568 [App] MainWindow.Show() — OK
+2026-06-06 05:58:54.569 [App] Cerrando splash...
+2026-06-06 05:58:54.639 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 05:59:50.274 [App] [Offline] Hotkey registrado (Mod:6 Key:114)
+2026-06-06 06:00:31.069 [App] [Offline] Sesión iniciada — DNI:70234305 Razón:WERWER
+2026-06-06 06:01:19.838 [App] [Offline] Hotkey desregistrado (conexión restaurada).
+2026-06-06 06:01:19.905 [App] [Offline] Config actualizada (hotkey no activo actualmente).
+2026-06-06 06:01:21.436 [App] [Offline] Sesión cerrada al reconectar — DNI:70234305 Estado:ok Motivo:Sesión registrada para Jorge Miller Nuñez Infantes

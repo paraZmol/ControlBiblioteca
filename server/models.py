@@ -282,8 +282,11 @@ class ConfiguracionKiosco(Base):
 
     id:                 Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     backdoor_modifiers: Mapped[int] = mapped_column(Integer, default=3)      # 0x0003 (Ctrl+Alt)
-    backdoor_key:       Mapped[int] = mapped_column(Integer, default=123)    # 0x7B (F12)
+    backdoor_key:       Mapped[int] = mapped_column(Integer, default=118)    # 0x76 (F7)
     backdoor_pin:       Mapped[str] = mapped_column(String(50), default="UNASAM2025")
+    offline_modifiers:  Mapped[int] = mapped_column(Integer, default=3)      # 0x0003 (Ctrl+Alt)
+    offline_key:        Mapped[int] = mapped_column(Integer, default=122)    # 0x7A (F11)
+    offline_pin:        Mapped[str] = mapped_column(String(50), default="UNASAM")
 
     def __repr__(self): return f"<ConfiguracionKiosco ID={self.id}>"
 

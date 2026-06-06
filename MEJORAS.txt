@@ -1,0 +1,461 @@
+MEJORAS PROPUESTAS — Sistema Control Biblioteca
+================================================
+Última revisión: 2026-06-05
+
+Las mejoras están ordenadas por impacto/utilidad. Las marcadas con [*] son
+las que considero más valiosas para el uso real del sistema.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECCIÓN 1 — ACTUALIZACIÓN DEL CLIENTE (kiosco .exe)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[*] MEJORA-1: Upload del .exe desde el panel web (actualización remota)
+-----------------------------------------------------------------------
+Problema actual:
+  Para publicar una nueva versión hay que ir físicamente a la PC del servidor,
+  copiar el .exe compilado a C:\WinSysCache\ y editar version.txt a mano.
+  Si se está en otra red o en otra PC, no es posible sin RDP/acceso físico.
+
+Propuesta:
+  Reimplementar el upload del .exe en el panel con la estrategia correcta:
+  el servidor escribe el nuevo ejecutable con nombre temporal
+  (ej: ControlBiblioteca.Client.new.exe), y solo cuando el kiosco pida
+  la descarga, el servidor sirve el .new si existe, sin tocar el .exe
+  activo hasta que la descarga termina. Esto elimina completamente el
+  problema de "archivo en uso" (WinError 32) que tuvo la implementación anterior.
+
+Beneficio:
+  Publicar una actualización desde cualquier lugar con acceso al panel,
+  sin necesidad de estar físicamente en la PC del servidor.
+
+Complejidad: media — requiere cambio en el servidor y en el panel.
+Estado: PENDIENTE (fue removido por problemas de implementación, 2026-06-05)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECCIÓN 2 — SEGURIDAD (ver también VULNERABILIDADES.txt)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MEJORA-2: Verificación de integridad del .exe en el cliente (E-2)
+-----------------------------------------------------------------
+Problema actual:
+  El kiosco descarga y ejecuta el .exe sin verificar que no fue alterado
+  en tránsito. Un atacante con acceso a la red podría servir un .exe malicioso.
+
+Propuesta:
+  El servidor expone el SHA-256 del .exe en GET /version. El cliente C#
+  debe calcular el SHA-256 del archivo descargado y compararlo antes de
+  ejecutar la actualización. Si no coincide, aborta y avisa.
+
+Complejidad: baja en el servidor (ya implementado), media en el cliente C#.
+Estado: PENDIENTE — requiere recompilar el cliente (ver VULNERABILIDADES.txt E-2)
+
+
+MEJORA-3: Comunicación segura servidor-kiosco (E-3)
+---------------------------------------------------
+Problema actual:
+  Los comandos del servidor al kiosco (bloquear, desbloquear, apagar) viajan
+  por WebSocket sin firma. Un proceso en la misma red podría inyectar comandos.
+
+Propuesta:
+  Agregar HMAC-SHA256 a cada mensaje WebSocket del servidor, firmado con
+  una clave secreta compartida. El cliente verifica la firma antes de ejecutar.
+
+Complejidad: media — cambio en servidor Python y cliente C#.
+Estado: PENDIENTE — requiere recompilar el cliente (ver VULNERABILIDADES.txt E-3)
+
+
+MEJORA-4: PIN de desbloqueo por defecto (E-4)
+---------------------------------------------
+Problema actual:
+  El PIN de desbloqueo de kioscos tiene un valor por defecto conocido.
+  Si el admin no lo cambia, cualquiera que sepa el default puede desbloquear.
+
+Propuesta:
+  Forzar al superadmin a definir un PIN propio en el primer inicio.
+  Bloquear el acceso al endpoint /config/backdoor para roles no-superadmin.
+
+Complejidad: baja.
+Estado: PENDIENTE — requiere recompilar el cliente (ver VULNERABILIDADES.txt E-4)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECCIÓN 3 — PANEL ADMINISTRADOR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MEJORA-5: Notificaciones en tiempo real de errores del servidor
+---------------------------------------------------------------
+Problema actual:
+  Si el servidor tiene un error interno (excepción no capturada, BD caída,
+  etc.), el admin solo lo ve si está mirando los logs del servidor.
+  El panel no muestra ninguna alerta.
+
+Propuesta:
+  Enviar errores críticos del servidor al panel vía WebSocket (ya existe
+  el canal de eventos). Mostrar un banner o toast de alerta roja cuando
+  el servidor reporta un error grave.
+
+Complejidad: baja.
+Estado: PENDIENTE
+
+
+MEJORA-6: Historial de publicaciones de versiones
+-------------------------------------------------
+Problema actual:
+  No hay registro de cuándo se publicó cada versión ni quién lo hizo.
+
+Propuesta:
+  Al actualizar version.txt, agregar una entrada en una tabla
+  "historial_versiones" (fecha, version, usuario). Mostrar el historial
+  en la sección de Actualizaciones del panel.
+
+Complejidad: baja.
+Estado: PENDIENTE
+
+
+MEJORA-7: Dashboard con métricas básicas en la pantalla de inicio
+-----------------------------------------------------------------
+Problema actual:
+  La pantalla principal del panel solo muestra las terminales conectadas.
+  No hay un resumen rápido del estado general.
+
+Propuesta:
+  Agregar al dashboard: total de alumnos registrados, sesiones activas hoy,
+  alumnos baneados activos, versión del cliente instalada actualmente.
+
+Complejidad: baja — consultas simples a la BD.
+Estado: PENDIENTE
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECCIÓN 4 — KIOSCO / CLIENTE C#
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MEJORA-8: Reinicio automático del kiosco fuera de horario
+---------------------------------------------------------
+Problema actual:
+  La actualización del .exe se aplica solo cuando el kiosco se reinicia
+  manualmente. Si nadie reinicia las PCs, la actualización queda pendiente.
+
+Propuesta:
+  El cliente verifica si hay nueva versión al arrancar. Agregar también
+  una verificación en horario configurable (ej: al cierre del día, cuando
+  no hay sesión activa) y reiniciarse automáticamente para aplicar la
+  actualización sin intervención manual.
+
+Complejidad: media — cambio en el cliente C#.
+Estado: PENDIENTE
+
+
+MEJORA-9: Modo offline del kiosco
+----------------------------------
+Problema actual:
+  Si el servidor no está disponible, el kiosco queda bloqueado sin poder
+  hacer nada. No hay modo degradado.
+
+Propuesta:
+  Si el kiosco no puede conectar al servidor en X segundos, mostrar un
+  mensaje claro ("Sistema no disponible, contacte al personal") en vez
+  de quedarse colgado o mostrar un error técnico.
+
+Complejidad: baja — manejo de timeout en el cliente C#.
+Estado: PENDIENTE
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECCIÓN 5 — INFRAESTRUCTURA / OPERACIÓN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MEJORA-10: Script de instalación/arranque automático del servidor
+-----------------------------------------------------------------
+Problema actual:
+  El servidor uvicorn se inicia manualmente. Si la PC se reinicia
+  (corte de luz, actualizaciones de Windows), el servidor no vuelve solo.
+
+Propuesta:
+  Crear un servicio de Windows (NSSM o Task Scheduler) que arranque
+  el servidor automáticamente al iniciar Windows, con reinicio en caso
+  de caída.
+
+Complejidad: baja — configuración del sistema operativo.
+Estado: PENDIENTE
+
+
+MEJORA-11: Backup automático de la base de datos
+------------------------------------------------
+Problema actual:
+  No hay backup automático de MySQL. Una falla del disco o un error
+  humano puede borrar todos los registros de alumnos e historial.
+
+Propuesta:
+  Script programado (Task Scheduler) que ejecute mysqldump diariamente
+  y guarde el .sql comprimido en una carpeta local (o red/nube).
+  Retener los últimos 7 días de backups.
+
+Complejidad: baja — script batch + Task Scheduler.
+Estado: PENDIENTE
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECCIÓN 6 — CALIDAD DE CÓDIGO / ROBUSTEZ (análisis 2026-06-05)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MEJORA-12: Unificar importación del logger en endpoints.py
+----------------------------------------------------------
+Problema actual:
+  Múltiples funciones en endpoints.py importan el logger dinámicamente
+  con "from main import logger" dentro del cuerpo de la función. Esto
+  crea una dependencia circular implícita y un import en tiempo de
+  ejecución en cada llamada.
+
+Propuesta:
+  Agregar al inicio de endpoints.py:
+    import logging
+    logger = logging.getLogger("control")
+  Y eliminar todos los "from main import logger" dentro de funciones.
+
+Complejidad: muy baja.
+Estado: PENDIENTE
+
+
+MEJORA-13: Selector visual de carpeta para ruta de distribución
+---------------------------------------------------------------
+Problema actual:
+  La ruta de distribución del cliente se escribe a mano en un campo de
+  texto, lo que puede llevar a errores tipográficos.
+
+Propuesta (opción A — más simple):
+  Mantener el campo de texto pero agregar validación en vivo: al salir
+  del campo (onblur), consultar al servidor si la ruta existe y mostrar
+  un indicador verde/rojo inmediatamente, sin esperar a guardar.
+
+Propuesta (opción B — más completa):
+  Agregar un explorador de carpetas interactivo dentro del panel: el
+  servidor expone un endpoint que lista subdirectorios dentro de las
+  rutas permitidas, y el panel muestra un árbol de carpetas navegable.
+  Solo se muestran carpetas dentro de la whitelist de seguridad.
+
+Complejidad: opción A baja, opción B media.
+Estado: PENDIENTE (discutido 2026-06-05)
+
+
+MEJORA-14: reset_maestro usa COUNT(*) en vez de cargar filas completas
+-----------------------------------------------------------------------
+Problema actual:
+  reset_maestro hace select(Sesion) y select(AlumnoMaestro) completos
+  en memoria solo para obtener el conteo. Con años de uso y miles de
+  registros esto puede ser lento y consumir mucha RAM.
+
+Propuesta:
+  Usar SELECT COUNT(*) con sqlalchemy.func.count para obtener totales
+  sin materializar las filas en el ORM.
+
+Complejidad: muy baja.
+Estado: PENDIENTE
+
+
+MEJORA-15: Rotación de archivos de respaldo de actividad purgada
+----------------------------------------------------------------
+Problema actual:
+  _purgar_logs_actividad genera archivos Excel en server/respaldos_actividad/
+  sin límite de retención. Se acumulan indefinidamente.
+
+Propuesta:
+  Al generar un nuevo respaldo, eliminar los anteriores a N días (ej: 365).
+  Documentar que la carpeta requiere permisos restrictivos del SO.
+
+Complejidad: baja.
+Estado: PENDIENTE
+
+
+MEJORA-16: Validación de hora en mensajes programados (rango 0-23:59)
+---------------------------------------------------------------------
+Problema actual:
+  La validación acepta "25:99" como hora válida. Un mensaje con hora
+  inválida nunca se envía pero la API devuelve 200 OK, confundiendo
+  al usuario.
+
+Propuesta:
+  Después del regex, validar el rango numérico:
+    h, m = map(int, datos.hora_envio.split(":"))
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        raise HTTPException(422, "hora_envio fuera de rango")
+
+Complejidad: muy baja.
+Estado: PENDIENTE (también documentado como BUG-7 en VULNERABILIDADES.txt)
+
+
+MEJORA-17: Consistencia de feedback en modal de confirmaciones del panel
+------------------------------------------------------------------------
+Problema actual:
+  La función accionSospecha usa confirm() nativo del navegador, mientras
+  el resto del sistema usa mostrarConfirmacion() (modal UI propio). En
+  ciertos contextos el confirm() puede ser bloqueado o no mostrarse.
+
+Propuesta:
+  Reemplazar confirm() en accionSospecha por mostrarConfirmacion() para
+  consistencia visual y funcionamiento garantizado.
+
+Complejidad: muy baja.
+Estado: PENDIENTE
+
+
+MEJORA-18: Ventana de tolerancia en scheduler de mensajes programados
+---------------------------------------------------------------------
+Problema actual:
+  El scheduler compara hora como string exacto "%H:%M". Si el servidor
+  tiene un pico de carga y el asyncio.sleep(60) se retrasa algunos
+  segundos, el mensaje del minuto exacto puede no enviarse.
+
+Propuesta:
+  Usar una ventana de tolerancia de ±1 minuto en la comparación, o
+  migrar a APScheduler para mayor precisión.
+
+Complejidad: baja.
+Estado: PENDIENTE
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECCIÓN 7 — EXPERIENCIA OFFLINE / RED LOCAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MEJORA-19: Diagnóstico de conectividad visible en el kiosco
+-----------------------------------------------------------
+Problema actual:
+  El kiosco muestra solo "Desconectado" cuando no puede llegar al servidor,
+  sin distinguir si el problema es de red local (sin IP, cable desconectado,
+  switch caído) o de internet (la LAN funciona pero hay corte de ISP).
+  El personal no puede saber dónde está el problema sin revisar logs.
+
+Contexto importante:
+  El sistema no necesita internet para funcionar — los kioscos solo
+  necesitan llegar al servidor por red local (LAN). El internet solo
+  es requerido para la consulta al SGA externo (validación de matrícula),
+  que ya tiene fallback a la BD local si falla. Por lo tanto:
+  - Corte de internet puro: el sistema sigue funcionando normalmente.
+  - Corte de red local (cable, switch, sin IP asignada): el kiosco
+    pierde acceso al servidor y aplica el comportamiento de desconexión.
+
+Propuesta:
+  Al detectar desconexión del WebSocket, el cliente C# intenta hacer
+  un ping/TCP al servidor antes de mostrar el aviso. Según el resultado:
+  - "Sin red local: verificar cable o switch" (no hay IP o no llega al servidor)
+  - "Servidor no disponible: contactar al administrador" (la red está bien
+    pero el servidor no responde — puede estar apagado o caído)
+  - "Conexión perdida: reconectando..." (el servidor estaba activo, WS cayó)
+  Esto le permite al personal distinguir inmediatamente si es un problema
+  de infraestructura física o del software del servidor.
+
+Beneficio:
+  Reduce el tiempo de diagnóstico ante incidentes. El personal puede
+  resolver "enchufá el cable" sin llamar al administrador del sistema.
+
+Complejidad: baja — cambio solo en el cliente C#, sin tocar el servidor.
+Estado: PENDIENTE
+
+
+[*] MEJORA-20: Heartbeat tolerante — sesión suspendida ante cortes breves
+--------------------------------------------------------------------------
+Problema actual:
+  Si la red cae por 2-5 minutos (reinicio del router, problema momentáneo
+  del switch) y luego vuelve, el kiosco bloquea al alumno aunque la
+  reconexión fue exitosa. El servidor ya cerró la sesión en la BD con
+  razón "desconexion_red". El alumno debe volver a hacer login aunque
+  estaba trabajando sin problema.
+
+Propuesta:
+  Implementar un estado intermedio "sesión suspendida":
+  - Servidor: al desconectarse el WebSocket, en lugar de cerrar la sesión
+    inmediatamente, la marca como "suspendida" y espera un umbral
+    configurable (ej: 15 minutos) antes de cerrarla definitivamente.
+  - Cliente C#: durante la reconexión, si logra volver a conectar dentro
+    del umbral, envía el ID de sesión activa al servidor para reanudarla.
+    El servidor la reactiva y continúa normalmente.
+  - Si el umbral se supera sin reconexión, el servidor cierra la sesión
+    y el cliente bloquea como ahora.
+
+Beneficio:
+  Cortes de red cortos (los más comunes) son completamente transparentes
+  para el alumno. Solo los cortes prolongados causan bloqueo.
+
+Complejidad: media — requiere cambio coordinado en servidor Python y cliente C#.
+Estado: PENDIENTE (discutido 2026-06-05)
+
+
+[*] MEJORA-21: Desbloqueo offline de emergencia con atajo de teclado
+--------------------------------------------------------------------
+Problema actual:
+  Si el kiosco detecta que está desconectado por causa de red (sin IP,
+  servidor inaccesible) queda bloqueado en la pantalla de login. El alumno
+  no puede usar ningún programa local (Word, Excel, etc.) aunque el PC
+  funciona perfectamente y el problema es externo al sistema.
+
+Propuesta:
+  Agregar un atajo de teclado de emergencia (similar al de mantenimiento)
+  que solo se habilita cuando el kiosco ya detectó que la desconexión es
+  por red. Al activarlo:
+  1. El personal ingresa una contraseña offline especial (distinta a la
+     de mantenimiento, conocida solo por el responsable del área).
+  2. El alumno ingresa su DNI y una razón de uso (ej: "trabajo académico").
+  3. El kiosco queda desbloqueado en modo offline por un tiempo definido.
+  4. El DNI y la razón quedan registrados en un log local del kiosco.
+
+  Comportamiento mientras dura el modo offline:
+  - El kiosco reintenta reconectar al servidor en segundo plano cada
+    cierto intervalo (ej: cada 2 minutos) sin interrumpir al usuario.
+  - Si la red vuelve y el servidor responde, el kiosco verifica:
+      a) Si el DNI está registrado en la BD de alumnos.
+      b) Si el alumno no está baneado.
+  - Si pasa ambas verificaciones: el modo offline se convierte en sesión
+    normal, el log local se sincroniza al servidor, continúa sin corte.
+  - Si el DNI no está registrado o el alumno está baneado: se activa
+    una cuenta regresiva de 3 minutos (mismo mecanismo que la desconexión
+    de red actual) con el mensaje correspondiente:
+      "Usuario no registrado en el sistema. El equipo se bloqueará en 3 min."
+      "Usuario con acceso restringido. El equipo se bloqueará en 3 min."
+    Esto le da tiempo al alumno para guardar su trabajo antes del bloqueo.
+  - El log local de la sesión offline se sincroniza al servidor al
+    reconectar, independientemente del resultado, para mantener auditoría.
+
+Referencia — atajo de mantenimiento existente:
+  El atajo de mantenimiento actual está implementado en:
+    client\Services\MantenimientoBackdoor.cs
+    client\Services\KioscoConfig.cs (línea 14-16)
+  Combinación: Ctrl+Alt+F12 (MOD_CONTROL|MOD_ALT + VK_F12, código 0x4D41)
+  Contraseña por defecto: "UNASAM2025" (campo BackdoorPin en KioscoConfig)
+  Mecanismo: RegisterHotKey() de Windows API sobre ventana oculta HWND_MESSAGE,
+  funciona aunque el kiosco esté bloqueado.
+
+Implementación del atajo offline:
+  Crear un servicio paralelo OfflineBackdoor.cs siguiendo el mismo patrón
+  de MantenimientoBackdoor.cs (RegisterHotKey sobre ventana HWND_MESSAGE).
+  - Atajo sugerido: Ctrl+Alt+F11 (un grado abajo de F12, fácil de recordar)
+  - Contraseña offline independiente: campo OfflinePin en KioscoConfig
+  - El atajo solo registra el hotkey cuando el estado es "desconectado por red".
+    Cuando la conexión se restablece, se desregistra con UnregisterHotKey().
+    Así es imposible activarlo en condiciones normales.
+  - HOTKEY_ID distinto al de mantenimiento (ej: 0x4F46 — 'OF' de Offline)
+
+Validación de unicidad al cambiar contraseñas/atajos:
+  Cada vez que el servidor actualiza BackdoorPin, OfflinePin, o cualquiera
+  de los atajos de teclado vía /api/config/backdoor, el cliente debe verificar:
+    1. OfflinePin != BackdoorPin  (contraseñas distintas)
+    2. Atajo offline != Ctrl+Alt+F12  (atajos distintos)
+  Si alguna condición falla, rechazar el cambio con un error descriptivo
+  antes de guardar en kiosco.config.json.
+
+Consideraciones de seguridad:
+  - La contraseña offline debe ser distinta a la de mantenimiento en todo
+    momento — validado activamente al guardar, no solo al configurar.
+  - El atajo solo es funcional cuando el kiosco ya detectó desconexión por
+    red — no es activable en operación normal aunque se conozca la combinación.
+  - Quien ingresa la contraseña queda como responsable en el log local.
+  - Sin conexión no se puede verificar si el DNI es válido ni si está
+    baneado — esa verificación ocurre al reconectar. Esto es un límite
+    aceptable dado que el acceso es temporal y auditado.
+
+Complejidad: media-alta — cambio principalmente en el cliente C#.
+  El servidor solo necesita un endpoint para recibir los logs offline
+  al sincronizar. No requiere cambios en la lógica principal del servidor.
+Estado: PENDIENTE (discutido 2026-06-05)

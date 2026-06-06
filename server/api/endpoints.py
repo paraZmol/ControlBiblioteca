@@ -1,7 +1,7 @@
 # endpoints.py - Rutas de la API REST
 import asyncio
 from datetime import datetime, date, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Form, Body
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Body, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,9 +12,46 @@ from auth_service import (
     verificar_password, hashear_password, crear_token, obtener_usuario_actual
 )
 from core.websocket_manager import manager
+from core import rate_limit
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api")
+
+# E-10: límite de tamaño para subidas de Excel (DoS por archivo gigante).
+# 25 MB cubre de sobra un padrón de alumnos/personal. Configurable por env.
+import os as _os_mod
+try:
+    _MAX_EXCEL_BYTES = int(_os_mod.getenv("MAX_EXCEL_MB", "25")) * 1024 * 1024
+except ValueError:
+    _MAX_EXCEL_BYTES = 25 * 1024 * 1024
+
+
+async def _leer_upload_limitado(archivo, max_bytes: int = _MAX_EXCEL_BYTES) -> bytes:
+    """Lee un UploadFile en trozos, abortando con HTTP 413 si supera max_bytes (E-10).
+
+    Evita cargar en memoria un archivo arbitrariamente grande: lee por chunks y
+    corta apenas se pasa del límite, sin haber materializado el archivo entero.
+    """
+    buf = bytearray()
+    while True:
+        chunk = await archivo.read(1024 * 256)  # 256 KB
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"El archivo supera el tamaño máximo permitido ({max_bytes // (1024*1024)} MB)."
+            )
+    return bytes(buf)
+
+
+# E-7: hash bcrypt "señuelo" para igualar el tiempo de respuesta cuando el
+# usuario NO existe. Sin esto, "usuario inexistente" responde al instante y
+# "contraseña incorrecta" tarda ~300ms (bcrypt), lo que permite enumerar
+# usuarios válidos por timing. Verificamos siempre contra un hash real para
+# gastar el mismo tiempo de CPU exista o no el usuario.
+_HASH_SENUELO = hashear_password("timing-attack-mitigation-dummy")
 
 
 # ── Esquemas Pydantic ──────────────────────────────────────────────
@@ -50,13 +87,22 @@ class UsuarioCrear(BaseModel):
 # ── Auth ────────────────────────────────────────────────────────────
 
 @router.post("/auth/login", response_model=LoginResponse)
-async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+async def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
     """Iniciar sesión como administrador/encargado."""
     from datetime import timedelta
+    # E-7: límite por IP además del bloqueo por usuario. Frena la fuerza bruta
+    # distribuida (probar muchos usuarios desde una IP). 10 intentos / 5 min.
+    rate_limit.exigir(request, "login", limite=10, ventana_seg=300,
+                      mensaje="Demasiados intentos de inicio de sesión. Espere unos minutos.")
+
     result = await db.execute(select(Usuario).where(Usuario.username == form.username))
     usuario = result.scalar_one_or_none()
-    
+
+    # E-7: timing constante. Si el usuario no existe, igual gastamos el tiempo
+    # de bcrypt verificando contra un hash señuelo, para que "usuario inexistente"
+    # y "contraseña incorrecta" tarden lo mismo y no se puedan enumerar usuarios.
     if not usuario:
+        verificar_password(form.password, _HASH_SENUELO)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales incorrectas")
 
     ahora = datetime.now()
@@ -102,8 +148,11 @@ async def registrar_usuario(
 # ── Alumnos ─────────────────────────────────────────────────────────
 
 @router.post("/alumnos/validar")
-async def validar_alumno(datos: AlumnoAuth, db: AsyncSession = Depends(get_db)):
+async def validar_alumno(request: Request, datos: AlumnoAuth, db: AsyncSession = Depends(get_db)):
     """Validar código/DNI de alumno para desbloquear terminal."""
+    # E-6: límite por IP para frenar enumeración masiva de DNIs desde la LAN.
+    # 30/min por IP es de sobra para el uso real del kiosco (un login por vez).
+    rate_limit.exigir(request, "kiosco", limite=30, ventana_seg=60)
     result = await db.execute(select(AlumnoMaestro).where(
         (AlumnoMaestro.codigo == datos.codigo) | (AlumnoMaestro.dni == datos.codigo)
     ))
@@ -189,20 +238,46 @@ async def listar_terminales(
     son terminales fantasma que nunca volvieron a conectarse tras un crash.
     Las que están offline pero con conexión reciente (PC recién desconectada)
     sí se incluyen para que el admin las vea unos minutos antes de desaparecer.
+    Incluye la sesión activa de cada terminal (si existe) para las tarjetas del panel.
     """
     from datetime import timedelta
     cutoff = datetime.now() - timedelta(hours=2)
     result = await db.execute(select(Terminal).order_by(Terminal.nombre_red))
     terminales = result.scalars().all()
-    return [
-        {
+
+    # Cargar sesiones activas de todas las terminales en una sola consulta
+    ids_terminales = [t.id for t in terminales]
+    sesiones_activas: dict[int, dict] = {}
+    if ids_terminales:
+        res_s = await db.execute(
+            select(Sesion, AlumnoMaestro)
+            .join(AlumnoMaestro, Sesion.dni_alumno == AlumnoMaestro.dni)
+            .where(Sesion.id_terminal.in_(ids_terminales), Sesion.estado == "activa")
+        )
+        for s, a in res_s.all():
+            sesiones_activas[s.id_terminal] = {
+                "id":           s.id,
+                "alumno_nombre": a.nombre,
+                "alumno_dni":   a.dni,
+                "razon_uso":    s.razon_uso or "",
+                "hora_entrada": s.hora_entrada,
+                "activa":       True,
+                "terminal_ip":  None,   # se rellena abajo
+            }
+
+    out = []
+    for t in terminales:
+        if t.estado == "offline" and not (t.ultima_conexion and t.ultima_conexion >= cutoff):
+            continue
+        sesion = sesiones_activas.get(t.id)
+        if sesion:
+            sesion["terminal_ip"] = t.ip
+        out.append({
             "id": t.id, "nombre": t.nombre_red, "ip": t.ip,
-            "estado": t.estado, "ultima_conexion": t.ultima_conexion
-        }
-        for t in terminales
-        # Mostrar siempre las no-offline; de las offline, solo las vistas en las últimas 2h
-        if t.estado != "offline" or (t.ultima_conexion and t.ultima_conexion >= cutoff)
-    ]
+            "estado": t.estado, "ultima_conexion": t.ultima_conexion,
+            "sesion_activa": sesion,
+        })
+    return out
 
 
 @router.delete("/terminales/{terminal_id}")
@@ -303,7 +378,7 @@ async def iniciar_sesion(
         await manager.broadcast({
             "tipo": "sospecha",
             "nivel": "alerta",
-            "mensaje": f"⚠ SOSPECHA — {alumno.nombre} (DNI {alumno.dni}): cambió de PC "
+            "mensaje": f"SOSPECHA - {alumno.nombre} (DNI {alumno.dni}): cambió de PC "
                        f"{len(terminales_distintas)} veces en 5 min",
             "sospecha_id": sospecha.id,
         })
@@ -367,7 +442,7 @@ async def obtener_motivos_activos(db: AsyncSession = Depends(get_db)):
     return [{"id": m.id, "descripcion": m.descripcion} for m in motivos]
 
 
-# Mapeo columna → campos ORM para ORDER BY.
+# Mapeo columna -> campos ORM para ORDER BY.
 # "escuela" y "estudiante" usan Alumno para agrupación real con JOIN.
 _SORT_MAP = {
     "estudiante": (AlumnoMaestro.nombre,),
@@ -415,14 +490,16 @@ def _aplicar_filtro_fecha(q, periodo: str | None, fecha_inicio: str | None, fech
     elif periodo == "dia" or periodo is None:
         q = q.where(Sesion.fecha_uso == hoy)
     elif periodo == "mes":
+        import calendar as _cal
+        ultimo_dia = _cal.monthrange(hoy.year, hoy.month)[1]
         q = q.where(
             Sesion.fecha_uso >= hoy.replace(day=1),
-            Sesion.fecha_uso <= hoy,
+            Sesion.fecha_uso <= hoy.replace(day=ultimo_dia),
         )
     elif periodo == "anio":
         q = q.where(
             Sesion.fecha_uso >= hoy.replace(month=1, day=1),
-            Sesion.fecha_uso <= hoy,
+            Sesion.fecha_uso <= hoy.replace(month=12, day=31),
         )
     elif periodo == "rango" and fecha_inicio and fecha_fin:
         from datetime import datetime as _dt
@@ -513,15 +590,61 @@ async def sesiones_activas(
     return {"total": total, "items": rows}
 
 
+def _resolver_mysqldump() -> str | None:
+    """Localiza el ejecutable mysqldump de forma robusta, sin depender del PATH
+    del momento en que arrancó el servidor (que puede no incluir MySQL).
+
+    Orden de búsqueda:
+      1. Variable MYSQLDUMP_PATH del .env (ruta absoluta explícita).
+      2. shutil.which('mysqldump') — el PATH actual del proceso.
+      3. Carpetas típicas de instalación de MySQL en Windows
+         (Program Files\\MySQL\\MySQL Server X.Y\\bin), tomando la más nueva.
+    Devuelve la ruta absoluta o None si no se encuentra.
+    """
+    import os, shutil, glob
+
+    # 1. Ruta explícita en .env
+    ruta_env = os.getenv("MYSQLDUMP_PATH", "").strip()
+    if ruta_env and os.path.isfile(ruta_env):
+        return ruta_env
+
+    # 2. PATH del proceso
+    encontrado = shutil.which("mysqldump")
+    if encontrado:
+        return encontrado
+
+    # 3. Carpetas típicas de Windows. Se respeta el ORDEN de los patrones
+    #    (MySQL Server real primero; XAMPP como último recurso porque su
+    #    mysqldump suele ser incompatible con caching_sha2_password). Dentro de
+    #    cada patrón se prefiere la versión más nueva.
+    patrones = [
+        r"C:\Program Files\MySQL\MySQL Server*\bin\mysqldump.exe",
+        r"C:\Program Files (x86)\MySQL\MySQL Server*\bin\mysqldump.exe",
+        r"C:\xampp\mysql\bin\mysqldump.exe",  # último recurso
+    ]
+    for patron in patrones:
+        matches = glob.glob(patron)
+        if matches:
+            matches.sort(reverse=True)  # versión más nueva dentro del patrón
+            return matches[0]
+
+    return None
+
+
 @router.get("/admin/backup-sql")
 async def backup_sql(
-    _: Usuario = Depends(obtener_usuario_actual),
+    admin: Usuario = Depends(obtener_usuario_actual),
 ):
     """Genera un volcado SQL completo de la BD y lo devuelve como descarga."""
-    import subprocess, re
+    import re
     from fastapi.responses import StreamingResponse
     from datetime import datetime as _dt
     import os
+
+    # A-7: solo superadmin puede exportar la base completa (contiene PII de
+    # todos los alumnos, sesiones e incidencias). Un admin básico no.
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo superadmin puede exportar la base de datos")
 
     # Parsear credenciales desde DATABASE_URL
     db_url = os.getenv("DATABASE_URL", "")
@@ -533,10 +656,21 @@ async def backup_sql(
     timestamp = _dt.now().strftime("%Y%m%d_%H%M%S")
     filename  = f"backup_{dbname}_{timestamp}.sql"
 
+    # Localizar mysqldump sin depender del PATH heredado al arrancar el servidor.
+    mysqldump_bin = _resolver_mysqldump()
+    if not mysqldump_bin:
+        raise HTTPException(
+            status_code=500,
+            detail="No se encontró 'mysqldump'. Instale MySQL o defina MYSQLDUMP_PATH en .env.",
+        )
+
+    # A-6: NO pasar la contraseña como argumento (--password=) porque queda
+    # visible en la lista de procesos (tasklist/ps). Se pasa por la variable
+    # de entorno MYSQL_PWD, que mysqldump lee automáticamente y no se expone
+    # en la línea de comando.
     cmd = [
-        "mysqldump",
+        mysqldump_bin,
         f"--user={user}",
-        f"--password={password}",
         f"--host={host}",
         f"--port={port}",
         "--single-transaction",   # consistencia sin bloquear tablas InnoDB
@@ -545,16 +679,20 @@ async def backup_sql(
         "--set-gtid-purged=OFF",  # evita error si GTID no está habilitado
         dbname,
     ]
+    env = {**os.environ, "MYSQL_PWD": password}
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
     stdout, stderr = await proc.communicate()
 
     if proc.returncode != 0:
-        raise HTTPException(status_code=500, detail=f"mysqldump falló: {stderr.decode()[:300]}")
+        from main import logger
+        logger.error(f"[BACKUP] mysqldump falló: {stderr.decode()[:500]}")
+        raise HTTPException(status_code=500, detail="No se pudo generar el backup. Revise los logs del servidor.")
 
     return StreamingResponse(
         iter([stdout]),
@@ -992,7 +1130,7 @@ async def exportar_pdf(
 
     # Construir descripción de filtros activos
     _periodos = {"dia": "Hoy", "mes": "Este mes", "anio": "Este año",
-                 "rango": f"{fecha_inicio} → {fecha_fin}", "todo": "Todo el historial"}
+                 "rango": f"{fecha_inicio} a {fecha_fin}", "todo": "Todo el historial"}
     periodo_desc = _periodos.get(periodo or "dia", "Hoy")
 
     elementos = [
@@ -1004,13 +1142,13 @@ async def exportar_pdf(
     # Bloque de filtros activos (solo si hay algo distinto al predeterminado)
     filtros_activos = []
     if periodo == "rango" and fecha_inicio and fecha_fin:
-        filtros_activos.append(f"📅 Período: {fecha_inicio} → {fecha_fin}")
+        filtros_activos.append(f"Período: {fecha_inicio} a {fecha_fin}")
     elif periodo and periodo != "dia":
-        filtros_activos.append(f"📅 Período: {periodo_desc}")
+        filtros_activos.append(f"Período: {periodo_desc}")
     if search:
-        filtros_activos.append(f"🔍 Búsqueda: «{search}»")
+        filtros_activos.append(f"Búsqueda: «{search}»")
     if actividad:
-        filtros_activos.append(f"🏷 Actividad: «{actividad}»")
+        filtros_activos.append(f"Actividad: «{actividad}»")
 
     if filtros_activos:
         filtro_tabla = Table(
@@ -1032,7 +1170,7 @@ async def exportar_pdf(
 
     # ── Cuadro de estadísticas ────────────────────────────────────────
     stats_data = [
-        ["📋 Total sesiones", "👥 Alumnos únicos", "⭐ Actividad frecuente", "⏱ Tiempo total de uso"],
+        ["Total sesiones", "Alumnos únicos", "Actividad frecuente", "Tiempo total de uso"],
         [str(len(rows)), str(alumnos_unicos), actividad_top, f"{horas}h {mins}min"],
     ]
     stats_table = Table(stats_data, colWidths=[6*cm, 5*cm, 9*cm, 5.5*cm])
@@ -1194,7 +1332,7 @@ async def limpiar_sesiones(
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
 
     # Primero notificar a los clientes WPF que vuelvan al login antes de borrar
-    await manager.notificar_evento("🧹 LIMPIAR HISTORIAL: Cerrando sesiones activas...", "warning")
+    await manager.notificar_evento("LIMPIAR HISTORIAL: Cerrando sesiones activas...", "warning")
     await manager.forzar_cierre_sesion_todas()
 
     # Borrar solo el historial de sesiones; terminales y alumnos se mantienen
@@ -1203,7 +1341,7 @@ async def limpiar_sesiones(
     await db.execute(update(Terminal).values(estado="disponible"))
     await db.commit()
 
-    await manager.notificar_evento("🧹 Historial borrado. Terminales listas para nuevo periodo.", "warning")
+    await manager.notificar_evento("Historial borrado. Terminales listas para nuevo periodo.", "warning")
     return {"mensaje": "Historial de sesiones borrado correctamente. Terminales y alumnos mantenidos."}
 
 
@@ -1223,12 +1361,14 @@ async def importar_excel_upload(
 
     logger.info(f"[ADMIN] '{admin.username}' inició importación de Excel")
 
-    contenido = await archivo.read()
+    contenido = await _leer_upload_limitado(archivo)  # E-10: límite de tamaño
     try:
         wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
         ws = wb.active
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Archivo Excel inválido: {e}")
+        from main import logger
+        logger.warning(f"[IMPORT-EXCEL] Archivo inválido: {e}")
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
 
     # ── Obtener o crear terminal virtual para sesiones importadas ──
     # Se hace commit inmediato para que no se pierda si hay rollback en filas posteriores
@@ -1238,14 +1378,16 @@ async def importar_excel_upload(
         if not terminal_virtual:
             terminal_virtual = Terminal(nombre_red="IMPORTADO", ip="0.0.0.0", estado="offline")
             db.add(terminal_virtual)
-            await db.commit()  # commit inmediato → nunca habrá duplicate entry
+            await db.commit()  # commit inmediato, nunca habrá duplicate entry
             # Re-fetch para tener id correcto en sesión fresca
             res_vt2 = await db.execute(select(Terminal).where(Terminal.nombre_red == "IMPORTADO"))
             terminal_virtual = res_vt2.scalar_one_or_none()
         terminal_virtual_id = terminal_virtual.id
     except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"No se pudo preparar la terminal virtual: {e}")
+        from main import logger
+        logger.error(f"[IMPORT-EXCEL] Error preparando terminal virtual: {e}")
+        raise HTTPException(status_code=500, detail="Error al preparar la importación. Revise los logs.")
 
     # ── Mapear encabezados (case-insensitive, sin espacios) ──
     headers = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
@@ -1369,13 +1511,15 @@ async def importar_excel_upload(
         await db.commit()
     except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error al guardar en la base de datos: {e}")
+        from main import logger
+        logger.error(f"[IMPORT-EXCEL] Error al guardar en BD: {e}")
+        raise HTTPException(status_code=500, detail="Error al guardar en la base de datos. Revise los logs.")
 
     msg = f"Importación completada: {insertadas} registro(s) insertado(s)"
     if errores:
         msg += f", {errores} fila(s) ignorada(s)"
     logger.info(f"[ADMIN] {msg}")
-    await manager.notificar_evento(f"📥 {msg}", "warning")
+    await manager.notificar_evento(f"{msg}", "warning")
     return {
         "mensaje": msg,
         "insertadas": insertadas,
@@ -1398,12 +1542,14 @@ async def importar_maestro(
     if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
 
-    contenido = await archivo.read()
+    contenido = await _leer_upload_limitado(archivo)  # E-10: límite de tamaño
     try:
         wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
         ws = wb.active
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Archivo Excel inválido: {e}")
+        from main import logger
+        logger.warning(f"[IMPORT-EXCEL] Archivo inválido: {e}")
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
 
     import unicodedata
 
@@ -1793,7 +1939,7 @@ async def reset_maestro(
 
     await manager.forzar_cierre_sesion_todas()
     await manager.notificar_evento(
-        f"🗑️ BASE DE DATOS LIMPIADA: {total_alumnos} alumno(s) y {total_sesiones} sesión(es) eliminados por '{admin.username}'",
+        f"BASE DE DATOS LIMPIADA: {total_alumnos} alumno(s) y {total_sesiones} sesión(es) eliminados por '{admin.username}'",
         "warning"
     )
     await manager.notificar_admins()
@@ -1913,10 +2059,13 @@ async def listar_bans(
 
 @router.get("/admin/bans/check/{dni}")
 async def check_ban(
+    request: Request,
     dni: str,
     db: AsyncSession = Depends(get_db),
 ):
     """Verifica si un DNI tiene ban activo (usado por el WebSocket del kiosco)."""
+    # E-6: mismo límite por IP que /alumnos/validar (evita enumerar quién está baneado).
+    rate_limit.exigir(request, "kiosco", limite=30, ventana_seg=60)
     ahora = datetime.now()
     res = await db.execute(
         select(Ban)
@@ -2049,12 +2198,14 @@ async def importar_personal(
     if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
     import io, openpyxl
-    contenido = await archivo.read()
+    contenido = await _leer_upload_limitado(archivo)  # E-10: límite de tamaño
     try:
         wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
         ws = wb.active
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Archivo inválido: {e}")
+        from main import logger
+        logger.warning(f"[IMPORT-PERSONAL] Archivo inválido: {e}")
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
 
     hdrs = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
 
@@ -2274,13 +2425,59 @@ async def reset_total(
     await manager.desconectar_todo()
 
     await db.commit()
-    await manager.notificar_evento("🧹 RESET TOTAL: El sistema ha sido reseteado por el administrador", "warning")
+    await manager.notificar_evento("RESET TOTAL: El sistema ha sido reseteado por el administrador", "warning")
     return {"mensaje": "Todo el sistema ha sido limpiado correctamente"}
 
 
 # ── Auto-actualización del cliente ──────────────────────────────────
 
 RUTA_DISTRIBUCION_DEFAULT = r"C:\WinSysCache"
+
+
+def _bases_distribucion_permitidas() -> list:
+    """Carpetas base bajo las que se permite ubicar la distribución (E-8).
+
+    Por defecto: la carpeta default y una variable de entorno opcional
+    (RUTA_DISTRIBUCION_BASE, separada por ';' si hay varias). Evita que un
+    superadmin (o una sesión suya comprometida) apunte la distribución a una
+    carpeta arbitraria del sistema. Si se necesita otra carpeta, se agrega
+    explícitamente aquí o por env, no se acepta cualquier ruta.
+    """
+    import os
+    import pathlib
+    bases = [pathlib.Path(RUTA_DISTRIBUCION_DEFAULT)]
+    extra = os.getenv("RUTA_DISTRIBUCION_BASE", "").strip()
+    if extra:
+        for p in extra.split(";"):
+            p = p.strip()
+            if p:
+                bases.append(pathlib.Path(p))
+    # Normalizar todas (sin exigir que existan todavía).
+    return [b.resolve() for b in bases]
+
+
+def _ruta_distribucion_valida(ruta: str):
+    """Normaliza la ruta y verifica que cae dentro de una base permitida (E-8).
+
+    Devuelve la ruta normalizada (Path) si es válida; lanza HTTP 422 si no.
+    """
+    import pathlib
+    try:
+        candidata = pathlib.Path(ruta).resolve()
+    except Exception:
+        raise HTTPException(status_code=422, detail="Ruta inválida")
+    for base in _bases_distribucion_permitidas():
+        try:
+            # candidata == base o está dentro de base
+            if candidata == base or base in candidata.parents:
+                return candidata
+        except Exception:
+            continue
+    raise HTTPException(
+        status_code=422,
+        detail="La ruta no está permitida. Use la carpeta de distribución autorizada."
+    )
+
 
 async def _obtener_ruta_distribucion(db: AsyncSession) -> str:
     from sqlalchemy import text as _text
@@ -2296,36 +2493,17 @@ async def obtener_version(db: AsyncSession = Depends(get_db)):
     ruta = await _obtener_ruta_distribucion(db)
     version_file = pathlib.Path(ruta) / "version.txt"
     if not version_file.exists():
-        return {"version": "0.0"}
+        return {"version": "0.0", "sha256": ""}
     # utf-8-sig descarta el BOM que Notepad agrega al guardar como UTF-8
-    return {"version": version_file.read_text(encoding="utf-8-sig").strip()}
+    version = version_file.read_text(encoding="utf-8-sig").strip()
+    # E-9: incluir el SHA-256 del exe publicado si existe, para que el cliente
+    # pueda verificar la integridad de la descarga.
+    sha256 = ""
+    sha_file = pathlib.Path(ruta) / "cliente.sha256"
+    if sha_file.exists():
+        sha256 = sha_file.read_text(encoding="utf-8-sig").strip()
+    return {"version": version, "sha256": sha256}
 
-
-@router.get("/descargar-cliente")
-async def descargar_cliente(db: AsyncSession = Depends(get_db)):
-    """Sirve el ejecutable del cliente para auto-actualización."""
-    import pathlib
-    from fastapi.responses import StreamingResponse
-    ruta = await _obtener_ruta_distribucion(db)
-    exe_path = pathlib.Path(ruta) / "ControlBiblioteca.Client.exe"
-    if not exe_path.exists():
-        raise HTTPException(status_code=404, detail="Ejecutable no disponible en el servidor")
-
-    file_size = exe_path.stat().st_size
-
-    def iterfile():
-        with open(exe_path, "rb") as f:
-            while chunk := f.read(1024 * 64):  # 64 KB por chunk
-                yield chunk
-
-    return StreamingResponse(
-        iterfile(),
-        media_type="application/octet-stream",
-        headers={
-            "Content-Disposition": 'attachment; filename="ControlBiblioteca.Client.exe"',
-            "Content-Length": str(file_size),
-        },
-    )
 
 
 @router.get("/admin/config/ruta-distribucion")
@@ -2354,100 +2532,17 @@ async def guardar_ruta_distribucion(
     ruta = str(datos.get("ruta", "")).strip()
     if not ruta:
         raise HTTPException(status_code=422, detail="Ruta no puede estar vacía")
-    # Verificar que la carpeta existe
-    if not pathlib.Path(ruta).exists():
-        raise HTTPException(status_code=422, detail=f"La carpeta '{ruta}' no existe en el servidor")
+    # E-8: normalizar y validar contra la whitelist de bases permitidas.
+    candidata = _ruta_distribucion_valida(ruta)
+    # Verificar que la carpeta existe (E-12: mensaje genérico, sin revelar la ruta absoluta).
+    if not candidata.exists():
+        raise HTTPException(status_code=422, detail="La carpeta indicada no existe en el servidor")
+    ruta_norm = str(candidata)
     await db.execute(
         _text("INSERT INTO ajustes_sistema (clave, valor) VALUES ('ruta_distribucion', :v) ON DUPLICATE KEY UPDATE valor=:v"),
-        {"v": ruta}
+        {"v": ruta_norm}
     )
     await db.commit()
-    return {"mensaje": "Ruta actualizada correctamente", "ruta": ruta}
+    return {"mensaje": "Ruta actualizada correctamente", "ruta": ruta_norm}
 
 
-@router.post("/admin/publicar-cliente")
-async def publicar_cliente(
-    archivo: UploadFile,
-    version: str = Form(...),
-    db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(obtener_usuario_actual),
-):
-    """
-    Sube un nuevo ControlBiblioteca.Client.exe a la ruta de distribución y
-    actualiza version.txt. Los kioskos lo recogen en su próximo arranque.
-    Sólo superadmin. El archivo se escribe primero a .tmp y luego se renombra
-    atómicamente para que ningún kiosco descargue un .exe a medio escribir.
-    """
-    import pathlib
-    from main import logger
-
-    if admin.rol != "superadmin":
-        raise HTTPException(status_code=403, detail="Solo superadmin")
-
-    version = (version or "").strip()
-    if not version:
-        raise HTTPException(status_code=422, detail="La versión no puede estar vacía")
-
-    # Validar primeros bytes — debe ser un PE (Windows .exe empieza con MZ)
-    primer_chunk = await archivo.read(2)
-    if primer_chunk[:2] != b"MZ":
-        raise HTTPException(status_code=422, detail="El archivo no es un .exe válido (firma MZ ausente)")
-
-    ruta = await _obtener_ruta_distribucion(db)
-    dir_dist = pathlib.Path(ruta)
-    if not dir_dist.exists():
-        try:
-            dir_dist.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"No se pudo crear la carpeta '{ruta}': {e}")
-
-    exe_dst = dir_dist / "ControlBiblioteca.Client.exe"
-    exe_tmp = dir_dist / "ControlBiblioteca.Client.exe.tmp"
-    ver_dst = dir_dist / "version.txt"
-
-    # Escritura en streaming a .tmp (evita cargar 150MB en RAM)
-    bytes_escritos = 0
-    try:
-        with open(exe_tmp, "wb") as fout:
-            fout.write(primer_chunk)
-            bytes_escritos += len(primer_chunk)
-            while True:
-                chunk = await archivo.read(1024 * 256)  # 256 KB por chunk
-                if not chunk:
-                    break
-                fout.write(chunk)
-                bytes_escritos += len(chunk)
-    except Exception as e:
-        try: exe_tmp.unlink(missing_ok=True)
-        except Exception: pass
-        raise HTTPException(status_code=500, detail=f"Error escribiendo archivo: {e}")
-
-    if bytes_escritos < 1024 * 1024:  # < 1MB es claramente inválido
-        try: exe_tmp.unlink(missing_ok=True)
-        except Exception: pass
-        raise HTTPException(status_code=422, detail=f"Archivo demasiado pequeño ({bytes_escritos} bytes)")
-
-    # Reemplazo atómico: si exe_dst existe, lo borramos primero. En Windows
-    # `replace` es atómico y funciona aunque el destino exista.
-    try:
-        exe_tmp.replace(exe_dst)
-    except Exception as e:
-        try: exe_tmp.unlink(missing_ok=True)
-        except Exception: pass
-        raise HTTPException(status_code=500, detail=f"No se pudo reemplazar el ejecutable: {e}")
-
-    # Escribir version.txt
-    try:
-        ver_dst.write_text(version, encoding="utf-8")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"No se pudo escribir version.txt: {e}")
-
-    logger.info(f"[ADMIN] '{admin.username}' publicó cliente v{version} ({bytes_escritos:,} bytes) en {ruta}")
-    await manager.notificar_evento(f"📦 Cliente v{version} publicado. Los kioskos se actualizarán al reiniciar.", "info")
-
-    return {
-        "mensaje": "Cliente publicado correctamente",
-        "version": version,
-        "tamano_bytes": bytes_escritos,
-        "ruta": str(exe_dst),
-    }
