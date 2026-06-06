@@ -52,8 +52,11 @@ namespace ControlBiblioteca.Client
         // NetworkEnsurer
         private Thread? _networkThread;
 
-        // Puerta trasera Ctrl+Alt+F12 + PIN
+        // Puerta trasera Ctrl+Alt+F7 + PIN (solo superadmin)
         private MantenimientoBackdoor? _backdoor;
+
+        // Desbloqueo offline Ctrl+Alt+F11 + PIN (admin nivel 1 y superadmin)
+        internal OfflineBackdoor? OfflineBackdoor { get; private set; }
 
         public volatile bool CerrandoApp;
 
@@ -154,7 +157,8 @@ namespace ControlBiblioteca.Client
             AppLog("Iniciando NetworkEnsurer, UIWatchdog y Backdoor...");
             IniciarNetworkEnsurer();
             IniciarUIWatchdog();
-            _backdoor = new MantenimientoBackdoor(this, config);
+            _backdoor      = new MantenimientoBackdoor(this, config);
+            OfflineBackdoor = new OfflineBackdoor(this, config);
             AppLog("Servicios internos iniciados.");
 
             // ── AUTO-ACTUALIZACIÓN ────────────────────────────────────────────────
@@ -417,11 +421,28 @@ namespace ControlBiblioteca.Client
             _backdoor?.ActualizarConfig(modifiers, key, pin);
         }
 
+        internal void ActualizarOfflineConfig(int modifiers, int key, string pin)
+        {
+            OfflineBackdoor?.ActualizarConfig(modifiers, key, pin);
+        }
+
+        // Llamado por OfflineBackdoor cuando el alumno completó el diálogo
+        internal void IniciarSesionOffline(string dni, string razon, DateTime horaInicio)
+        {
+            // Notificar a MainWindow para que muestre la UI de sesión offline
+            Dispatcher.Invoke(() =>
+            {
+                if (MainWindow is UI.MainWindow mw)
+                    mw.MostrarSesionOffline(dni, razon, horaInicio);
+            });
+        }
+
         protected override void OnExit(ExitEventArgs e)
         {
             CerrandoApp = true;
             _heartbeatTimer?.Stop();
             _backdoor?.Dispose();
+            OfflineBackdoor?.Dispose();
             Security.Dispose();
             LiberarMutex();
             base.OnExit(e);

@@ -11,7 +11,7 @@ namespace ControlBiblioteca.Client.UI
 
         public event Action? TiempoAgotado;
 
-        public VentanaDesconexion(int segundos = 180)
+        public VentanaDesconexion(int segundos = 180, string? motivo = null)
         {
             InitializeComponent();
             _segundosRestantes = segundos;
@@ -19,7 +19,12 @@ namespace ControlBiblioteca.Client.UI
             _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _timer.Tick += OnTick;
 
-            Loaded += (_, _) => PositionarEsquinaSuperiorDerecha();
+            Loaded += (_, _) =>
+            {
+                PositionarEsquinaSuperiorDerecha();
+                if (!string.IsNullOrWhiteSpace(motivo))
+                    TxtMotivo.Text = motivo;
+            };
         }
 
         public void Iniciar()

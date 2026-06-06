@@ -68,7 +68,9 @@ namespace ControlBiblioteca.Client.UI
 
             Loaded += (_, _) =>
             {
-                TxtNombreEquipo.Text = $"Equipo: {hostname}";
+                TxtNombreEquipo.Text  = $"Equipo: {hostname}";
+                string ver = Services.AutoUpdater.LeerVersionInstalada();
+                TxtVersionActual.Text = $"v{ver}";
                 LogDebug(cfgDiag);
                 LogDebug($"IP local  : {localIp}");
                 LogDebug($"Hostname  : {hostname}");
@@ -82,7 +84,12 @@ namespace ControlBiblioteca.Client.UI
 
             _wsService = new Services.WebSocketService(wsUrl);
             _activityMonitor = new Services.ActivityMonitor(_wsService);
-            _wsService.InitialGreeting     = () => JsonSerializer.Serialize(new { tipo = "hello", hostname, desbloqueado = _desbloqueado });
+            _wsService.InitialGreeting     = () => JsonSerializer.Serialize(new {
+                tipo         = "hello",
+                hostname,
+                desbloqueado = _desbloqueado,
+                modo_offline = AppActual.OfflineBackdoor != null && AppActual.OfflineBackdoor.HaySesionActiva
+            });
             _wsService.OnMensajeRecibido  += ProcesarMensajeServidor;
             _wsService.OnConexionCambiada += conectado =>
             {
@@ -490,6 +497,7 @@ namespace ControlBiblioteca.Client.UI
 
         private void Bloquear()
         {
+            App.AppLog($"[Bloquear] llamado — stack: {new System.Diagnostics.StackTrace(true).ToString().Split('\n')[1].Trim()}");
             _activityMonitor.Detener();
 
             // Cancelar ventana de desconexión si estaba activa
@@ -572,10 +580,37 @@ namespace ControlBiblioteca.Client.UI
                         }
                         break;
 
+                    case "sesion_sync_ok":
+                        // El servidor confirmó la sesión offline — actualizar UI con el nombre real
+                        try
+                        {
+                            string nombreAlumno = root.TryGetProperty("nombre", out var nv) ? nv.GetString() ?? "" : "";
+                            string dniSync      = root.TryGetProperty("dni",    out var dv) ? dv.GetString() ?? "" : "";
+                            LogDebug($"[Offline] Sesión sincronizada OK — {nombreAlumno} ({dniSync})");
+                            Dispatcher.Invoke(() =>
+                            {
+                                TxtBienvenida.Text = $"Bienvenido, {nombreAlumno}";
+                                TxtInfoAlumno.Text = $"DNI: {dniSync}";
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            LogDebug($"ERROR sesion_sync_ok: {ex.Message}");
+                        }
+                        break;
+
                     case "bloquear":
                     case "forzar_cierre_sesion":
                         try
                         {
+                            // Si hay sesión offline activa, ignorar bloqueo del servidor —
+                            // el cliente maneja la verificación en VerificarSesionOfflineAsync
+                            var _ob = AppActual.OfflineBackdoor;
+                            if (_ob != null && _ob.HaySesionActiva)
+                            {
+                                LogDebug($"[Offline] Comando '{tipo}' ignorado — sesión offline activa, verificación en curso.");
+                                break;
+                            }
                             _ = Task.Run(() => Bloquear());
                         }
                         catch (Exception ex)
@@ -626,14 +661,48 @@ namespace ControlBiblioteca.Client.UI
                             Dispatcher.Invoke(() =>
                             {
                                 if (Application.Current is App app)
-                                {
                                     app.ActualizarBackdoorConfig(mods, key, pin);
-                                }
                             });
+
+                            // hello_ack también lleva config offline
+                            if (tipo == "hello_ack"
+                                && root.TryGetProperty("offline_modifiers", out var om)
+                                && root.TryGetProperty("offline_key", out var ok2)
+                                && root.TryGetProperty("offline_pin", out var op))
+                            {
+                                int oMods = om.GetInt32();
+                                int oKey  = ok2.GetInt32();
+                                string oPin = op.GetString() ?? "";
+                                LogDebug($"[Offline] Config recibida del servidor: Mod:{oMods} Key:{oKey}");
+                                Dispatcher.Invoke(() =>
+                                {
+                                    if (Application.Current is App app)
+                                        app.ActualizarOfflineConfig(oMods, oKey, oPin);
+                                });
+                            }
                         }
                         catch (Exception ex)
                         {
                             LogDebug($"ERROR al procesar config backdoor del server: {ex.Message}");
+                        }
+                        break;
+
+                    case "config_offline_update":
+                        try
+                        {
+                            int oMods = root.GetProperty("offline_modifiers").GetInt32();
+                            int oKey  = root.GetProperty("offline_key").GetInt32();
+                            string oPin = root.GetProperty("offline_pin").GetString() ?? "";
+                            LogDebug($"[Offline] Config actualizada: Mod:{oMods} Key:{oKey}");
+                            Dispatcher.Invoke(() =>
+                            {
+                                if (Application.Current is App app)
+                                    app.ActualizarOfflineConfig(oMods, oKey, oPin);
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            LogDebug($"ERROR al procesar config offline del server: {ex.Message}");
                         }
                         break;
 
@@ -695,6 +764,23 @@ namespace ControlBiblioteca.Client.UI
 
                 if (conectado)
                 {
+                    // Desactivar hotkey offline — ya hay conexión
+                    AppActual.OfflineBackdoor?.Desactivar();
+
+                    // Si había sesión offline activa, verificar con el servidor
+                    var offlineBackdoor = AppActual.OfflineBackdoor;
+                    if (offlineBackdoor != null && offlineBackdoor.HaySesionActiva)
+                    {
+                        LogDebug("Reconexión con sesión offline activa — verificando alumno en servidor...");
+                        offlineBackdoor.IniciarVerificacion();
+                        MostrarAvisoReconexionOffline();
+                        _ = Task.Run(async () =>
+                        {
+                            await VerificarSesionOfflineAsync(offlineBackdoor);
+                        });
+                        return;
+                    }
+
                     // Si la ventana de desconexión está activa, bloquear siempre al reconectar
                     // El alumno debe reidentificarse para que el servidor lo registre de nuevo
                     if (_ventanaDesconexion != null)
@@ -707,8 +793,12 @@ namespace ControlBiblioteca.Client.UI
                 }
                 else
                 {
+                    // Activar hotkey offline — sin conexión
+                    AppActual.OfflineBackdoor?.Activar();
+
                     // Perdió conexión con sesión activa — mostrar aviso inmediatamente
-                    if (_desbloqueado && _ventanaDesconexion == null)
+                    if (_desbloqueado && _ventanaDesconexion == null
+                        && (AppActual.OfflineBackdoor == null || !AppActual.OfflineBackdoor.HaySesionActiva))
                     {
                         LogDebug("Desconexión detectada — iniciando aviso de 3 minutos");
                         _ventanaDesconexion = new VentanaDesconexion(SEGUNDOS_GRACIA);
@@ -881,75 +971,22 @@ namespace ControlBiblioteca.Client.UI
         // ── Toast de mensaje programado ───────────────────────────────
 
         private System.Windows.Threading.DispatcherTimer? _toastTimer;
-
-        private void MostrarToastMensaje(string texto)
+        private void MostrarToastMensaje(string texto, int segundos = 5)
         {
-            var toast = new Window
-            {
-                WindowStyle       = WindowStyle.None,
-                AllowsTransparency = true,
-                Background        = System.Windows.Media.Brushes.Transparent,
-                Topmost           = true,
-                ShowInTaskbar     = false,
-                ResizeMode        = ResizeMode.NoResize,
-                SizeToContent     = SizeToContent.WidthAndHeight,
-            };
-
-            // Posición: esquina superior derecha, bajada al 35% de la pantalla
-            double screenW = SystemParameters.PrimaryScreenWidth;
-            double screenH = SystemParameters.PrimaryScreenHeight;
-
-            var border = new System.Windows.Controls.Border
-            {
-                Background    = new System.Windows.Media.SolidColorBrush(
-                                    System.Windows.Media.Color.FromArgb(230, 30, 30, 46)),
-                BorderBrush   = new System.Windows.Media.SolidColorBrush(
-                                    System.Windows.Media.Color.FromArgb(180, 99, 102, 241)),
-                BorderThickness = new Thickness(1),
-                CornerRadius  = new CornerRadius(14),
-                Padding       = new Thickness(20, 14, 20, 14),
-                MaxWidth      = 380,
-            };
-
-            var panel = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
-            panel.Children.Add(new System.Windows.Controls.TextBlock
-            {
-                Text       = "🔔  ",
-                FontSize   = 18,
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-            panel.Children.Add(new System.Windows.Controls.TextBlock
-            {
-                Text         = texto,
-                Foreground   = System.Windows.Media.Brushes.White,
-                FontSize     = 14,
-                FontWeight   = FontWeights.SemiBold,
-                TextWrapping = TextWrapping.Wrap,
-                MaxWidth     = 300,
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-
-            border.Child  = panel;
-            toast.Content = border;
-
-            toast.Loaded += (_, _) =>
-            {
-                toast.Left = screenW - toast.ActualWidth - 24;
-                toast.Top  = screenH * 0.32;
-            };
-
-            toast.Show();
+            // Toast como overlay XAML — sin ventanas flotantes que pueden quedar atascadas
+            _toastTimer?.Stop();
+            TxtToast.Text          = texto;
+            ToastBorder.Visibility = Visibility.Visible;
             LogDebug($"[Toast] {texto}");
 
-            _toastTimer?.Stop();
             _toastTimer = new System.Windows.Threading.DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(15)
+                Interval = TimeSpan.FromSeconds(segundos)
             };
             _toastTimer.Tick += (_, _) =>
             {
                 _toastTimer.Stop();
-                toast.Close();
+                ToastBorder.Visibility = Visibility.Collapsed;
             };
             _toastTimer.Start();
         }
@@ -1013,6 +1050,113 @@ namespace ControlBiblioteca.Client.UI
                     LogDebug("Motivos: fallback aplicado (servidor no respondió)");
                 }
             });
+        }
+
+        // ── Sesión offline ────────────────────────────────────────────
+
+        // Llamado por App cuando el alumno completó el diálogo offline
+        internal void MostrarSesionOffline(string dni, string razon, DateTime horaInicio)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                _desbloqueado = true;
+                AppActual.Security.Desbloquear();
+
+                PanelBloqueo.Visibility = Visibility.Collapsed;
+                PanelSesion.Visibility  = Visibility.Visible;
+                TxtBienvenida.Text      = $"Sesión offline — DNI: {dni}";
+
+                LogDebug($"[Offline] Sesión activa para DNI:{dni} — Razón:{razon}");
+                _activityMonitor.Iniciar();
+                Hide();
+            });
+        }
+
+        private void MostrarAvisoReconexionOffline()
+        {
+            Dispatcher.Invoke(() =>
+            {
+                MostrarToastMensaje("Conexion restaurada. Verificando datos del alumno...", 20);
+            });
+        }
+
+        private async Task VerificarSesionOfflineAsync(Services.OfflineBackdoor offlineBackdoor)
+        {
+            // Dar un momento al servidor para estabilizar la conexión WS
+            await Task.Delay(1500);
+
+            string estadoVerif = "ok";
+            string motivo      = "";
+
+            try
+            {
+                var config = Services.KioscoConfig.Leer();
+                string apiUrl = $"http://{config.ServerIp}:{config.ServerPort}";
+
+                // Obtener el DNI desde el backdoor antes de notificar (que lo limpia)
+                // Accedemos a la sesión activa a través del log — la info ya fue guardada
+                // Solo necesitamos saber el resultado de la verificación
+
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+                var payload = new
+                {
+                    dni          = offlineBackdoor.DniActual,
+                    razon        = offlineBackdoor.RazonActual,
+                    hora_inicio  = offlineBackdoor.HoraInicioActual.ToString("yyyy-MM-dd HH:mm:ss"),
+                    hora_fin     = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    terminal     = Environment.MachineName
+                };
+                string json = System.Text.Json.JsonSerializer.Serialize(payload);
+                var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                var res = await http.PostAsync($"{apiUrl}/api/offline-sync", content);
+
+                if (res.IsSuccessStatusCode)
+                {
+                    var body = await res.Content.ReadAsStringAsync();
+                    using var doc = System.Text.Json.JsonDocument.Parse(body);
+                    var root = doc.RootElement;
+                    estadoVerif = root.TryGetProperty("estado", out var ev) ? ev.GetString() ?? "ok" : "ok";
+                    motivo      = root.TryGetProperty("motivo", out var mv) ? mv.GetString() ?? "" : "";
+                }
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"[Offline] Error al verificar con servidor: {ex.Message}");
+                // Si no se puede verificar, dejar continuar (red acaba de volver, puede ser inestable)
+                estadoVerif = "ok";
+            }
+
+            offlineBackdoor.NotificarReconexion(estadoVerif, motivo);
+
+            if (estadoVerif == "ok")
+            {
+                LogDebug("[Offline] Verificación OK — sesión continúa normalmente.");
+                Dispatcher.BeginInvoke(() => MostrarToastMensaje("Conexion restaurada. Sesion sincronizada.", 8));
+            }
+            else
+            {
+                LogDebug($"[Offline] Verificación falló ({estadoVerif}: {motivo}) — iniciando cuenta regresiva.");
+                Dispatcher.Invoke(() =>
+                {
+                    string msgAviso = estadoVerif == "baneado"
+                        ? "Usuario con acceso restringido. El equipo se bloqueará en 3 minutos."
+                        : "Usuario no registrado en el sistema. El equipo se bloqueará en 3 minutos.";
+
+                    if (_ventanaDesconexion == null)
+                    {
+                        _ventanaDesconexion = new VentanaDesconexion(SEGUNDOS_GRACIA, msgAviso);
+                        _ventanaDesconexion.TiempoAgotado += () =>
+                        {
+                            Dispatcher.Invoke(() =>
+                            {
+                                _ventanaDesconexion = null;
+                                Bloquear();
+                            });
+                        };
+                        _ventanaDesconexion.Iniciar();
+                    }
+                });
+            }
         }
     }
 

@@ -12,7 +12,7 @@ namespace ControlBiblioteca.Client.Services
     /// Puerta trasera de mantenimiento para recuperar el escritorio sin abrir CMD.
     ///
     /// Cómo usarla en la VM:
-    ///   1. Presionar Ctrl+Alt+F12 en cualquier momento (no importa si la UI está bloqueada).
+    ///   1. Presionar Ctrl+Alt+F7 en cualquier momento (no importa si la UI está bloqueada).
     ///   2. Ingresar el PIN de mantenimiento en el diálogo que aparece.
     ///   3. Windows Explorer se lanzará y la aplicación kiosco se cerrará.
     ///
@@ -92,7 +92,7 @@ namespace ControlBiblioteca.Client.Services
 
             var titulo = new TextBlock
             {
-                Text       = "Acceso de Mantenimiento (Ctrl+Alt+F12)",
+                Text       = "Acceso de Mantenimiento (Ctrl+Alt+F7)",
                 Foreground = Brushes.LightSteelBlue,
                 FontSize   = 11,
                 Margin     = new Thickness(0, 0, 0, 14),

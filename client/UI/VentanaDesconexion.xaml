@@ -28,9 +28,11 @@
                            VerticalAlignment="Center"/>
             </StackPanel>
 
-            <!-- Instrucción -->
-            <TextBlock Text="Guarda tu trabajo ahora."
+            <!-- Instrucción / motivo personalizado -->
+            <TextBlock x:Name="TxtMotivo"
+                       Text="Guarda tu trabajo ahora."
                        FontSize="12" Foreground="#EEEEEE"
+                       TextWrapping="Wrap"
                        Margin="0,0,0,4"/>
 
             <!-- Cuenta regresiva -->
