@@ -225,7 +225,14 @@ namespace ControlBiblioteca.Client.UI
 
                 if (hayError) return;
 
-                if (!_wsService.EstaConectado) { ValidarOffline(codigo); return; }
+                if (!_wsService.EstaConectado)
+                {
+                    // Pasar datos al backdoor para que el encargado solo ingrese el PIN
+                    AppActual.OfflineBackdoor?.SetDatosAlumno(codigo, razon);
+                    TxtEstado.Text = "Sin conexion al servidor. Contacte al encargado.";
+                    BtnIngresar.IsEnabled = true;
+                    return;
+                }
 
                 TxtEstado.Text        = "Validando...";
                 BtnIngresar.IsEnabled = false;
@@ -766,6 +773,8 @@ namespace ControlBiblioteca.Client.UI
                 {
                     // Desactivar hotkey offline — ya hay conexión
                     AppActual.OfflineBackdoor?.Desactivar();
+                    AppActual.OfflineBackdoor?.LimpiarDatosPendientes();
+                    // La recarga de motivos la maneja el closure OnConexionCambiada del constructor.
 
                     // Si había sesión offline activa, verificar con el servidor
                     var offlineBackdoor = AppActual.OfflineBackdoor;
@@ -795,6 +804,9 @@ namespace ControlBiblioteca.Client.UI
                 {
                     // Activar hotkey offline — sin conexión
                     AppActual.OfflineBackdoor?.Activar();
+
+                    // Restringir el ComboBox de motivos a solo "Otros (Especificar)"
+                    RestringirMotivosOffline();
 
                     // Perdió conexión con sesión activa — mostrar aviso inmediatamente
                     if (_desbloqueado && _ventanaDesconexion == null
@@ -998,6 +1010,19 @@ namespace ControlBiblioteca.Client.UI
             _toastTimer?.Stop();
             _wsService.Desconectar();
             base.OnClosed(e);
+        }
+
+        private void RestringirMotivosOffline()
+        {
+            // Deja solo "Otros (Especificar)" disponible en el ComboBox
+            // para que el alumno pueda ingresar su motivo sin conexión.
+            CmbRazon.Items.Clear();
+            var otros = new ComboBoxItem { Content = "Otros (Especificar)", Tag = 0 };
+            CmbRazon.Items.Add(otros);
+            CmbRazon.SelectedIndex = 0;
+            PanelOtros.Visibility = Visibility.Visible;
+            TxtOtroRazon.Clear();
+            PlaceholderOtros.Visibility = Visibility.Visible;
         }
 
         private async Task CargarMotivosAsync(string url)
