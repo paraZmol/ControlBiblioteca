@@ -122,18 +122,48 @@ namespace ControlBiblioteca.Client.Services
 
         private volatile bool _verificandoReconexion;
 
+        // Llamado por MainWindow antes de que el alumno presione el hotkey,
+        // para pasar el DNI y motivo que ya ingresó en el formulario principal.
+        public void SetDatosAlumno(string dni, string razon)
+        {
+            _dniPendiente   = dni;
+            _razonPendiente = razon;
+        }
+
+        public void LimpiarDatosPendientes()
+        {
+            _dniPendiente   = null;
+            _razonPendiente = null;
+        }
+
+        private string? _dniPendiente;
+        private string? _razonPendiente;
+
         private void MostrarDialogo()
         {
-            // Paso 1: PIN del personal
-            if (!ValidarPinPersonal()) return;
+            // Si el formulario principal ya capturó los datos del alumno,
+            // solo pedimos el PIN al encargado.
+            string? dni   = _dniPendiente;
+            string? razon = _razonPendiente;
 
-            // Paso 2: DNI y razón del alumno
-            var (dni, razon) = PedirDniYRazon();
-            if (dni == null) return;
+            if (string.IsNullOrEmpty(dni))
+            {
+                // Fallback: no hay datos previos — pedir DNI y motivo como antes.
+                if (!ValidarPinPersonal()) return;
+                (dni, razon) = PedirDniYRazon();
+                if (dni == null) return;
+            }
+            else
+            {
+                // Datos ya capturados — solo validar PIN del encargado.
+                if (!ValidarPinPersonal()) return;
+            }
 
             _dniActual   = dni;
             _razonActual = razon;
             _horaInicio  = DateTime.Now;
+            _dniPendiente   = null;
+            _razonPendiente = null;
 
             GuardarLogLocal(dni, razon!, _horaInicio, null, "activa");
             App.AppLog($"[Offline] Sesión iniciada — DNI:{dni} Razón:{razon}");
@@ -168,7 +198,7 @@ namespace ControlBiblioteca.Client.Services
 
                 var titulo = new TextBlock
                 {
-                    Text         = "Acceso Offline de Emergencia (Ctrl+Alt+F11)",
+                    Text         = "Acceso Offline — Encargado",
                     Foreground   = Brushes.LightSteelBlue,
                     FontSize     = 11,
                     Margin       = new Thickness(0, 0, 0, 14),
