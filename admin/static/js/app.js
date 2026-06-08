@@ -2810,6 +2810,112 @@ function levantarBan(banId, nombre) {
     );
 }
 
+// ── Historial de Bans ─────────────────────────────────────────────────
+
+let _banHistOffset = 0;
+const _banHistLimit = 20;
+let _banHistTotal  = 0;
+let _banVistaActual = 'activos';
+
+function banCambiarVista(vista) {
+    _banVistaActual = vista;
+    document.getElementById('ban-view-activos').style.display   = vista === 'activos'   ? '' : 'none';
+    document.getElementById('ban-view-historial').style.display = vista === 'historial' ? '' : 'none';
+    const btnA = document.getElementById('ban-view-activos-btn');
+    const btnH = document.getElementById('ban-view-historial-btn');
+    if (btnA) {
+        btnA.className = vista === 'activos'
+            ? 'px-4 py-1.5 text-sm font-semibold rounded-lg border border-rose-300 dark:border-rose-700 bg-rose-500 text-white transition-colors'
+            : 'px-4 py-1.5 text-sm font-semibold rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 transition-colors';
+    }
+    if (btnH) {
+        btnH.className = vista === 'historial'
+            ? 'px-4 py-1.5 text-sm font-semibold rounded-lg border border-zinc-400 dark:border-zinc-500 bg-zinc-700 text-white transition-colors'
+            : 'px-4 py-1.5 text-sm font-semibold rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 transition-colors';
+    }
+    if (vista === 'historial') {
+        _banHistOffset = 0;
+        cargarHistorialBans();
+    }
+}
+
+async function cargarHistorialBans() {
+    const dni    = document.getElementById('ban-hist-dni')?.value.trim()    || '';
+    const estado = document.getElementById('ban-hist-estado')?.value         || '';
+    const params = new URLSearchParams({ limit: _banHistLimit, offset: _banHistOffset });
+    if (dni)    params.set('dni',    dni);
+    if (estado) params.set('estado', estado);
+
+    const body = document.getElementById('banHistBody');
+    if (body) body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:16px;color:var(--t3)">Cargando...</td></tr>';
+
+    try {
+        const res  = await fetch(`${API_BASE}/admin/bans/historial?${params}`, { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        _banHistTotal = data.total || 0;
+        renderHistorialBans(data.items || []);
+        _banHistActualizarPag();
+    } catch (e) {
+        addLog('error', `Error cargando historial de bans: ${e.message}`);
+    }
+}
+
+function renderHistorialBans(items) {
+    const body  = document.getElementById('banHistBody');
+    const empty = document.getElementById('sinBanHist');
+    if (!body) return;
+
+    if (!items.length) {
+        body.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    const estadoBadge = {
+        activo:    `<span style="background:oklch(0.56 0.20 20 / 0.12);border:1px solid oklch(0.56 0.20 20 / 0.4);color:oklch(0.56 0.20 20);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap">Activo</span>`,
+        expirado:  `<span style="background:var(--sur2);border:1px solid var(--bdr);color:var(--t3);border-radius:6px;padding:2px 8px;font-size:11px;white-space:nowrap">Expirado</span>`,
+        levantado: `<span style="background:oklch(0.60 0.16 220 / 0.12);border:1px solid oklch(0.60 0.16 220 / 0.4);color:oklch(0.60 0.16 220);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap">Levantado</span>`,
+    };
+
+    body.innerHTML = items.map(b => {
+        const fechaIni  = b.fecha_ini       ? new Date(b.fecha_ini).toLocaleDateString('es-PE')       : '—';
+        const fechaFin  = b.fecha_fin       ? new Date(b.fecha_fin).toLocaleDateString('es-PE')       : 'Indefinido';
+        const fechaLev  = b.fecha_levantado ? new Date(b.fecha_levantado).toLocaleDateString('es-PE') : '';
+        const badge     = estadoBadge[b.estado] || estadoBadge.expirado;
+        const levInfo   = b.levantado_por
+            ? `<span style="font-size:12px;color:var(--t2)">${esc(b.levantado_por)}</span>${fechaLev ? `<div style="font-size:11px;color:var(--t3)">${fechaLev}</div>` : ''}`
+            : `<span style="color:var(--t3);font-size:12px">${b.estado === 'expirado' ? 'Sistema' : '—'}</span>`;
+        return `<tr>
+            <td><code>${esc(b.dni)}</code></td>
+            <td style="font-size:13px">${esc(b.nombre)}</td>
+            <td style="font-size:12px;color:var(--t2);max-width:180px">${esc(b.motivo)}</td>
+            <td style="font-size:12px;color:var(--t2)">${esc(b.baneado_por || '—')}</td>
+            <td style="font-size:12px"><span class="cell-time">${fechaIni}</span></td>
+            <td style="font-size:12px"><span class="cell-time">${fechaFin}</span></td>
+            <td>${badge}</td>
+            <td>${levInfo}</td>
+        </tr>`;
+    }).join('');
+}
+
+function _banHistActualizarPag() {
+    const info = document.getElementById('ban-hist-pag-info');
+    const prev = document.getElementById('ban-hist-prev');
+    const next = document.getElementById('ban-hist-next');
+    const desde = _banHistOffset + 1;
+    const hasta = Math.min(_banHistOffset + _banHistLimit, _banHistTotal);
+    if (info) info.textContent = _banHistTotal ? `${desde}–${hasta} de ${_banHistTotal}` : '';
+    if (prev) prev.disabled = _banHistOffset === 0;
+    if (next) next.disabled = _banHistOffset + _banHistLimit >= _banHistTotal;
+}
+
+function banHistCambiarPag(dir) {
+    _banHistOffset = Math.max(0, _banHistOffset + dir * _banHistLimit);
+    cargarHistorialBans();
+}
+
 // ── Incidencias ──────────────────────────────────────────────────────
 
 let _incidenciasCache = [];
@@ -2938,16 +3044,19 @@ function _renderIncidencias(items) {
             : '<span style="background:var(--sur2);border:1px solid var(--bdr);color:var(--t3);border-radius:6px;padding:2px 8px;font-size:11px">Reseteada</span>';
         const fecha = i.fecha ? new Date(i.fecha).toLocaleDateString('es-PE', { day:'2-digit', month:'2-digit', year:'numeric' }) : '—';
         return `<tr>
-            <td class="p-4 text-xs font-mono">${escapeHtml(i.dni)}</td>
-            <td class="p-4 text-xs font-medium">${escapeHtml(i.nombre_alumno)}</td>
-            <td class="p-4"><span style="${tipoBg};${tipoCls};border-radius:6px;padding:2px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em">${escapeHtml(i.tipo)}</span></td>
-            <td class="p-4 text-xs">${escapeHtml(i.motivo)}</td>
-            <td class="p-4 text-xs text-slate-500 dark:text-slate-400 max-w-xs truncate" title="${escapeHtml(i.descripcion || '')}">${escapeHtml(i.descripcion || '—')}</td>
-            <td class="p-4 text-xs">${fecha}</td>
-            <td class="p-4 text-xs">${escapeHtml(i.registrado_por)}</td>
-            <td class="p-4">${estadoBadge}</td>
-            <td class="p-4">
-                ${i.activa ? `<button onclick="eliminarIncidencia(${i.id},'${escapeHtml(i.nombre_alumno)}')" class="text-rose-400 hover:text-rose-600 dark:text-rose-500 dark:hover:text-rose-300 transition-colors" title="Eliminar incidencia"><i class="ph ph-trash text-base"></i></button>` : ''}
+            <td class="px-3 py-3 text-xs font-mono whitespace-nowrap">${escapeHtml(i.dni)}</td>
+            <td class="px-3 py-3 text-xs font-medium whitespace-nowrap">${escapeHtml(i.nombre_alumno)}</td>
+            <td class="px-3 py-3"><span style="${tipoBg};${tipoCls};border-radius:6px;padding:2px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em">${escapeHtml(i.tipo)}</span></td>
+            <td class="px-3 py-3 text-xs whitespace-nowrap">${escapeHtml(i.motivo)}</td>
+            <td class="px-3 py-3 text-xs text-slate-500 dark:text-slate-400 truncate" style="max-width:180px" title="${escapeHtml(i.descripcion || '')}">${escapeHtml(i.descripcion || '—')}</td>
+            <td class="px-3 py-3 text-xs whitespace-nowrap">${fecha}</td>
+            <td class="px-3 py-3 text-xs whitespace-nowrap">${escapeHtml(i.registrado_por)}</td>
+            <td class="px-3 py-3">${estadoBadge}</td>
+            <td class="px-3 py-3">
+                <div class="flex items-center gap-2">
+                    ${i.activa && i.tipo === 'grave' ? `<button onclick="abrirBanearUsuario('${escapeHtml(i.dni)}','${escapeHtml(i.nombre_alumno)}')" class="text-amber-500 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-200 transition-colors" title="Banear alumno"><i class="ph ph-prohibit text-base"></i></button>` : ''}
+                    ${i.activa ? `<button onclick="eliminarIncidencia(${i.id},'${escapeHtml(i.nombre_alumno)}')" class="text-rose-400 hover:text-rose-600 dark:text-rose-500 dark:hover:text-rose-300 transition-colors" title="Eliminar incidencia"><i class="ph ph-trash text-base"></i></button>` : ''}
+                </div>
             </td>
         </tr>`;
     }).join('');

@@ -611,18 +611,18 @@
                             </div>
 
                             <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-amber-100 dark:border-amber-900/30">
-                                <table class="tabla w-full text-left text-sm">
+                                <table class="tabla w-full min-w-max text-left text-sm">
                                     <thead>
                                         <tr class="bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 text-xs uppercase tracking-wider border-b border-amber-100 dark:border-amber-900/40">
-                                            <th class="p-4 font-semibold">DNI</th>
-                                            <th class="p-4 font-semibold">Nombre</th>
-                                            <th class="p-4 font-semibold">Tipo</th>
-                                            <th class="p-4 font-semibold">Motivo</th>
-                                            <th class="p-4 font-semibold">Descripción</th>
-                                            <th class="p-4 font-semibold">Fecha</th>
-                                            <th class="p-4 font-semibold">Registrado por</th>
-                                            <th class="p-4 font-semibold">Estado</th>
-                                            <th class="p-4 font-semibold" style="width:80px">Acciones</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">DNI</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">Nombre</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">Tipo</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">Motivo</th>
+                                            <th class="px-3 py-3 font-semibold" style="max-width:180px">Descripción</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">Fecha</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">Registrado por</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">Estado</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap" style="width:90px">Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody id="incidenciasBody" class="divide-y divide-amber-50 dark:divide-amber-900/20"></tbody>
@@ -683,6 +683,20 @@
 
                     <!-- Panel: Usuarios Baneados -->
                     <div id="subtab-incidencias-bans" style="display:none">
+                        <!-- Sub-nav: Activos / Historial -->
+                        <div class="flex gap-1 mb-4">
+                            <button id="ban-view-activos-btn" onclick="banCambiarVista('activos')"
+                                class="px-4 py-1.5 text-sm font-semibold rounded-lg border border-rose-300 dark:border-rose-700 bg-rose-500 text-white transition-colors">
+                                Activos
+                            </button>
+                            <button id="ban-view-historial-btn" onclick="banCambiarVista('historial')"
+                                class="bd-solo-superadmin px-4 py-1.5 text-sm font-semibold rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 transition-colors">
+                                Historial
+                            </button>
+                        </div>
+
+                        <!-- Vista: Activos -->
+                        <div id="ban-view-activos">
                         <section class="section bg-white dark:bg-zinc-900 border border-rose-200 dark:border-rose-900/40 rounded-2xl p-5 shadow-sm transition-colors">
                             <div class="flex items-center justify-between mb-5">
                                 <h3 class="text-base font-bold text-rose-600 dark:text-rose-400 flex items-center gap-2">
@@ -708,6 +722,53 @@
                             </div>
                             <p id="sinBans" class="text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm">No hay usuarios baneados actualmente</p>
                         </section>
+                        </div>
+
+                        <!-- Vista: Historial -->
+                        <div id="ban-view-historial" style="display:none">
+                        <section class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors">
+                            <div class="flex flex-wrap items-center gap-3 mb-4">
+                                <h3 class="text-base font-bold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 mr-auto">
+                                    <i class="ph ph-clock-counter-clockwise text-lg"></i> Historial de Bans
+                                </h3>
+                                <input id="ban-hist-dni" type="text" maxlength="8" placeholder="DNI alumno"
+                                    class="act-filter-input" oninput="cargarHistorialBans()">
+                                <select id="ban-hist-estado" onchange="cargarHistorialBans()" class="act-filter-input">
+                                    <option value="">Todos los estados</option>
+                                    <option value="activo">Activos</option>
+                                    <option value="expirado">Expirados (sistema)</option>
+                                    <option value="levantado">Levantados (admin)</option>
+                                </select>
+                                <span id="ban-hist-total" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
+                            </div>
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-zinc-100 dark:border-zinc-800">
+                                <table class="tabla w-full text-left text-sm">
+                                    <thead>
+                                        <tr class="bg-zinc-50 dark:bg-zinc-800/60 text-zinc-500 dark:text-zinc-400 text-xs uppercase tracking-wider border-b border-zinc-100 dark:border-zinc-700">
+                                            <th class="p-4 font-semibold">DNI</th>
+                                            <th class="p-4 font-semibold">Nombre</th>
+                                            <th class="p-4 font-semibold">Motivo</th>
+                                            <th class="p-4 font-semibold">Baneado por</th>
+                                            <th class="p-4 font-semibold">Inicio</th>
+                                            <th class="p-4 font-semibold">Fin original</th>
+                                            <th class="p-4 font-semibold">Estado</th>
+                                            <th class="p-4 font-semibold">Levantado por</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="banHistBody" class="divide-y divide-zinc-100 dark:divide-zinc-800"></tbody>
+                                </table>
+                            </div>
+                            <p id="sinBanHist" class="text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm" style="display:none">Sin registros</p>
+                            <!-- Paginación -->
+                            <div class="flex items-center justify-between mt-3">
+                                <span id="ban-hist-pag-info" class="text-xs text-zinc-400"></span>
+                                <div class="flex gap-2">
+                                    <button id="ban-hist-prev" onclick="banHistCambiarPag(-1)" class="act-pag-btn"><i class="ph ph-caret-left"></i> Anterior</button>
+                                    <button id="ban-hist-next" onclick="banHistCambiarPag(1)"  class="act-pag-btn">Siguiente <i class="ph ph-caret-right"></i></button>
+                                </div>
+                            </div>
+                        </section>
+                        </div>
                     </div>
 
                 </div>
