@@ -16,12 +16,15 @@ FLUJO_ALUMNO.txt.
      A-1. Cambiar la contraseña del admin
      A-2. Cambiar la contraseña del superadmin
      A-3. Qué pasa si olvidás la contraseña
+     A-4. La sesión del panel expiró (401 Unauthorized)
 
   B. Gestión de alumnos y acceso
      B-1. Registrar un alumno nuevo
      B-2. Banear a un alumno
-     B-3. Levantar el ban de un alumno
+     B-3. Levantar el ban de un alumno (manualmente)
      B-4. Desbloquear manualmente una PC para un alumno
+     B-5. Ver el historial de bans de un alumno
+     B-6. Ver todos los bans (activos e histórico)
 
   C. Control de terminales (PCs)
      C-1. Bloquear una PC desde el panel
@@ -32,7 +35,7 @@ FLUJO_ALUMNO.txt.
   D. Historial y sesiones
      D-1. Buscar las sesiones de un alumno
      D-2. Cerrar una sesión que quedó abierta por error
-     D-3. Exportar el historial a Excel
+     D-3. Exportar el historial a Excel / PDF
      D-4. Por qué no aparece una sesión en el historial
 
   E. Actividad y sospechas
@@ -46,6 +49,13 @@ FLUJO_ALUMNO.txt.
      F-2. Hacer un backup de la base de datos
      F-3. Qué hacer si el servidor no arranca
      F-4. Cómo agregar una terminal nueva
+
+  G. Personalización visual
+     G-1. Cambiar el logo de la aplicación (kiosco)
+     G-2. Cambiar los textos del login del kiosco
+
+  MEJORAS PENDIENTES (detectadas al documentar)
+     → ver sección al final
 
 
 ───────────────────────────────────────────────────────────────────
@@ -88,23 +98,51 @@ FLUJO_ALUMNO.txt.
 
   A-3. QUÉ PASA SI OLVIDÁS LA CONTRASEÑA
   ─────────────────────────────────────────
-  No hay recuperación automática (sin email de reset). Hay que resetear
-  directamente en la base de datos.
+  ACLARACIÓN: NO hay que resetear la base de datos completa. Solo hay
+  que actualizar UN campo (password_hash) en la tabla "usuarios". Los
+  datos de alumnos, sesiones, historial, etc. no se tocan.
 
-  Pasos (requiere acceso al servidor):
-    1. Abrir una terminal en la PC del servidor.
+  No hay recuperación automática (sin email de reset). Hay que actualizar
+  el hash directamente en la base de datos.
+
+  Pasos (requiere acceso a la PC del servidor):
+    1. Abrir una terminal en la PC del servidor (CMD o PowerShell).
     2. Conectarse a MySQL:
-         mysql -u root -p
-         USE biblioteca_unasam;
-    3. Generar un hash bcrypt de la nueva contraseña. Opciones:
-         - Usar Python: python -c "from passlib.context import CryptContext; ctx=CryptContext(schemes=['bcrypt']); print(ctx.hash('NuevaContraseña123'))"
-         - O usar algún generador bcrypt online (cost factor 12).
-    4. Actualizar en la base:
-         UPDATE usuarios SET password_hash='$2b$12$...' WHERE username='admin';
-    5. Reiniciar el servidor (o no — el próximo login ya usará el nuevo hash).
+         mysql -u root -pimpo2010 biblioteca_unasam
+    3. Generar un hash bcrypt de la nueva contraseña con Python:
+         python -c "from passlib.context import CryptContext; ctx=CryptContext(schemes=['bcrypt']); print(ctx.hash('NuevaContraseña123'))"
+       Esto imprime algo como: $2b$12$abcdef...
+    4. Actualizar en MySQL (pegar el hash generado):
+         UPDATE usuarios SET password_hash='$2b$12$...' WHERE username='superadmin';
+    5. Listo. No hace falta reiniciar el servidor.
 
   Respuesta esperada:
     - El usuario puede iniciar sesión con la nueva contraseña.
+
+  PENDIENTE (mejora): Agregar un campo en Configuración para que el
+  superadmin pueda cambiar su propia contraseña desde el panel, sin
+  tener que entrar a la base de datos. (Registrado en MEJORAS abajo.)
+
+
+  A-4. LA SESIÓN DEL PANEL EXPIRÓ (401 UNAUTHORIZED)
+  ─────────────────────────────────────────────────────
+  El token JWT del panel tiene validez de 8 horas. Al expirar, todas
+  las requests al servidor devuelven 401 y el panel cierra la sesión
+  automáticamente.
+
+  Síntomas en los logs del servidor:
+    "GET /api/dashboard/stats HTTP/1.1" 401 Unauthorized
+    "GET /api/terminales HTTP/1.1" 401 Unauthorized
+    ... (varios endpoints en cadena)
+    "Panel admin desconectado"
+
+  Qué hacer:
+    - Volver a iniciar sesión en el panel con usuario y contraseña.
+    - El panel guarda el nuevo token y retoma el monitoreo normalmente.
+
+  Nota: esto es comportamiento CORRECTO y esperado, no es un error.
+  Los kioscos y las PCs de alumnos NO se ven afectados cuando expira
+  el token del panel. Solo pierde acceso el navegador del admin.
 
 
 ───────────────────────────────────────────────────────────────────
@@ -151,22 +189,88 @@ FLUJO_ALUMNO.txt.
     - El alumno aparece en la lista de baneados.
     - Si intenta usar una terminal, el kiosco muestra: "DNI baneado.
       Acérquese al módulo."
-    - Si ya tenía una sesión activa, no se cierra automáticamente
-      (el ban aplica al próximo intento de login).
+    - Si ya tenía una sesión activa, NO se cierra automáticamente.
+      El ban aplica al próximo intento de login.
+
+  SOBRE EL BAN Y EL PANEL ADMIN: el ban solo aplica al uso de
+  terminales (kioscos). Los usuarios del panel (admin/superadmin) se
+  gestionan por separado en la tabla "usuarios" y NO están sujetos al
+  sistema de bans de alumnos. Son dos sistemas distintos: los bans
+  son para alumnos que usan las PCs, no para administradores del panel.
+
+  PENDIENTE (mejora): registrar quién aplicó el ban y cuándo, para
+  tener trazabilidad. (Ver sección MEJORAS abajo.)
 
 
-  B-3. LEVANTAR EL BAN DE UN ALUMNO
-  ────────────────────────────────────
-  Quién puede hacerlo: admin y superadmin.
+  B-3. LEVANTAR EL BAN DE UN ALUMNO (MANUALMENTE)
+  ──────────────────────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN.
 
   Pasos:
     1. Ir a Alertas → Baneados.
-    2. Buscar al alumno por DNI o nombre.
+    2. Buscar al alumno por DNI o nombre en la lista de bans activos.
     3. Clic en "Levantar ban".
+    4. Confirmar.
 
   Respuesta esperada:
-    - El alumno desaparece de la lista de baneados.
+    - El ban queda marcado como levantado (fecha_fin = ahora).
+    - Se registra quién lo levantó (levantado_por = username del superadmin)
+      y a qué hora (fecha_levantado). Esto ya ocurre en el servidor.
+    - El alumno desaparece de la lista de bans activos.
     - Puede volver a usar las terminales de inmediato.
+    - Sus incidencias activas quedan reseteadas.
+    - En el historial de bans (B-6 — pendiente), el registro seguirá
+      visible con "Levantado por: <superadmin>" y la fecha.
+
+  Diferencia con expiración automática:
+    - Cuando el superadmin levanta el ban: levantado_por = "<username>"
+    - Cuando el ban expira solo por fecha: levantado_por queda NULL
+      (el sistema simplemente dejó de considerar el ban como activo)
+
+
+  B-5. VER EL HISTORIAL DE BANS DE UN ALUMNO ESPECÍFICO
+  ────────────────────────────────────────────────────────
+  Caso de uso: quiero saber cuántas veces fue baneado un alumno, quién
+  lo baneó cada vez, y cómo terminó cada ban.
+
+  Pasos:
+    1. Ir a Alertas → Baneados.
+    2. Clic en "Historial" (botón junto a "Activos").
+    3. Escribir el DNI del alumno en el filtro "DNI alumno".
+
+  Respuesta esperada:
+    - Lista de todos los bans del alumno (activos, expirados, levantados).
+    - Por cada ban:
+        * Fecha de inicio
+        * Fecha de expiración original
+        * Motivo
+        * Baneado por: <username>
+        * Estado:
+            - "Activo"                    → fecha_fin en el futuro
+            - "Expirado (sistema)"        → fecha_fin ya pasó, sin levantado_por
+            - "Levantado por <username>"  → levantado_por presente
+
+
+  B-6. VER TODOS LOS BANS — HISTORIAL GLOBAL
+  ─────────────────────────────────────────────
+  Caso de uso: el superadmin quiere auditar todos los baneamientos y
+  desbanamientos del sistema (quién baneó a quién, cuándo, cómo terminó).
+
+  Pasos:
+    1. Ir a Alertas → Baneados.
+    2. Clic en "Historial".
+    3. Usar el filtro "Estado" para acotar: Todos / Activos /
+       Expirados (sistema) / Levantados (admin).
+
+  Respuesta esperada:
+    - Tabla paginada con todos los bans, no solo los activos.
+    - Columnas: Alumno, DNI, Motivo, Fecha inicio, Fecha fin original,
+      Baneado por, Estado, Levantado por, Fecha levantado.
+    - Filtros: por alumno/DNI, por fecha, por quién baneó, por estado.
+    - Tres tipos de registros:
+        1. ACTIVO          → fecha_fin en el futuro, levantado_por NULL
+        2. EXPIRADO SISTEM → fecha_fin ya pasó, levantado_por NULL
+        3. LEVANTADO ADMIN → levantado_por = "<username>", fecha_levantado presente
 
 
   B-4. DESBLOQUEAR MANUALMENTE UNA PC PARA UN ALUMNO
@@ -203,11 +307,20 @@ FLUJO_ALUMNO.txt.
     2. Confirmar en el diálogo.
 
   Respuesta esperada:
-    - Si había sesión activa: se cierra (motivo "bloqueo_admin") y se
-      registra la hora de salida.
+    - Si había sesión activa: se cierra (motivo interno "bloqueo_admin")
+      y se registra la hora de salida automáticamente.
     - El kiosco vuelve a la pantalla de login bloqueada.
     - La tarjeta en el panel cambia a estado "bloqueado".
     - El historial guarda la sesión con hora de inicio y hora de cierre.
+    - El admin NO tiene que escribir un motivo al bloquear: la acción
+      en sí es el motivo (bloqueo manual por el administrador).
+
+  SOBRE EL MOTIVO DE CIERRE: el motivo "bloqueo_admin" se guarda
+  internamente en la BD para trazabilidad. Actualmente no se muestra
+  en la interfaz de historial (solo se guarda). Si en el futuro se
+  quiere mostrar el motivo de cierre en el historial, es un cambio
+  de visualización, no de lógica.
+  * el historial de quien bloquea desde el panel, ya sea el admin o superadmin debe de guardarse en la base de datos *
 
 
   C-2. APAGAR UNA PC DE FORMA REMOTA
@@ -235,10 +348,12 @@ FLUJO_ALUMNO.txt.
     - Se envía la orden de bloqueo a TODAS las terminales conectadas.
     - Las tarjetas del panel cambian a "bloqueado".
     - El historial registra el cierre de todas las sesiones.
-    - NOTA: las PCs offline (desconectadas) no reciben la orden; se
-      bloquearán al reconectarse.
+    - Las PCs offline (desconectadas) NO reciben la orden. Al reconectar,
+      el servidor las registra como "bloqueado" (pantalla de login), no
+      como "activo" — el modo offline protege la sesión EN CURSO, no
+      reinicia una sesión nueva. Esto es el comportamiento correcto.
 
-  PENDIENTE: no hay botón de "Apagar todas" todavía (ver FLUJO_ADMIN.txt).
+  PENDIENTE: no hay botón de "Apagar todas" todavía.
 
 
   C-4. QUÉ PASA SI UNA PC SE DESCONECTA
@@ -250,13 +365,25 @@ FLUJO_ALUMNO.txt.
 
   El kiosco del lado cliente:
     - Muestra un contador de 3 minutos intentando reconectar.
-    - Si reconecta antes: reanuda la sesión (si estaba en modo offline).
+    - Si reconecta antes de 3 min Y tenía sesión activa en modo offline:
+      la sesión se sincroniza con el servidor (/api/offline-sync) y
+      continúa como activa.
     - Si no reconecta en 3 min: bloquea la pantalla.
 
   En el panel:
     - La tarjeta de esa PC aparece en estado "offline" (gris).
-    - Cuando la PC vuelve a conectarse, el servidor la actualiza a
-      "bloqueado" y la tarjeta vuelve al mapa.
+    - Cuando la PC vuelve a conectarse, el servidor la registra como
+      "bloqueado" y la tarjeta vuelve al mapa activo.
+
+  NOTA: varios comportamientos de C-4 (especialmente la reconexión
+  con sesión offline activa) están implementados pero pendientes de
+  prueba exhaustiva en condiciones reales.
+  * quiza debamos implementar un flujo o reapar, pues no me parece bien que tengamos que poner
+  una contraseña para habilitar un modo offline
+  almenos no al inicio , sino que colocar los datos de forma normal
+  y cuando le doy a iniciar sesion, quiza lo mejor sea poner dni y motivo de uso otros
+  y esa info sea la que se guarde y obviamente me pregunte la contraseña para entrar al modo ofline *
+  
 
 
 ───────────────────────────────────────────────────────────────────
@@ -291,43 +418,50 @@ FLUJO_ALUMNO.txt.
   Opción 2 — Reiniciar el servidor:
     - Al arrancar, el servidor cierra todas las sesiones que estaban
       marcadas como "activa" y pone todas las terminales en "offline".
-    - server/main.py (cerrar_todas_sesiones al startup).
+    - Útil si hay varias sesiones atascadas a la vez.
 
   Respuesta esperada:
     - La sesión aparece en el historial con hora de salida.
 
 
-  D-3. EXPORTAR EL HISTORIAL A EXCEL
-  ────────────────────────────────────
+  D-3. EXPORTAR EL HISTORIAL A EXCEL / PDF
+  ──────────────────────────────────────────
   Pasos:
     1. Ir a Historial.
-    2. Aplicar los filtros deseados (período, búsqueda, etc.).
-    3. Clic en "Exportar Excel" (o "Exportar PDF").
+    2. Aplicar los filtros deseados (período, búsqueda, etc.) si los
+       necesitás para el PDF.
+    3. Clic en "Exportar Excel" o "Exportar PDF".
 
   Respuesta esperada:
-    - Se descarga un archivo con las sesiones que coinciden con los
-      filtros aplicados (no todo el historial completo si hay filtros).
-    - El Excel incluye: alumno, DNI, código, PC, fecha, hora entrada,
-      hora salida, duración, motivo.
+    - EXCEL: siempre exporta TODO el historial completo, sin importar
+      los filtros aplicados en pantalla. Esto es correcto — el Excel
+      es para tener el registro completo.
+    - PDF: exporta SOLO lo que está visible con los filtros aplicados.
+      Si no hay filtros, exporta todo lo que aparece en pantalla.
+
+  PENDIENTE (mejora): mejorar el aspecto visual del PDF exportado.
 
 
   D-4. POR QUÉ NO APARECE UNA SESIÓN EN EL HISTORIAL
   ──────────────────────────────────────────────────────
   Causas posibles:
 
-    1. Filtro de período incorrecto: verificar que el período seleccionado
+    1. Filtro de período incorrecto: el Excel no usa filtros, pero la
+       vista del panel sí. Verificar que el período seleccionado
        incluye la fecha de la sesión.
 
     2. La sesión fue modo offline y la sincronización falló: buscar en
-       el "Flujo de Actividad" si hay eventos de esa PC/alumno en esa fecha.
+       el "Flujo de Actividad" si hay eventos de esa PC/alumno en esa
+       fecha. Si hay eventos pero no sesión, la sincronización offline
+       no completó.
 
-    3. La sesión nunca se confirmó (sesión fantasma): el alumno puso el DNI
-       pero la PC se desconectó antes de que el kiosco enviara "unlock_confirmed".
-       El servidor cancela estas sesiones a los 10s.
+    3. La sesión nunca se confirmó (sesión fantasma): el alumno puso el
+       DNI pero la PC se desconectó antes de que el kiosco enviara
+       "unlock_confirmed". El servidor cancela estas sesiones a los 10s.
 
-    4. Diferencia horaria: si el servidor y la PC kiosco tienen zonas horarias
-       distintas, la fecha de la sesión puede quedar un día antes o después.
-       El servidor usa su propia hora local para fecha_uso (corregido en v4.37+).
+    4. Diferencia horaria entre el servidor y las PCs kiosco: puede
+       provocar que la sesión quede registrada en una fecha distinta.
+       Corregido en v4.37+ (el servidor usa su propia hora para fecha_uso).
 
 
 ───────────────────────────────────────────────────────────────────
@@ -346,8 +480,8 @@ FLUJO_ALUMNO.txt.
     - Eventos en rojo = nivel "sospechoso" (cmd, powershell, ejecutables
       descargados, etc.).
     - Eventos en gris = nivel normal (Word, Chrome, documentos).
-    - NOTA: los procesos "ignorados" están ocultos por defecto. Para verlos
-      todos, clic en "Ver ignorados".
+    - NOTA: los procesos "ignorados" están ocultos por defecto. Para
+      verlos todos, clic en "Ver ignorados".
 
 
   E-2. INVESTIGAR UNA SOSPECHA
@@ -370,6 +504,9 @@ FLUJO_ALUMNO.txt.
     - Descartar: la sospecha desaparece de "pendientes", no queda nada
       en incidencias.
 
+  PENDIENTE (mejora): aprobación/descarte por lotes (seleccionar varias
+  sospechas y resolver de una sola vez). (Ver sección MEJORAS abajo.)
+
 
   E-3. CREAR UNA INCIDENCIA MANUALMENTE
   ────────────────────────────────────────
@@ -384,31 +521,43 @@ FLUJO_ALUMNO.txt.
 
   Respuesta esperada:
     - La incidencia aparece en la lista para ese alumno.
-    - Sistema de acumulación automático:
-      * 3 incidencias leves activas → alerta de posible baneo.
-      * 1 incidencia grave → recomendación de baneo.
-      (El baneo no es automático; el admin lo hace manualmente en B-2.)
+    - Sistema de acumulación:
+      * 3 incidencias leves activas → aparece alerta de posible baneo
+        en la parte superior de la sección.
+      * 1 incidencia grave → aparece recomendación de baneo.
+      (El baneo NO es automático; el admin lo aplica manualmente en B-2.)
+
+  PENDIENTE (mejora): cuando se crea una incidencia grave, mostrar
+  directamente el botón/opción de banear en el mismo lugar (no solo
+  arriba). Reevaluar el diseño de respuestas y acciones de incidencias.
 
 
   E-4. IGNORAR UN PROCESO DEL SISTEMA (ELIMINAR RUIDO)
   ──────────────────────────────────────────────────────
-  Caso de uso: el panel está llenándose de eventos de un proceso del SO
-  (ej: "antivirus.exe") que no son relevantes.
+  Caso de uso: el panel se llena de eventos de un proceso que no es
+  relevante (ej: un proceso del sistema o del antivirus).
 
   Pasos:
     1. Ir a Eventos.
-    2. Encontrar un evento de ese proceso.
+    2. Encontrar un evento de ese proceso (debe ser nivel "normal").
     3. Clic en "Ignorar" en ese evento.
 
   Respuesta esperada:
     - Ese ejecutable queda en la lista de "ignorados".
     - Ya NO aparece más en la vista limpia de Eventos en NINGUNA PC.
     - PERO: si el nivel del evento era "sospechoso", SIEMPRE se muestra
-      (los ignorados sospechosos nunca se ocultan).
+      (los sospechosos nunca se pueden ignorar — es una protección).
     - El registro en la base de datos NO se borra: sigue guardado para
       evidencia futura.
 
-  Para revertirlo:
+  LIMITACIÓN CONOCIDA: si un proceso normalmente inofensivo (como Word)
+  ejecuta algo en segundo plano que el sistema clasifica como sospechoso,
+  ese evento queda marcado en rojo y NO se puede ignorar ni reclasificar
+  a "normal". Esto es un comportamiento rígido del sistema actual.
+  PENDIENTE: evaluar si se necesita una función para que el superadmin
+  pueda reclasificar manualmente un evento de "sospechoso" a "normal".
+
+  Para revertir un proceso ignorado:
     1. En Eventos, clic en "Lista".
     2. Buscar el proceso en la lista de ignorados.
     3. Clic en "Quitar" → vuelve a mostrarse en la vista.
@@ -433,25 +582,22 @@ FLUJO_ALUMNO.txt.
          dotnet publish -c Release -r win-x64 --self-contained true
                         /p:PublishSingleFile=true -o publish\
        (desde la carpeta client/)
-    2. Copiar el .exe compilado a la carpeta de distribución del servidor
-       (la configurada en el panel → Configuración → Ruta de distribución).
-       Por defecto: C:\WinSysCache\
-    3. Editar C:\WinSysCache\version.txt y escribir el nuevo número de versión
+    2. Copiar el .exe compilado a C:\WinSysCache\
+    3. Editar C:\WinSysCache\version.txt y escribir el nuevo número
        (ej: "4.38"). Solo el número, sin "v" ni espacios extra.
     4. Reiniciar el servidor (para que lea el nuevo version.txt).
 
   Respuesta esperada al reiniciar cada kiosco:
     - El kiosco detecta que la versión del servidor es mayor a la local.
     - Descarga el nuevo .exe automáticamente.
-    - Se reinicia y muestra la nueva versión en la pantalla de login (ej: "v4.38").
+    - Se reinicia y muestra la nueva versión en la pantalla de login.
     - NOTA: si el kiosco ya estaba corriendo y no se reinicia, la
       actualización ocurre en el próximo reinicio.
 
   Si un kiosco no se actualiza:
     - Verificar que el servidor esté corriendo y accesible desde esa PC.
-    - Revisar que version.txt tenga el número correcto (sin espacios ni BOM).
-    - El kiosco escribe en su log (App.log en su carpeta) si la actualización
-      falla.
+    - Revisar que version.txt tenga el número correcto (sin espacios).
+    - El kiosco escribe en su log (App.log en su carpeta) si falla.
 
 
   F-2. HACER UN BACKUP DE LA BASE DE DATOS
@@ -463,43 +609,55 @@ FLUJO_ALUMNO.txt.
     2. Buscar la sección de Backup SQL.
     3. Clic en "Descargar backup".
 
-  Respuesta esperada:
-    - El servidor ejecuta mysqldump y genera un archivo .sql.
-    - Se descarga el archivo en el navegador.
-    - El archivo contiene toda la base de datos: alumnos, sesiones,
-      actividad, usuarios, etc.
+  Respuesta esperada CORRECTA:
+    - El servidor ejecuta mysqldump sobre toda la base de datos.
+    - Se descarga un archivo .sql con TODA la base: estructura de tablas
+      Y todos los datos (alumnos, sesiones, historial, actividad, etc.).
+    - Al restaurarlo en otro servidor se recupera todo el estado.
 
-  Si falla:
-    - El servidor no encuentra mysqldump en el PATH.
-    - Solución: instalar MySQL client tools, o configurar la ruta de
-      mysqldump en server/.env (ver VULNERABILIDADES.txt A-6).
+  BUG CONOCIDO: actualmente el backup solo guarda la estructura de las
+  tablas (CREATE TABLE) pero NO los datos (INSERT INTO). Esto hace que
+  el backup no sirva para restaurar registros.
+  PENDIENTE (crítico): corregir el backup para que incluya los datos.
+  (Ver sección MEJORAS abajo.)
+
+  Si falla la descarga:
+    - El servidor no encuentra mysqldump en el PATH de Windows.
+    - Solución: asegurar que mysqldump.exe esté en el PATH, o configurar
+      su ruta en server/.env
 
 
   F-3. QUÉ HACER SI EL SERVIDOR NO ARRANCA
   ──────────────────────────────────────────
-  Síntomas: el panel no carga, los kioscos quedan en "offline".
+  Síntomas: el panel no carga (pantalla en blanco o error de conexión),
+  los kioscos se quedan conectando indefinidamente.
 
   Pasos de diagnóstico:
-    1. En la PC del servidor, abrir la terminal donde corre el servidor.
-       El error suele estar en los últimos mensajes.
-    2. Causas comunes:
-       - MySQL no está corriendo: iniciar el servicio MySQL/XAMPP.
-       - Puerto 8000 ocupado: cerrar el proceso que lo usa o cambiar el
-         puerto en el comando de arranque.
-       - Error en .env: verificar que las credenciales de la BD sean
-         correctas.
-       - Dependencias faltantes: correr "pip install -r requirements.txt"
-         dentro del entorno virtual (server/).
+    1. Ir a la PC del servidor. Abrir la terminal donde corre el servidor.
+       El error aparece en los últimos mensajes impresos.
+    2. Causas comunes y solución:
+       - "Can't connect to MySQL": MySQL/XAMPP no está corriendo.
+         Abrir XAMPP y arrancar el servicio MySQL.
+       - "Address already in use" (puerto 8000 ocupado):
+         Cerrar el proceso anterior o usar otro puerto.
+       - "No module named X": falta una dependencia.
+         Correr: cd server && .venv\Scripts\activate && pip install -r requirements.txt
+       - Credenciales incorrectas en .env: verificar server/.env
     3. Arrancar de nuevo:
          cd server
          .venv\Scripts\activate
          uvicorn main:app --host 0.0.0.0 --port 8000
 
-  Respuesta esperada al reiniciar el servidor:
+  Respuesta esperada al reiniciar exitosamente:
     - El servidor imprime: "Application startup complete."
-    - AUTOMÁTICAMENTE: cierra todas las sesiones que estaban abiertas
+    - AUTOMÁTICAMENTE cierra todas las sesiones que estaban abiertas
       y pone todas las terminales en "offline".
-    - Las PCs kiosco reconectan solas (tienen reconexión automática).
+    - Los kioscos reconectan solos (tienen reconexión automática cada
+      pocos segundos).
+
+  PARA PROBARLO: simplemente detener el servidor (Ctrl+C en la terminal)
+  y volver a arrancarlo. Ver que los kioscos vuelven a conectarse solos
+  y las sesiones abiertas quedan cerradas en el historial.
 
 
   F-4. CÓMO AGREGAR UNA TERMINAL NUEVA
@@ -508,21 +666,141 @@ FLUJO_ALUMNO.txt.
 
   Pasos:
     1. Copiar el archivo ControlBiblioteca.Client.exe a la PC nueva.
-       (desde C:\WinSysCache\ del servidor, o el archivo publicado)
+       (desde C:\WinSysCache\ del servidor)
     2. Crear en la misma carpeta el archivo kiosco.config.json:
          {"ServidorUrl": "http://<IP_DEL_SERVIDOR>:8000"}
        Reemplazar <IP_DEL_SERVIDOR> con la IP real de la PC del servidor.
-    3. Ejecutar el .exe como Administrador (necesario para bloquear la
-       pantalla y monitorear procesos del sistema).
+    3. Ejecutar el .exe como Administrador.
 
   Respuesta esperada:
     - El kiosco se conecta al servidor.
     - En el panel (Nodos), aparece una tarjeta nueva con el nombre de
       esa PC y estado "bloqueado".
     - La terminal se registra automáticamente en la base de datos.
-    - NOTA: el nombre que aparece en el panel es el hostname de Windows
-      de esa PC (el servidor no permite que la PC elija su propio nombre
-      para evitar suplantaciones — usa la IP real de la conexión).
+    - El nombre que aparece es el HOSTNAME de Windows de esa PC.
+
+
+───────────────────────────────────────────────────────────────────
+  G. PERSONALIZACIÓN VISUAL
+───────────────────────────────────────────────────────────────────
+
+  G-1. CAMBIAR EL LOGO DE LA APLICACIÓN (KIOSCO)
+  ──────────────────────────────────────────────────
+  Ubicación actual del logo:
+    client/Assets/ (buscar archivos .png o .ico usados en XAML)
+    client/UI/MainWindow.xaml (donde se referencia la imagen)
+
+  Pasos:
+    1. Preparar el nuevo logo en PNG (recomendado: 200x200px o similar).
+    2. Reemplazar el archivo de imagen en client/Assets/
+       manteniendo el mismo nombre de archivo, O actualizar la referencia
+       en MainWindow.xaml si usás un nombre distinto.
+    3. Recompilar y publicar una nueva versión (ver F-1).
+
+  Respuesta esperada:
+    - El logo nuevo aparece en la pantalla de login del kiosco.
+    - Los kioscos se actualizan automáticamente al reiniciarse.
+
+  NOTA: el logo del panel web (admin/index.html) se cambia directamente
+  en el HTML/CSS del panel, sin necesidad de recompilar.
+
+
+  G-2. CAMBIAR LOS TEXTOS DEL LOGIN DEL KIOSCO
+  ──────────────────────────────────────────────
+  Textos configurables: título de la institución, subtítulo, texto de
+  bienvenida, instrucciones para el alumno.
+
+  Ubicación:
+    client/UI/MainWindow.xaml → sección de la pantalla de login.
+    Buscar los TextBlock con el texto actual.
+
+  Pasos:
+    1. Abrir client/UI/MainWindow.xaml.
+    2. Modificar el texto de los elementos visuales deseados.
+    3. Recompilar y publicar (ver F-1).
+
+  NOTA: los textos que vienen del servidor (nombre del alumno,
+  mensajes de error de validación) no se cambian en el XAML sino en
+  server/main.py y server/api/endpoints.py.
+
+
+───────────────────────────────────────────────────────────────────
+  MEJORAS PENDIENTES (detectadas al documentar)
+───────────────────────────────────────────────────────────────────
+  Estas son mejoras identificadas durante la revisión de los casos de uso.
+  No son bugs críticos pero mejorarían la experiencia y trazabilidad.
+
+  ALTA PRIORIDAD:
+    - F-2: El backup no incluye los datos de las tablas (solo estructura).
+      Corregir mysqldump para que exporte datos completos.
+
+  MEDIA PRIORIDAD:
+    - A-3: Agregar pantalla en Configuración para que el superadmin
+      cambie su propia contraseña sin acceder a la base de datos.
+    - E-2: Aprobación/descarte de sospechas por lotes.
+    - E-3: Cuando se crea una incidencia grave, mostrar la opción de
+      banear directamente en el formulario (no solo arriba).
+    - E-4: Permitir al superadmin reclasificar un evento de "sospechoso"
+      a "normal" para casos como Word ejecutando procesos en segundo plano.
+
+  BAJA PRIORIDAD:
+    - D-3: Mejorar el aspecto visual del PDF exportado.
+    - C-3: Agregar botón "Apagar todas las PCs" (además del bloqueo masivo).
+
+
+───────────────────────────────────────────────────────────────────
+  PLAN: HISTORIAL DE BANS (B-5 y B-6)
+───────────────────────────────────────────────────────────────────
+
+  ESTADO DEL MODELO (ya existe en la BD, NO requiere migración):
+    La tabla "bans" ya tiene todos los campos necesarios:
+      - baneado_por    (String 50) — quién aplicó el ban
+      - levantado_por  (String 50) — quién lo levantó (NULL si expiró solo)
+      - fecha_levantado (DateTime) — cuándo se levantó (NULL si expiró solo)
+    El servidor ya guarda baneado_por (al crear) y levantado_por/fecha_levantado
+    (al levantar manualmente). No hay que tocar el modelo ni la BD.
+
+  LO QUE HAY QUE DISTINGUIR (tres estados):
+    1. ACTIVO         → fecha_fin > ahora,  levantado_por = NULL
+    2. EXPIRADO       → fecha_fin <= ahora, levantado_por = NULL
+       (el alumno recuperó acceso automáticamente al llegar la fecha)
+    3. LEVANTADO      → levantado_por = "<username>", fecha_levantado presente
+       (un superadmin lo levantó antes de que expirara)
+
+  CAMBIOS A IMPLEMENTAR:
+
+  Paso 1 — Servidor: nuevo endpoint de historial
+    Archivo: server/api/endpoints.py
+    Agregar: GET /admin/bans/historial
+      Parámetros opcionales: dni, estado (activo/expirado/levantado),
+                              page, limit
+      Devuelve: todos los bans (sin filtrar por fecha_fin > ahora),
+        con campo calculado "estado" según las reglas de arriba.
+      Incluye: levantado_por, fecha_levantado (que el GET /admin/bans
+               actual no devuelve).
+
+  Paso 2 — Panel: sub-pestaña "Historial" en Alertas → Baneados
+    Archivo: admin/index.html
+    Agregar: botón/pestaña "Historial" junto a la lista de bans activos.
+    Vista: tabla con columnas:
+      Alumno | DNI | Motivo | Baneado por | Fecha inicio | Fecha fin |
+      Estado (badge: Activo/Expirado/Levantado) | Levantado por | Fecha levantado
+
+    Archivo: admin/static/js/app.js
+    Agregar:
+      - cargarHistorialBans(filtros)  → GET /admin/bans/historial
+      - renderHistorialBans(items)    → genera las filas con badge de estado
+      - Filtros: por DNI/nombre, por estado, por fecha
+
+  Paso 3 — Panel: mostrar historial también en el perfil de un alumno
+    Cuando se ve el detalle de un alumno específico en Base de Datos,
+    mostrar sus bans históricos (GET /admin/bans/historial?dni=<dni>).
+    Esto es OPCIONAL para una segunda iteración.
+
+  ESTIMACIÓN:
+    Paso 1: ~40 líneas de Python (endpoint simple, misma lógica que /bans)
+    Paso 2: ~80 líneas JS + ~30 líneas HTML (tabla nueva con filtros)
+    Sin cambios en BD ni en el cliente kiosco.
 
 
 ───────────────────────────────────────────────────────────────────
@@ -535,12 +813,12 @@ FLUJO_ALUMNO.txt.
      Acérquese al módulo"         local de alumnos. Hay que registrarlo.
     "DNI baneado"               → el alumno tiene un ban activo.
     "Sin conexión al servidor"  → la PC no puede llegar al servidor.
-                                  Verificar red y que el servidor esté
-                                  corriendo.
+                                  Verificar red y que el servidor corra.
 
   En el panel admin:
     "401 Unauthorized"          → el token expiró (después de 8 horas).
                                   Cerrar sesión y volver a iniciar sesión.
+                                  Esto es normal, no es un error del sistema.
     "403 Forbidden"             → la acción requiere superadmin y estás
                                   logueado como admin.
     "Terminal no encontrada"    → la PC ya no está conectada al servidor.
@@ -550,6 +828,6 @@ FLUJO_ALUMNO.txt.
 
   Al cambiar contraseña:
     "Contraseña muy corta"      → el servidor exige mínimo 8 caracteres.
-                                  NOTA: el panel solo valida 6 caracteres,
-                                  lo que puede causar confusión (bug conocido).
-                                  Usar siempre 8+ caracteres para evitarlo.
+                                  BUG CONOCIDO: el panel valida solo 6
+                                  caracteres. Usar siempre 8+ para evitar
+                                  que el servidor rechace la solicitud.

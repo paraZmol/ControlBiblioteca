@@ -676,7 +676,12 @@ async def backup_sql(
         "--single-transaction",   # consistencia sin bloquear tablas InnoDB
         "--routines",             # incluir stored procedures/functions
         "--triggers",             # incluir triggers
-        "--set-gtid-purged=OFF",  # evita error si GTID no está habilitado
+        "--no-tablespaces",       # evita error de permisos en MariaDB/MySQL 5.7+
+        "--complete-insert",      # INSERT INTO con nombres de columna explícitos
+        "--extended-insert",      # agrupa filas en un solo INSERT (más eficiente)
+        "--add-drop-table",       # DROP TABLE IF EXISTS antes de cada CREATE
+        "--disable-keys",         # deshabilita índices durante restore (más rápido)
+        "--hex-blob",             # exporta BLOB/BINARY en hex para evitar corrupción
         dbname,
     ]
     env = {**os.environ, "MYSQL_PWD": password}
@@ -693,6 +698,15 @@ async def backup_sql(
         from main import logger
         logger.error(f"[BACKUP] mysqldump falló: {stderr.decode()[:500]}")
         raise HTTPException(status_code=500, detail="No se pudo generar el backup. Revise los logs del servidor.")
+
+    sql_text = stdout.decode("utf-8", errors="replace")
+
+    # Verificar que el dump incluye datos reales (al menos un INSERT)
+    from main import logger
+    if "INSERT INTO" not in sql_text:
+        logger.warning("[BACKUP] El dump no contiene INSERTs — puede que la BD esté vacía o mysqldump falló silenciosamente")
+
+    logger.info(f"[BACKUP] Generado: {filename} ({len(stdout):,} bytes)")
 
     return StreamingResponse(
         iter([stdout]),
@@ -2055,6 +2069,65 @@ async def listar_bans(
         }
         for b in bans
     ]
+
+
+@router.get("/admin/bans/historial")
+async def historial_bans(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+    dni: str | None = None,
+    estado: str | None = None,   # activo | expirado | levantado
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Historial completo de bans (activos, expirados y levantados manualmente)."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede ver el historial de bans")
+    from sqlalchemy.orm import joinedload
+    from sqlalchemy import func as _func
+    ahora = datetime.now()
+    q = select(Ban).options(joinedload(Ban.alumno)).order_by(Ban.fecha_ini.desc())
+    if dni:
+        q = q.where(Ban.dni_alumno == dni)
+    if estado == "activo":
+        q = q.where((Ban.fecha_fin == None) | (Ban.fecha_fin > ahora))
+        q = q.where(Ban.levantado_por == None)
+    elif estado == "expirado":
+        q = q.where(Ban.fecha_fin <= ahora)
+        q = q.where(Ban.levantado_por == None)
+    elif estado == "levantado":
+        q = q.where(Ban.levantado_por != None)
+
+    total_res = await db.execute(select(_func.count()).select_from(q.subquery()))
+    total = total_res.scalar_one()
+    res = await db.execute(q.limit(limit).offset(offset))
+    bans = res.scalars().all()
+
+    def _estado(b: Ban) -> str:
+        if b.levantado_por:
+            return "levantado"
+        if b.fecha_fin and b.fecha_fin <= ahora:
+            return "expirado"
+        return "activo"
+
+    return {
+        "total": total,
+        "items": [
+            {
+                "id":               b.id,
+                "dni":              b.dni_alumno,
+                "nombre":           b.alumno.nombre if b.alumno else b.dni_alumno,
+                "motivo":           b.motivo or "",
+                "fecha_ini":        b.fecha_ini,
+                "fecha_fin":        b.fecha_fin,
+                "baneado_por":      b.baneado_por or "",
+                "estado":           _estado(b),
+                "levantado_por":    b.levantado_por or "",
+                "fecha_levantado":  b.fecha_levantado,
+            }
+            for b in bans
+        ],
+    }
 
 
 @router.get("/admin/bans/check/{dni}")

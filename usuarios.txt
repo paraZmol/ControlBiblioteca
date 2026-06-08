@@ -4,8 +4,8 @@
 
 NIVEL 1 — Admin
 ───────────────
-Usuario  : superadmin 
-Contraseña: admin123
+Usuario  : admin@admin.com 
+Contraseña: Admin1234
 
 Acceso   : Monitoreo, Eventos, Historial, Alertas,
            Configuracion > Backdoor
@@ -13,8 +13,8 @@ Acceso   : Monitoreo, Eventos, Historial, Alertas,
 
 NIVEL 2 — Super Admin
 ──────────────────────
-Usuario  : admin
-Contraseña: max123
+Usuario  : superadmin
+Contraseña: SuperAdmin123
 
 Acceso   : Todo lo anterior +
            Base de Datos,
