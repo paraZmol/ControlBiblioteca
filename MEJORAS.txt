@@ -1,6 +1,6 @@
 MEJORAS PROPUESTAS — Sistema Control Biblioteca
 ================================================
-Última revisión: 2026-06-05
+Última revisión: 2026-06-10 (4to análisis multi-agente — ver SECCIÓN 8 al final)
 
 Las mejoras están ordenadas por impacto/utilidad. Las marcadas con [*] son
 las que considero más valiosas para el uso real del sistema.
@@ -458,4 +458,126 @@ Consideraciones de seguridad:
 Complejidad: media-alta — cambio principalmente en el cliente C#.
   El servidor solo necesita un endpoint para recibir los logs offline
   al sincronizar. No requiere cambios en la lógica principal del servidor.
-Estado: PENDIENTE (discutido 2026-06-05)
+Estado: IMPLEMENTADO PARCIAL (2026-06-10).
+  - El atajo de teclado offline (OfflineBackdoor.cs) y el endpoint
+    /api/offline-sync YA existen.
+  - El 2026-06-10 se REDISEÑÓ el flujo: ahora el alumno ingresa DNI + motivo
+    en el formulario normal (sin conexión, el ComboBox se restringe a "Otros"),
+    pulsa Ingresar, ve "Sin conexion. Contacte al encargado.", y el encargado
+    activa con el atajo (solo pide PIN, los datos ya están capturados vía
+    SetDatosAlumno). Ver docs/CASOS_DE_USO.txt C-4.
+  PENDIENTE (detectado en el 4to análisis, ver VULNERABILIDADES.txt cat. G):
+  - G-5: _verificandoReconexion puede atascarse en true → la PC queda
+    imposible de bloquear remotamente. CRÍTICO, corregir al recompilar.
+  - G-16: _dniPendiente puede quedar sucio entre alumnos → sesión con DNI
+    equivocado. Agregar timestamp/expiración a los datos pendientes.
+  - G-8 (servidor): offline-sync ignora hora_fin → la sesión queda "activa"
+    para siempre. Crear la sesión ya cerrada con hora_salida.
+  - G-1/G-7 (servidor): /api/offline-sync sin auth ni validación de DNI.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECCIÓN 8 — CALIDAD Y ROBUSTEZ (4to análisis multi-agente, 2026-06-10)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Mejoras de calidad/robustez detectadas al auditar los 4 subsistemas. Las que
+ son riesgo de seguridad están en VULNERABILIDADES.txt categoría G; aquí van
+ las que son robustez/mantenibilidad. Referencia cruzada con el ID de cat. G.
+
+MEJORA-22: Tope máximo de `limit` en los listados paginados (G-13)
+------------------------------------------------------------------
+Problema:
+  Los endpoints de listado (sesiones, sospechas, actividad, maestro, bans,
+  personal, incidencias) aceptan ?limit=N sin cota superior. Un cliente puede
+  pedir limit=100000000 y forzar al servidor a materializar la tabla entera.
+Propuesta:
+  limit = min(max(limit, 1), 200) en cada endpoint, o usar Query(le=200).
+  Aplicar también un filtro de fecha por defecto / tope de filas en las
+  exportaciones Excel/PDF (hoy hacen result.all() sin límite).
+Complejidad: baja.
+Estado: PENDIENTE
+
+MEJORA-23: Estado coherente de terminales tras cierre masivo (G-12)
+-------------------------------------------------------------------
+Problema:
+  cerrar_todas_sesiones y limpiar_sesiones ponen las terminales en estado
+  "disponible", que ninguna otra parte del sistema produce (se usa
+  bloqueado/activo/offline). reset_maestro sí usa "bloqueado".
+Propuesta:
+  Cambiar a estado="bloqueado" tras el cierre masivo (PC esperando login).
+Complejidad: muy baja (1 palabra en 2 sitios).
+Estado: PENDIENTE
+
+MEJORA-24: broadcast del WebSocket manager sin race condition (G-6)
+-------------------------------------------------------------------
+Problema:
+  ConnectionManager.broadcast itera el dict conexiones_activas vivo; si una
+  terminal conecta/desconecta durante el envío, lanza RuntimeError y aborta el
+  broadcast a medias (unos kioscos reciben el mensaje y otros no).
+Propuesta:
+  Iterar sobre list(self.conexiones_activas.items()); considerar asyncio.Lock
+  para mutaciones de las estructuras compartidas.
+Complejidad: baja.
+Estado: PENDIENTE
+
+MEJORA-25: Validación robusta de mensajes del servidor en el cliente (G-17)
+---------------------------------------------------------------------------
+Problema:
+  El cliente C# usa GetProperty(...).GetInt32() sin TryGetProperty al procesar
+  hello_ack/config_backdoor_update: un mensaje malformado puede dejar el backdoor
+  a medio configurar. Además el buffer de recepción es fijo de 4096 bytes y no
+  reensambla fragmentos (EndOfMessage se ignora) → mensajes largos se truncan.
+Propuesta:
+  TryGetProperty + validación de tipo en todos los campos; acumular fragmentos
+  hasta EndOfMessage antes de parsear; descartar lo que no parsee sin tocar estado.
+Complejidad: media — cambio en el cliente C# (recompilar).
+Estado: PENDIENTE
+
+MEJORA-26: Envío WebSocket serializado en el cliente (G-18)
+-----------------------------------------------------------
+Problema:
+  El heartbeat (cada 3s) y los envíos de login/actividad hacen SendAsync
+  concurrentemente sobre el mismo ClientWebSocket, que NO permite dos SendAsync
+  simultáneos → InvalidOperationException intermitente y reportes de error falsos.
+Propuesta:
+  Serializar todos los SendAsync con un SemaphoreSlim(1,1) en EnviarAsync.
+  Además: cerrar (Close) la VentanaDesconexion en vez de solo Hide; disponer
+  el ActivityMonitor en OnClosed; usar File.Replace atómico en AutoUpdater (G-20).
+Complejidad: baja-media — cambio en el cliente C# (recompilar).
+Estado: PENDIENTE
+
+MEJORA-27: Eliminar código muerto (G-4, G-20, G-10)
+---------------------------------------------------
+Problema:
+  - endpoints.py: POST /terminales/registrar usa Terminal(nombre=...) que LANZA
+    (nombre es @property, la columna es nombre_red). Código muerto roto.
+  - main.py:1422-1429: if alumno is None duplicado (el 2do es inalcanzable).
+  - cliente: _codigosPrueba y ValidarOffline son código muerto con datos de
+    prueba embebidos en el binario de producción.
+Propuesta:
+  Eliminar o corregir cada uno. Si /terminales/registrar es legacy (el cliente
+  registra por WebSocket), eliminar el endpoint; si se conserva, usar nombre_red.
+Complejidad: muy baja.
+Estado: PENDIENTE
+
+MEJORA-28: Manejo correcto de errores HTTP en limpiar_todo (G-10)
+-----------------------------------------------------------------
+Problema:
+  main.py:788 hace `return {...}, 500` — FastAPI NO interpreta la tupla como
+  status 500; serializa [dict, 500] con status 200. El panel recibe 200 con
+  cuerpo array inesperado en caso de error.
+Propuesta:
+  Usar JSONResponse(status_code=500, content={...}) o raise HTTPException(500).
+Complejidad: muy baja.
+Estado: PENDIENTE
+
+MEJORA-29: Detección de colisión de hostname entre terminales (G-9)
+-------------------------------------------------------------------
+Problema:
+  Si dos kioscos reportan el mismo hostname (clonación de imagen Windows), el
+  segundo "hello" sobrescribe la conexión del primero en el manager; comandos
+  pueden ir a la PC equivocada. También es vector de suplantación.
+Propuesta:
+  Detectar colisión en actualizar_id (rechazar/desambiguar) y/o vincular el
+  hostname a la IP TCP real ya validada. Alertar al admin ante duplicados.
+Complejidad: media.
+Estado: PENDIENTE

@@ -1,6 +1,49 @@
 PENDIENTES — Control Biblioteca UNASAM
-Fecha última actualización: 2026-05-15
+Fecha última actualización: 2026-06-10
 =========================================================
+
+NOTA: el detalle técnico de seguridad está en VULNERABILIDADES.txt (categorías
+A–G) y las mejoras en MEJORAS.txt. Este archivo es la lista operativa corta.
+
+═════════════════════════════════════════════════════════
+  ACCIONES RÁPIDAS DE ALTO IMPACTO (4to análisis, 2026-06-10)
+  Sin recompilar el cliente — solo servidor/panel:
+═════════════════════════════════════════════════════════
+[ ] G-3  Escapar campos en _renderSospechas (app.js:3478-3517) — XSS que puede
+         robar el token JWT de sessionStorage. LO MÁS URGENTE.
+[ ] G-1  Autenticar/validar POST /api/offline-sync (main.py:1557) — hoy
+         cualquiera en la LAN inyecta historial/sesiones falsas.
+[ ] G-2  Conservar identidad + verificar rol en comandos WS destructivos
+         (main.py:1337-1532) — un admin básico puede apagar PCs / bloqueo global.
+[ ] G-4  /terminales/registrar: Terminal(nombre=) → Terminal(nombre_red=)
+         (endpoints.py:328) — hoy lanza TypeError al crear terminal nueva.
+[ ] G-12 Cierre masivo deja terminales en estado "disponible" → usar "bloqueado"
+         (endpoints.py:1337, 1368).
+[ ] G-6  broadcast del WS: iterar list(...) para evitar RuntimeError.
+[ ] G-11 Rol en aprobar/descartar sospecha (endpoints.py:766-814) si aplica.
+[ ] G-13 Tope máximo de limit en listados (DoS por limit gigante).
+[ ] BUG-1 datetime.utcnow() → datetime.now() en cerrar_todas (endpoints.py:1330).
+[ ] BUG-2 actualizar_maestro no asigna id_facultad y BORRA escuela al editar solo
+         facultad (endpoints.py:1916).
+[ ] BUG-5 listar_actividad excluye último segundo del día (endpoints.py:861).
+[ ] BUG-3 Validación de password en el panel (6 → 8 + mayúscula + número).
+[ ] BUG-6 Enmascarar DNI en la consola del panel (app.js:1674-1678).
+[ ] BUG-7 Validar rango de hora en mensajes programados (main.py:1685).
+[ ] F-5  Rol superadmin en POST/PUT/DELETE /api/mensajes.
+[ ] F-2  /api/server-info: evaluar si exigir auth (bajo, kiosco lo usa).
+[ ] F-6  min_length en backdoor_pin/offline_pin (Pydantic).
+
+REQUIEREN RECOMPILAR EL CLIENTE C# (coordinar con despliegue en biblioteca):
+[ ] G-5  _verificandoReconexion atascado → PC no bloqueable. CRÍTICO.
+[ ] G-16 _dniPendiente sucio entre alumnos → sesión con DNI equivocado.
+[ ] G-17 Validación robusta de mensajes WS + reensamblar fragmentos.
+[ ] G-18 SendAsync serializado + cerrar VentanaDesconexion + disponer monitor.
+[ ] G-19 Rate limiting de PIN + enmascarar DNI en logs locales.
+[ ] G-20 File.Replace atómico en AutoUpdater; eliminar código muerto.
+[ ] E-2/E-3/E-4 (ya documentados): firma/hash del .exe, comandos firmados/TLS,
+         PIN backdoor no hardcodeado.
+
+
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -20,18 +63,13 @@ DEPLOY EN BIBLIOTECA (hacer antes de poner en producción)
 SEGURIDAD
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[ ] WebSocket /ws/admin sin autenticación [CRÍTICO]
-    — Confirmar en red real si ws.send() puede bloquear terminales
-      sin estar logueado (prueba pendiente cuando haya PCs conectadas)
-    — Una vez confirmado: agregar validación de JWT token al conectar
-    — Archivo: server/main.py — endpoint /ws/admin
-    — Ver detalle completo en VULNERABILIDADES.txt
+[x] WebSocket /ws/admin sin autenticación — RESUELTO (A-1, valida JWT al conectar)
+[x] Rate limiting en endpoints públicos del kiosco — RESUELTO (E-6, por IP)
 
-[ ] Endpoints públicos del kiosco — considerar rate limiting [BAJO]
-    — POST /api/alumnos/validar
-    — POST /api/sesiones/iniciar
-    — POST /api/sesiones/{id}/cerrar
-    — GET  /api/admin/bans/check/{dni}
+[ ] F-4: POST /api/sesiones/iniciar y POST /api/sesiones/{id}/cerrar siguen SIN
+    autenticación (el panel los llama con JWT pero el endpoint lo ignora; el
+    cliente C# no los usa — van por WebSocket). Decidir: agregar auth o eliminar
+    si son legacy. Ver VULNERABILIDADES.txt F-4.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -52,6 +90,21 @@ MEJORAS PENDIENTES
 COMPLETADO RECIENTEMENTE (referencia)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+[x] (2026-06-10) Persistencia de sesión del panel: F5 ya no cierra sesión
+    (token en sessionStorage + /auth/me + restaura pestaña activa)
+[x] (2026-06-10) Backup SQL corregido: ahora incluye datos (no solo estructura)
+[x] (2026-06-10) Historial de bans (solo superadmin) + botón banear en
+    incidencias graves + tabla de incidencias responsive
+[x] (2026-06-10) Ícono del administrador (sidebar + favicon + login) y textos
+    del login del panel editables con valores por defecto
+[x] (2026-06-10) Flujo offline rediseñado: alumno ingresa datos normal, encargado
+    activa con atajo+PIN (ver docs/CASOS_DE_USO.txt C-4)
+[x] WebSocket /ws/admin con autenticación JWT (A-1)
+[x] Rate limiting de login y de endpoints del kiosco por IP (B-3, E-6, E-7)
+[x] Headers de seguridad HTTP, enmascarado de PII en logs, complejidad de
+    contraseñas en el servidor (B-4, B-8, B-9)
+[x] Límite de tamaño en importaciones Excel (C-3, E-10)
+[x] GET/PUT /api/config/backdoor restringido a superadmin (F-3)
 [x] Migración completa de SQLite a MySQL
 [x] Renombrar roles: admin→superadmin, encargado→admin
 [x] Sistema de incidencias (backend + frontend)
