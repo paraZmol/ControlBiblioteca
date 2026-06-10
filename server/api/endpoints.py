@@ -125,6 +125,19 @@ async def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), d
     return LoginResponse(access_token=token)
 
 
+@router.get("/auth/me")
+async def usuario_actual(
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Devuelve los datos del usuario del token. Sirve para validar la sesión
+    al recargar el panel (F5) sin pedir login de nuevo."""
+    return {
+        "username": admin.username,
+        "rol": admin.rol,
+        "nombre_completo": admin.nombre_completo,
+    }
+
+
 @router.post("/auth/registro", status_code=201)
 async def registrar_usuario(
     datos: UsuarioCrear,

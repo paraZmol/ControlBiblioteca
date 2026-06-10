@@ -4,6 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control Biblioteca UNASAM - Panel de Administración</title>
+    <link id="app-favicon" rel="icon" type="image/png" href="data:,">
+    <style id="anti-flash">
+        /* Si hay sesión guardada, ocultar el login desde el inicio para evitar
+           el parpadeo mientras se valida el token. La clase se quita si la
+           validación falla (entonces sí se muestra el login). */
+        html.con-sesion #loginPanel { display: none !important; }
+    </style>
+    <script>
+        // Corre antes de pintar el body: marca el estado para evitar el flash.
+        if (sessionStorage.getItem('panel_token')) {
+            document.documentElement.classList.add('con-sesion');
+        }
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -100,7 +113,7 @@
         <!-- Logo -->
         <div>
             <div class="sidebar-logo-area">
-                <div class="sidebar-logo-badge">U</div>
+                <div id="sidebar-logo-badge" class="sidebar-logo-badge">U</div>
                 <div class="sidebar-logo-text">
                     <h1>UNASAM</h1>
                     <p>Biblioteca_OS</p>
@@ -960,9 +973,9 @@
                             <!-- Logo de la aplicación -->
                             <section class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm">
                                 <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2 mb-1">
-                                    <i class="ph ph-image text-indigo-500"></i> Logo de la Aplicación
+                                    <i class="ph ph-image text-indigo-500"></i> Ícono del Administrador
                                 </h3>
-                                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">Aparece en el sidebar del panel y en la pantalla de login.</p>
+                                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">Reemplaza el ícono del panel: aparece en el sidebar, en la pestaña del navegador y en la pantalla de login.</p>
 
                                 <!-- Preview actual -->
                                 <div class="flex items-center gap-4 mb-5 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
@@ -989,23 +1002,23 @@
                             <!-- Textos del login -->
                             <section class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm">
                                 <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2 mb-1">
-                                    <i class="ph ph-text-aa text-indigo-500"></i> Textos del Login
+                                    <i class="ph ph-text-aa text-indigo-500"></i> Textos del Login del Panel Administrador
                                 </h3>
-                                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">Personaliza el título y subtítulo que aparecen en la pantalla de inicio de sesión.</p>
+                                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">Personaliza el título, subtítulo y pie de página de la pantalla de inicio de sesión del panel administrador. No afecta al cliente kiosco.</p>
                                 <div class="flex flex-col gap-3">
                                     <div>
                                         <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Título principal</label>
-                                        <input id="cfg-login-titulo" type="text" placeholder="Control Biblioteca"
+                                        <input id="cfg-login-titulo" type="text" value="Control Biblioteca"
                                             class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
                                     </div>
                                     <div>
                                         <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Subtítulo</label>
-                                        <input id="cfg-login-subtitulo" type="text" placeholder="UNASAM — PANEL DE ADMINISTRACIÓN"
+                                        <input id="cfg-login-subtitulo" type="text" value="UNASAM — PANEL DE ADMINISTRACIÓN"
                                             class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
                                     </div>
                                     <div>
                                         <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Pie de página</label>
-                                        <input id="cfg-login-footer" type="text" placeholder="© 2026 UNASAM — Dirección de Biblioteca Central"
+                                        <input id="cfg-login-footer" type="text" value="© 2026 UNASAM — Dirección de Biblioteca Central"
                                             class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
                                     </div>
                                     <p id="cfg-app-error" class="text-rose-500 text-xs min-h-4"></p>
@@ -1669,6 +1682,9 @@ function switchTab(tab) {
     if (tab === 'incidencias')   switchSubtabInc('inc');
     if (tab === 'configuracion') switchSubtabCfg(_rolServidor === 'superadmin' ? 'actividad' : 'backdoor');
     if (tab === 'actividad')     cargarActividad();
+
+    // Recordar la pestaña activa para sobrevivir a F5
+    try { sessionStorage.setItem('panel_tab', tab); } catch (e) {}
 }
 </script>
 </body>
