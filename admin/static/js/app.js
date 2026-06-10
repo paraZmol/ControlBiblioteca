@@ -310,62 +310,13 @@ async function login() {
         const data = await res.json();
 
         token = data.access_token;
-
-        _sesionExpirada = false;  // nueva sesión válida: rearmar el aviso de expiración
-
-        // Decodificar rol del servidor desde el JWT (sin verificar firma — solo lectura UI)
-        try {
-            const payload = JSON.parse(atob(token.split('.')[1]));
-            _rolServidor = payload.rol || 'admin';
-        } catch(e) { _rolServidor = 'admin'; }
-
-        document.getElementById('usuarioActual').textContent = username;
-        const rolEl = document.getElementById('usuarioRol');
-        if (rolEl) rolEl.textContent = _rolServidor === 'superadmin' ? 'Super Admin' : 'Admin';
-
-        document.getElementById('loginPanel').style.display  = 'none';
-
-        document.getElementById('dashboard').style.display   = 'flex';
-
-        document.body.classList.remove('login-screen');
+        sessionStorage.setItem('panel_token', token);  // persistir para sobrevivir a F5
 
         btn.disabled = false;
-
         btn.textContent = 'Iniciar Sesión';
 
-
-
-        _aplicarRol(); // aplica visibilidad según rol del JWT
-
-        _aplicarConfigApp(); // aplica logo y textos personalizados si existen
-        _poblarAnios();      // popula selector de año en historial
-        cargarSospechas();   // carga badge de sospechas pendientes
-
-
-
-        // Obtener y mostrar IP real del servidor
-
-        await obtenerYMostrarIpServidor();
-
-
-
+        await _entrarDashboard(username);
         addLog('activity', `Login exitoso como '${username}'`);
-
-        addLog('activity', `API: ${API_BASE}`);
-
-        addLog('activity', `WS: ${WS_BASE}/ws/admin`);
-
-        cargarDashboard();
-
-        conectarWebSocket();
-
-        setInterval(cargarDashboard, 15000);
-
-        _cargarResumenIncidencias();
-        _cargarEventosMini();
-
-        setInterval(_cargarResumenIncidencias, 60000);
-        setInterval(_cargarEventosMini, 30000);
 
     } catch (e) {
 
@@ -379,6 +330,82 @@ async function login() {
 
     }
 
+}
+
+// Evita que los intervalos de refresco se dupliquen al re-entrar al dashboard
+let _intervalosDashboard = false;
+
+// Lógica común de entrada al dashboard, compartida por login() y _restaurarSesion()
+async function _entrarDashboard(username) {
+    _sesionExpirada = false;  // sesión válida: rearmar el aviso de expiración
+
+    // Decodificar rol del servidor desde el JWT (sin verificar firma — solo lectura UI)
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        _rolServidor = payload.rol || 'admin';
+    } catch(e) { _rolServidor = 'admin'; }
+
+    document.getElementById('usuarioActual').textContent = username;
+    const rolEl = document.getElementById('usuarioRol');
+    if (rolEl) rolEl.textContent = _rolServidor === 'superadmin' ? 'Super Admin' : 'Admin';
+
+    document.getElementById('loginPanel').style.display = 'none';
+    document.getElementById('dashboard').style.display  = 'flex';
+    document.body.classList.remove('login-screen');
+
+    _aplicarRol(); // aplica visibilidad según rol del JWT
+    _aplicarConfigApp(); // aplica logo y textos personalizados si existen
+    _poblarAnios();      // popula selector de año en historial
+    cargarSospechas();   // carga badge de sospechas pendientes
+
+    await obtenerYMostrarIpServidor();
+
+    addLog('activity', `API: ${API_BASE}`);
+    addLog('activity', `WS: ${WS_BASE}/ws/admin`);
+
+    cargarDashboard();
+    conectarWebSocket();
+    _cargarResumenIncidencias();
+    _cargarEventosMini();
+
+    // Registrar los intervalos una sola vez por carga de página
+    if (!_intervalosDashboard) {
+        _intervalosDashboard = true;
+        setInterval(cargarDashboard, 15000);
+        setInterval(_cargarResumenIncidencias, 60000);
+        setInterval(_cargarEventosMini, 30000);
+    }
+
+    // Restaurar la pestaña donde estaba el usuario antes del F5
+    const tabGuardada = sessionStorage.getItem('panel_tab');
+    if (tabGuardada && typeof switchTab === 'function') switchTab(tabGuardada);
+}
+
+// Al recargar la página (F5): si hay un token guardado, validarlo y entrar
+// directo al dashboard sin pedir login de nuevo.
+async function _restaurarSesion() {
+    const guardado = sessionStorage.getItem('panel_token');
+    if (!guardado) { document.documentElement.classList.remove('con-sesion'); return; }
+    token = guardado;
+
+    // Validar el token contra el servidor antes de confiar en él
+    try {
+        const res = await fetch(`${API_BASE}/auth/me`, { headers: authHeaders() });
+        if (!res.ok) {
+            // Token inválido/expirado: limpiar y mostrar el login
+            token = null;
+            sessionStorage.removeItem('panel_token');
+            document.documentElement.classList.remove('con-sesion');
+            return;
+        }
+        const me = await res.json();
+        await _entrarDashboard(me.username || '');
+    } catch (e) {
+        // Sin conexión u otro error: mostrar el login para que reintente
+        token = null;
+        sessionStorage.removeItem('panel_token');
+        document.documentElement.classList.remove('con-sesion');
+    }
 }
 
 
@@ -420,6 +447,8 @@ async function obtenerYMostrarIpServidor() {
 function logout() {
 
     token = null;
+    sessionStorage.removeItem('panel_token');  // limpiar token persistido
+    document.documentElement.classList.remove('con-sesion');  // login visible al recargar
 
     if (wsAdmin) { wsAdmin.onclose = null; wsAdmin.close(); wsAdmin = null; }
 
@@ -465,8 +494,10 @@ function _sesionVencida() {
         const resp = await _fetchOriginal(recurso, opciones);
         try {
             const url = (typeof recurso === 'string') ? recurso : (recurso && recurso.url) || '';
-            const esLogin = url.includes('/auth/login');
-            if (resp.status === 401 && token && !esLogin) {
+            // /auth/login y /auth/me manejan su propio 401 (login fallido o token
+            // expirado al restaurar sesión) — no deben disparar el aviso global.
+            const esAuth = url.includes('/auth/login') || url.includes('/auth/me');
+            if (resp.status === 401 && token && !esAuth) {
                 _sesionVencida();
             }
         } catch (_) { /* nunca romper la petición por el interceptor */ }
@@ -3226,23 +3257,32 @@ const _CFG_TITULO_KEY  = 'cfg_app_titulo';
 const _CFG_SUBTITULO_KEY = 'cfg_app_subtitulo';
 const _CFG_FOOTER_KEY  = 'cfg_app_footer';
 
+// Textos por defecto del login — se usan si el campo se deja vacío
+const _CFG_TITULO_DEFAULT    = 'Control Biblioteca';
+const _CFG_SUBTITULO_DEFAULT = 'UNASAM — PANEL DE ADMINISTRACIÓN';
+const _CFG_FOOTER_DEFAULT    = '© 2026 UNASAM — Dirección de Biblioteca Central';
+
 function _aplicarConfigApp() {
     const logo      = localStorage.getItem(_CFG_LOGO_KEY);
     const titulo    = localStorage.getItem(_CFG_TITULO_KEY);
     const subtitulo = localStorage.getItem(_CFG_SUBTITULO_KEY);
     const footer    = localStorage.getItem(_CFG_FOOTER_KEY);
 
-    // Logo sidebar
-    const sidebarIconWrap = document.querySelector('.sidebar .flex.items-center.gap-3 i.ph-books')?.parentElement?.parentElement;
-    if (logo && sidebarIconWrap) {
-        const existing = sidebarIconWrap.querySelector('img.cfg-logo-sidebar');
-        if (!existing) {
-            const img = document.createElement('img');
-            img.className = 'cfg-logo-sidebar w-8 h-8 rounded-lg object-contain';
-            sidebarIconWrap.querySelector('i')?.replaceWith(img);
-        }
-        sidebarIconWrap.querySelector('img.cfg-logo-sidebar').src = logo;
+    // Logo sidebar — reemplaza la "U" por la imagen
+    const badgeEl = document.getElementById('sidebar-logo-badge');
+    if (logo && badgeEl) {
+        badgeEl.innerHTML = `<img src="${logo}" class="w-full h-full object-contain rounded-lg" alt="Logo">`;
+        badgeEl.style.background = 'transparent';
+        badgeEl.style.padding = '2px';
+    } else if (!logo && badgeEl) {
+        badgeEl.innerHTML = 'U';
+        badgeEl.style.background = '';
+        badgeEl.style.padding = '';
     }
+
+    // Favicon
+    const faviconEl = document.getElementById('app-favicon');
+    if (logo && faviconEl) faviconEl.href = logo;
 
     // Logo login
     const loginIconWrap = document.querySelector('.login-icon-wrap');
@@ -3250,13 +3290,13 @@ function _aplicarConfigApp() {
         loginIconWrap.innerHTML = `<img src="${logo}" class="w-12 h-12 rounded-xl object-contain" alt="Logo">`;
     }
 
-    // Textos login
+    // Textos login — usa el guardado o el default, nunca queda en blanco
     const loginTitle = document.querySelector('.login-title');
     const loginSub   = document.querySelector('.login-subtitle');
     const loginFoot  = document.querySelector('.login-footer p');
-    if (titulo    && loginTitle) loginTitle.textContent = titulo;
-    if (subtitulo && loginSub)   loginSub.innerHTML     = subtitulo;
-    if (footer    && loginFoot)  loginFoot.innerHTML    = footer;
+    if (loginTitle) loginTitle.textContent = titulo    || _CFG_TITULO_DEFAULT;
+    if (loginSub)   loginSub.textContent   = subtitulo || _CFG_SUBTITULO_DEFAULT;
+    if (loginFoot)  loginFoot.textContent  = footer    || _CFG_FOOTER_DEFAULT;
 }
 
 function _cargarCamposConfigApp() {
@@ -3306,15 +3346,22 @@ function guardarLogo() {
 }
 
 function guardarTextosApp() {
-    const titulo    = document.getElementById('cfg-login-titulo').value.trim();
-    const subtitulo = document.getElementById('cfg-login-subtitulo').value.trim();
-    const footer    = document.getElementById('cfg-login-footer').value.trim();
-    const errEl     = document.getElementById('cfg-app-error');
+    const errEl = document.getElementById('cfg-app-error');
     errEl.textContent = '';
-    if (!titulo && !subtitulo && !footer) { errEl.textContent = 'Completa al menos un campo'; return; }
-    if (titulo)    localStorage.setItem(_CFG_TITULO_KEY, titulo);
-    if (subtitulo) localStorage.setItem(_CFG_SUBTITULO_KEY, subtitulo);
-    if (footer)    localStorage.setItem(_CFG_FOOTER_KEY, footer);
+
+    // Si un campo se deja vacío, vuelve al texto por defecto (nunca queda en blanco)
+    const titulo    = document.getElementById('cfg-login-titulo').value.trim()    || _CFG_TITULO_DEFAULT;
+    const subtitulo = document.getElementById('cfg-login-subtitulo').value.trim() || _CFG_SUBTITULO_DEFAULT;
+    const footer    = document.getElementById('cfg-login-footer').value.trim()    || _CFG_FOOTER_DEFAULT;
+
+    // Reflejar los defaults aplicados en los inputs
+    document.getElementById('cfg-login-titulo').value    = titulo;
+    document.getElementById('cfg-login-subtitulo').value = subtitulo;
+    document.getElementById('cfg-login-footer').value    = footer;
+
+    localStorage.setItem(_CFG_TITULO_KEY, titulo);
+    localStorage.setItem(_CFG_SUBTITULO_KEY, subtitulo);
+    localStorage.setItem(_CFG_FOOTER_KEY, footer);
     _aplicarConfigApp();
     mostrarNotificacion('Textos actualizados correctamente', 'ok');
 }
@@ -4112,3 +4159,11 @@ async function eliminarMensaje(id) {
         await cargarMensajes();
     } catch (e) { /* silencioso */ }
 }
+
+// Al cargar la página: aplicar logo/textos personalizados a la pantalla de login,
+// rellenar los campos de Configuración, y restaurar la sesión si hay token (F5).
+document.addEventListener('DOMContentLoaded', () => {
+    _aplicarConfigApp();
+    _cargarCamposConfigApp();
+    _restaurarSesion();
+});
