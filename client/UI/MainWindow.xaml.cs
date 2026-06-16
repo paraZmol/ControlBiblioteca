@@ -518,6 +518,11 @@ namespace ControlBiblioteca.Client.UI
             _esperandoEscapes = false;
             _conteoEscapes    = 0;
 
+            // G-5: al bloquear por cualquier vía (incluido el timeout de gracia),
+            // limpiar el estado de la sesión offline para que su flag de
+            // verificación no quede colgado y la PC siga siendo bloqueable.
+            AppActual.OfflineBackdoor?.CerrarSesion();
+
             Dispatcher.Invoke(() =>
             {
                 AppActual.Security.Bloquear();
@@ -717,8 +722,14 @@ namespace ControlBiblioteca.Client.UI
                         try
                         {
                             string txtMsg = root.TryGetProperty("mensaje", out var mp) ? mp.GetString() ?? "" : "";
+                            // Duración configurable desde el panel (segundos). Fallback 5s
+                            // si el servidor es viejo y no envía el campo.
+                            int durSeg = 5;
+                            if (root.TryGetProperty("duracion_seg", out var dp) &&
+                                dp.ValueKind == JsonValueKind.Number && dp.TryGetInt32(out var d) && d > 0)
+                                durSeg = d;
                             if (!string.IsNullOrWhiteSpace(txtMsg))
-                                Dispatcher.Invoke(() => MostrarToastMensaje(txtMsg));
+                                Dispatcher.Invoke(() => MostrarToastMensaje(txtMsg, durSeg));
                         }
                         catch (Exception ex) { LogDebug($"ERROR mensaje_broadcast: {ex}"); }
                         break;
@@ -983,24 +994,108 @@ namespace ControlBiblioteca.Client.UI
         // ── Toast de mensaje programado ───────────────────────────────
 
         private System.Windows.Threading.DispatcherTimer? _toastTimer;
+        private System.Windows.Threading.DispatcherTimer? _toastFlotanteTimer;
+        private Window? _toastFlotante;
+
         private void MostrarToastMensaje(string texto, int segundos = 5)
         {
-            // Toast como overlay XAML — sin ventanas flotantes que pueden quedar atascadas
-            _toastTimer?.Stop();
-            TxtToast.Text          = texto;
-            ToastBorder.Visibility = Visibility.Visible;
             LogDebug($"[Toast] {texto}");
+            // Siempre usar una ventana flotante topmost independiente, igual que la
+            // ventana de desconexión ("tienes 3 min para guardar"). El overlay XAML
+            // interno NO se ve cuando hay sesión activa (el kiosco está oculto con
+            // Hide()), por eso los mensajes de cierre/extra no aparecían.
+            MostrarToastFlotante(texto, segundos);
+        }
 
-            _toastTimer = new System.Windows.Threading.DispatcherTimer
+        private void MostrarToastFlotante(string texto, int segundos)
+        {
+            // Cerrar el flotante anterior si seguía en pantalla
+            _toastFlotanteTimer?.Stop();
+            if (_toastFlotante != null)
+            {
+                try { _toastFlotante.Close(); } catch { }
+                _toastFlotante = null;
+            }
+
+            // Mismo estilo visual que VentanaDesconexion: borde redondeado, acento
+            // índigo, ancho FIJO (no depender de ActualWidth, que en Loaded puede ser
+            // 0 con AllowsTransparency y dejar la ventana fuera de pantalla).
+            const double ANCHO = 360;
+
+            var titulo = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+            titulo.Children.Add(new TextBlock
+            {
+                Text              = "Aviso",
+                FontSize          = 14,
+                FontWeight        = FontWeights.Bold,
+                Foreground        = new SolidColorBrush(Color.FromRgb(0x99, 0x9B, 0xF5)),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            var cuerpo = new TextBlock
+            {
+                Text         = texto,
+                FontSize     = 13,
+                Foreground   = new SolidColorBrush(Color.FromRgb(0xEE, 0xEE, 0xEE)),
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(titulo);
+            stack.Children.Add(cuerpo);
+
+            var borde = new Border
+            {
+                Background      = new SolidColorBrush(Color.FromArgb(0xEE, 0x1A, 0x1A, 0x1A)),
+                BorderBrush     = new SolidColorBrush(Color.FromRgb(0x63, 0x66, 0xF1)),
+                BorderThickness = new Thickness(2),
+                CornerRadius    = new CornerRadius(10),
+                Padding         = new Thickness(16, 14, 16, 14),
+                Child           = stack
+            };
+
+            var win = new Window
+            {
+                Title                 = "",
+                WindowStyle           = WindowStyle.None,
+                ResizeMode            = ResizeMode.NoResize,
+                AllowsTransparency    = true,
+                Background            = Brushes.Transparent,
+                Topmost               = true,
+                ShowActivated         = false,   // no robar el foco al alumno
+                ShowInTaskbar         = false,
+                Width                 = ANCHO,
+                SizeToContent         = SizeToContent.Height,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Content               = borde
+            };
+
+            // Esquina superior derecha — mismo cálculo que VentanaDesconexion,
+            // con ancho fijo así siempre cae dentro de la pantalla.
+            win.Loaded += (_, _) =>
+            {
+                var area = SystemParameters.WorkArea;
+                win.Left = area.Right - ANCHO - 16;
+                win.Top  = area.Top + 80;
+            };
+
+            _toastFlotante = win;
+            win.Show();
+
+            _toastFlotanteTimer = new System.Windows.Threading.DispatcherTimer
             {
                 Interval = TimeSpan.FromSeconds(segundos)
             };
-            _toastTimer.Tick += (_, _) =>
+            _toastFlotanteTimer.Tick += (_, _) =>
             {
-                _toastTimer.Stop();
-                ToastBorder.Visibility = Visibility.Collapsed;
+                _toastFlotanteTimer.Stop();
+                if (_toastFlotante != null)
+                {
+                    try { _toastFlotante.Close(); } catch { }
+                    _toastFlotante = null;
+                }
             };
-            _toastTimer.Start();
+            _toastFlotanteTimer.Start();
         }
 
         protected override void OnClosed(EventArgs e)
@@ -1008,6 +1103,12 @@ namespace ControlBiblioteca.Client.UI
             _loginCts?.Cancel();
             _loginCts?.Dispose();
             _toastTimer?.Stop();
+            _toastFlotanteTimer?.Stop();
+            if (_toastFlotante != null)
+            {
+                try { _toastFlotante.Close(); } catch { }
+                _toastFlotante = null;
+            }
             _wsService.Desconectar();
             base.OnClosed(e);
         }
@@ -1107,6 +1208,15 @@ namespace ControlBiblioteca.Client.UI
 
         private async Task VerificarSesionOfflineAsync(Services.OfflineBackdoor offlineBackdoor)
         {
+            // G5-6: capturar los datos de la sesión offline ANTES del Delay. Como
+            // Bloquear()/CerrarSesion() pueden nulear _dniActual en paralelo durante
+            // estos 1.5s, leerlos después produciría un payload con dni=null (que el
+            // servidor rechaza con 422 y se pierde la sincronización). Con el snapshot
+            // usamos los valores que existían al iniciar la verificación.
+            string? dniSnap    = offlineBackdoor.DniActual;
+            string? razonSnap  = offlineBackdoor.RazonActual;
+            DateTime inicioSnap = offlineBackdoor.HoraInicioActual;
+
             // Dar un momento al servidor para estabilizar la conexión WS
             await Task.Delay(1500);
 
@@ -1118,16 +1228,12 @@ namespace ControlBiblioteca.Client.UI
                 var config = Services.KioscoConfig.Leer();
                 string apiUrl = $"http://{config.ServerIp}:{config.ServerPort}";
 
-                // Obtener el DNI desde el backdoor antes de notificar (que lo limpia)
-                // Accedemos a la sesión activa a través del log — la info ya fue guardada
-                // Solo necesitamos saber el resultado de la verificación
-
                 using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(8) };
                 var payload = new
                 {
-                    dni          = offlineBackdoor.DniActual,
-                    razon        = offlineBackdoor.RazonActual,
-                    hora_inicio  = offlineBackdoor.HoraInicioActual.ToString("yyyy-MM-dd HH:mm:ss"),
+                    dni          = dniSnap,
+                    razon        = razonSnap,
+                    hora_inicio  = inicioSnap.ToString("yyyy-MM-dd HH:mm:ss"),
                     hora_fin     = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
                     terminal     = Environment.MachineName
                 };

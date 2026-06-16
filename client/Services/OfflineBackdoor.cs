@@ -360,6 +360,14 @@ namespace ControlBiblioteca.Client.Services
         // Llamado por MainWindow cuando detecta reconexión con sesión offline activa
         public void NotificarReconexion(string estadoVerificacion, string motivo)
         {
+            // G-5: SIEMPRE limpiar el flag de verificación, incluso si ya no hay
+            // sesión activa. Antes el early-return dejaba _verificandoReconexion
+            // en true para siempre cuando la sesión se cerró por otra vía (timeout
+            // de gracia/bloqueo) entre IniciarVerificacion y este punto, haciendo
+            // que HaySesionActiva nunca volviera a false y que el cliente ignorara
+            // permanentemente los comandos de bloqueo del servidor.
+            _verificandoReconexion = false;
+
             if (_dniActual == null) return;
 
             string dni      = _dniActual;
@@ -372,13 +380,15 @@ namespace ControlBiblioteca.Client.Services
 
             _dniActual             = null;
             _razonActual           = null;
-            _verificandoReconexion = false;
 
             OnReconectado?.Invoke(estadoVerificacion, motivo, inicio);
         }
 
         public void CerrarSesion()
         {
+            // G-5: limpiar también el flag de verificación al cerrar por cualquier
+            // vía, para que no quede colgado si se cierra durante una reconexión.
+            _verificandoReconexion = false;
             if (_dniActual == null) return;
             GuardarLogLocal(_dniActual, _razonActual ?? "", _horaInicio, DateTime.Now, "cerrada_manual");
             App.AppLog($"[Offline] Sesión cerrada manualmente — DNI:{_dniActual}");

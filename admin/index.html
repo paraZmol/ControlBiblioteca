@@ -27,7 +27,7 @@
         }
     </script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link rel="stylesheet" href="static/css/style.css?v=23">
+    <link rel="stylesheet" href="static/css/style.css?v=33">
     <style>
         ::-webkit-scrollbar { width:6px; height:6px; }
         .dark ::-webkit-scrollbar-track { background:transparent; }
@@ -78,7 +78,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
                         </svg>
                     </span>
-                    <input type="text" id="username" placeholder="Usuario de red" class="login-input" autocomplete="username">
+                    <input type="text" id="username" placeholder="Usuario de red" class="login-input" autocomplete="username" aria-label="Usuario de red">
                 </div>
             </div>
             <div class="login-field">
@@ -89,7 +89,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
                         </svg>
                     </span>
-                    <input type="password" id="password" placeholder="••••••••" class="login-input" autocomplete="current-password">
+                    <input type="password" id="password" placeholder="••••••••" class="login-input" autocomplete="current-password" aria-label="Contraseña">
                 </div>
             </div>
             <button id="btnLogin" class="login-btn" onclick="login()">Iniciar Sesión</button>
@@ -125,7 +125,7 @@
                 <button onclick="switchTab('monitoreo')" id="nav-monitoreo"
                     class="nav-item nav-item-active">
                     <i class="ph ph-cpu"></i>
-                    <span>Nodos</span>
+                    <span>Monitoreo</span>
                 </button>
 
                 <button onclick="switchTab('actividad')" id="nav-actividad"
@@ -199,11 +199,11 @@
                     <p id="usuarioRol" class="sidebar-user-rol"></p>
                 </div>
                 <div class="flex items-center gap-0.5">
-                    <button id="btnTema" onclick="toggleTema()" title="Cambiar tema"
+                    <button id="btnTema" onclick="toggleTema()" title="Cambiar tema" aria-label="Cambiar tema claro u oscuro"
                         class="p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors">
                         <i id="iconTema" class="ph ph-sun text-base"></i>
                     </button>
-                    <button onclick="logout()" title="Cerrar Sesión"
+                    <button onclick="logout()" title="Cerrar Sesión" aria-label="Cerrar sesión"
                         class="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-500/10 text-zinc-400 hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
                         <i class="ph ph-sign-out text-base"></i>
                     </button>
@@ -217,7 +217,7 @@
 
         <!-- Top Header — solo visible en móvil para hamburger -->
         <header class="top-header-mobile">
-            <button class="btn-hamburger" onclick="abrirSidebar()" title="Menú">
+            <button class="btn-hamburger" onclick="abrirSidebar()" title="Menú" aria-label="Abrir menú">
                 <i class="ph ph-list"></i>
             </button>
             <span id="pageTitle" class="top-header-title"></span>
@@ -308,8 +308,8 @@
                     <div class="bento-card mon-grid-card" id="seccionEquipos">
                         <div class="bento-card-hdr">
                             <div class="bento-card-ttl">
-                                <i class="ph ph-chart-network bento-icon-indigo"></i>
-                                Mapa de Nodos (PCs)
+                                <i class="ph ph-desktop bento-icon-indigo"></i>
+                                Equipos
                             </div>
                             <span class="bento-badge" id="badgeEquipos"></span>
                         </div>
@@ -367,7 +367,7 @@
                             <button class="btn-act pdf" onclick="exportarPdfFiltrado()">
                                 <i class="ph ph-file-pdf"></i> PDF
                             </button>
-                            <button class="btn-act import" id="btnImportarExcel" onclick="abrirImportarExcel()" style="display:none">
+                            <button class="btn-act import bd-solo-superadmin" id="btnImportarExcel" onclick="abrirImportarExcel()">
                                 <i class="ph ph-upload-simple"></i> Importar Historial
                             </button>
                             <input id="inputImportarExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="ejecutarImportacion(this)">
@@ -885,6 +885,10 @@
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-lock-key"></i> Backdoor
                         </button>
+                        <button id="subtab-btn-cfg-auditoria" onclick="switchSubtabCfg('auditoria')"
+                            class="subtab-btn bd-solo-superadmin px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-clipboard-text"></i> Auditoría
+                        </button>
                     </div>
 
                     <!-- Panel: Actividad del Sistema -->
@@ -1169,6 +1173,38 @@
 
                             </div><!-- fin grid mensajes -->
 
+                            <!-- Duración del aviso en pantalla (global) -->
+                            <div class="flex items-center gap-3 flex-wrap mb-4">
+                                <label for="msg-duracion-min" class="text-sm font-bold text-zinc-600 dark:text-zinc-300">
+                                    Duración del aviso en pantalla
+                                </label>
+                                <div class="flex items-center gap-2">
+                                    <input id="msg-duracion-min" type="number" min="1" max="15" value="1"
+                                        class="w-20 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white">
+                                    <span class="text-sm text-zinc-500 dark:text-zinc-400">minuto(s)</span>
+                                </div>
+                                <button onclick="guardarDuracionMensaje()" type="button"
+                                    class="db-btn db-btn-new inline-flex items-center gap-2 text-sm">
+                                    <i class="ph ph-floppy-disk"></i> Guardar
+                                </button>
+                                <span class="text-xs text-zinc-400 dark:text-zinc-500">
+                                    Cuánto tiempo permanece el aviso en cada PC (entre 1 y 15 minutos).
+                                </span>
+                                <p id="msg-duracion-status" class="text-xs min-h-4 ml-auto"></p>
+                            </div>
+
+                            <!-- Probar el aviso en vivo (no guarda nada) -->
+                            <div class="flex items-center gap-3 flex-wrap mb-6">
+                                <button onclick="probarMensajeAhora()" type="button"
+                                    class="db-btn inline-flex items-center gap-2 text-sm border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300">
+                                    <i class="ph ph-paper-plane-tilt"></i> Probar ahora
+                                </button>
+                                <span class="text-xs text-zinc-400 dark:text-zinc-500">
+                                    Envía un aviso de prueba inmediato a las PCs conectadas (usa el texto del cierre y la duración configurada).
+                                </span>
+                                <p id="msg-probar-status" class="text-xs min-h-4 ml-auto"></p>
+                            </div>
+
                         <!-- ── Atajo de Mantenimiento (solo superadmin) ── -->
                         <div class="max-w-xl" id="seccion-mantenimiento-backdoor">
                             <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
@@ -1289,6 +1325,86 @@
                         </div>
                     </div>
 
+                    <!-- Panel: Auditoría (solo superadmin) -->
+                    <div id="subtab-cfg-auditoria" style="display:none">
+                        <section class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors">
+                            <div class="flex flex-wrap items-center gap-3 mb-1">
+                                <h3 class="text-base font-bold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 mr-auto">
+                                    <i class="ph ph-clipboard-text text-lg"></i> Bitácora de Auditoría
+                                </h3>
+                                <input id="aud-usuario" type="text" maxlength="100" placeholder="Usuario"
+                                    class="act-filter-input" oninput="cargarAuditoria()">
+                                <select id="aud-accion" onchange="cargarAuditoria()" class="act-filter-input">
+                                    <option value="">Todas las acciones</option>
+                                    <option value="bloquear_terminal">Bloquear terminal</option>
+                                    <option value="desbloquear_terminal">Desbloquear terminal</option>
+                                    <option value="apagar_terminal">Apagar terminal</option>
+                                    <option value="bloquear_todas">Bloquear toda la sala</option>
+                                    <option value="banear_alumno">Banear alumno</option>
+                                    <option value="levantar_ban">Levantar ban</option>
+                                    <option value="crear_alumno">Crear estudiante</option>
+                                    <option value="editar_alumno">Editar estudiante</option>
+                                    <option value="eliminar_alumno">Eliminar estudiante</option>
+                                    <option value="importar_maestro">Importar padrón estudiantes</option>
+                                    <option value="crear_personal">Crear personal</option>
+                                    <option value="editar_personal">Editar personal</option>
+                                    <option value="eliminar_personal">Eliminar personal</option>
+                                    <option value="importar_personal">Importar personal</option>
+                                    <option value="crear_incidencia">Crear incidencia</option>
+                                    <option value="eliminar_incidencia">Eliminar incidencia</option>
+                                    <option value="aprobar_sospecha">Aprobar sospecha</option>
+                                    <option value="descartar_sospecha">Descartar sospecha</option>
+                                    <option value="agregar_proceso_ignorado">Agregar proceso ignorado</option>
+                                    <option value="quitar_proceso_ignorado">Quitar proceso ignorado</option>
+                                    <option value="eliminar_terminal">Eliminar terminal</option>
+                                    <option value="crear_mensaje">Crear mensaje</option>
+                                    <option value="editar_mensaje">Editar mensaje</option>
+                                    <option value="toggle_mensaje">Activar/desactivar mensaje</option>
+                                    <option value="eliminar_mensaje">Eliminar mensaje</option>
+                                    <option value="editar_usuario">Editar usuario (admin)</option>
+                                    <option value="crear_usuario">Crear usuario (admin)</option>
+                                    <option value="cambiar_config_backdoor">Config backdoor</option>
+                                    <option value="cambiar_config_offline">Config offline</option>
+                                    <option value="cambiar_ruta_distribucion">Ruta distribución</option>
+                                    <option value="cerrar_todas_sesiones">Cerrar todas las sesiones</option>
+                                    <option value="limpiar_historial_sesiones">Limpiar historial</option>
+                                    <option value="limpiar_todo">Limpiar todo</option>
+                                    <option value="reset_maestro">Reset maestro</option>
+                                    <option value="reset_total">Reset total</option>
+                                    <option value="backup_sql">Backup SQL</option>
+                                </select>
+                                <input id="aud-desde" type="date" class="act-filter-input" onchange="cargarAuditoria()" title="Desde">
+                                <input id="aud-hasta" type="date" class="act-filter-input" onchange="cargarAuditoria()" title="Hasta">
+                                <span id="aud-total" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
+                            </div>
+                            <p class="text-xs text-zinc-400 dark:text-zinc-500 mb-4">Registro permanente de quién hizo cada acción administrativa y cuándo. Solo visible para el superadmin.</p>
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-zinc-100 dark:border-zinc-800">
+                                <table class="tabla w-full min-w-max text-left text-sm">
+                                    <thead>
+                                        <tr class="bg-zinc-50 dark:bg-zinc-800/60 text-zinc-500 dark:text-zinc-400 text-xs uppercase tracking-wider border-b border-zinc-100 dark:border-zinc-700">
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">Fecha / Hora</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">Usuario</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">Rol</th>
+                                            <th class="px-3 py-3 font-semibold whitespace-nowrap">Acción</th>
+                                            <th class="px-3 py-3 font-semibold">Objetivo</th>
+                                            <th class="px-3 py-3 font-semibold">Detalle</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="audBody" class="divide-y divide-zinc-100 dark:divide-zinc-800"></tbody>
+                                </table>
+                            </div>
+                            <p id="sinAud" class="text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm" style="display:none">Sin registros de auditoría</p>
+                            <!-- Paginación -->
+                            <div class="flex items-center justify-between mt-3">
+                                <span id="aud-pag-info" class="text-xs text-zinc-400"></span>
+                                <div class="flex gap-2">
+                                    <button id="aud-prev" onclick="audCambiarPag(-1)" class="act-pag-btn"><i class="ph ph-caret-left"></i> Anterior</button>
+                                    <button id="aud-next" onclick="audCambiarPag(1)" class="act-pag-btn">Siguiente <i class="ph ph-caret-right"></i></button>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+
                 </div>
 
             </div>
@@ -1302,7 +1418,7 @@
 <div id="notificacion" class="notificacion"></div>
 
 <!-- MODALES (sin cambios) -->
-<div id="modal-advertencia" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+<div id="modal-advertencia" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
         <h3 id="modal-titulo" class="text-base font-bold text-zinc-900 dark:text-white mb-3">Advertencia</h3>
         <p id="modal-mensaje" class="text-sm text-zinc-500 dark:text-zinc-400 mb-5">¿Estás seguro?</p>
@@ -1313,7 +1429,7 @@
     </div>
 </div>
 
-<div id="modal-procesos-ignorados" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+<div id="modal-procesos-ignorados" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
         <div class="flex items-center justify-between mb-1">
             <h3 class="text-base font-bold text-zinc-900 dark:text-white">Procesos ignorados</h3>
@@ -1327,7 +1443,7 @@
     </div>
 </div>
 
-<div id="modal-bloqueo" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+<div id="modal-bloqueo" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content modal-bloqueo-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
         <h3 class="modal-bloqueo-titulo text-base font-bold text-zinc-900 dark:text-white mb-3">Confirmar Bloqueo</h3>
         <p id="modal-bloqueo-mensaje" class="modal-bloqueo-msg text-sm text-zinc-500 dark:text-zinc-400 mb-5"></p>
@@ -1338,7 +1454,7 @@
     </div>
 </div>
 
-<div id="modal-desbloqueo" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+<div id="modal-desbloqueo" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
         <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-lock-open text-emerald-500"></i> Desbloquear Terminal</h3>
         <p id="modal-desbloqueo-nombre" class="modal-desbloqueo-sub text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
@@ -1366,7 +1482,7 @@
     </div>
 </div>
 
-<div id="modal-nuevo-usuario" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+<div id="modal-nuevo-usuario" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
         <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-user-plus text-indigo-500"></i> Nuevo Usuario</h3>
         <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Registra manualmente un alumno, docente, egresado u otro usuario del centro de cómputo.</p>
@@ -1388,7 +1504,7 @@
     </div>
 </div>
 
-<div id="modal-maestro" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+<div id="modal-maestro" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
         <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-pencil text-amber-500"></i> Editar Alumno</h3>
         <p id="modal-maestro-dni" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
@@ -1410,7 +1526,7 @@
 
 
 <!-- MODAL NUEVO PERSONAL -->
-<div id="modal-nuevo-personal" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+<div id="modal-nuevo-personal" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
         <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-identification-badge text-indigo-500"></i> Nuevo Personal</h3>
         <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Registra un docente, administrativo u otro trabajador de la universidad.</p>
@@ -1435,7 +1551,7 @@
 </div>
 
 <!-- MODAL EDITAR PERSONAL -->
-<div id="modal-editar-personal" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+<div id="modal-editar-personal" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
         <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-pencil text-amber-500"></i> Editar Personal</h3>
         <p id="ep-dni-label" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
@@ -1457,7 +1573,7 @@
     </div>
 </div>
 
-<div id="modal-ban" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+<div id="modal-ban" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
         <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-prohibit text-rose-500"></i> Banear Usuario</h3>
         <p id="modal-ban-nombre" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
@@ -1474,7 +1590,7 @@
 </div>
 
 <!-- MODAL REGISTRAR INCIDENCIA -->
-<div id="modal-incidencia" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+<div id="modal-incidencia" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-amber-200 dark:border-amber-800/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
         <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-warning-circle text-amber-500"></i> Registrar Incidencia</h3>
         <p id="modal-incidencia-nombre" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
@@ -1501,7 +1617,7 @@
 </div>
 
 
-<script src="static/js/app.js?v=22"></script>
+<script src="static/js/app.js?v=25"></script>
 <script>
 // Tema
 (function() {
@@ -1622,7 +1738,7 @@ function switchSubtabInc(sub) {
 }
 
 function switchSubtabCfg(sub) {
-    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones', 'backdoor'].forEach(s => {
+    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones', 'backdoor', 'auditoria'].forEach(s => {
         const panel = document.getElementById('subtab-cfg-' + s);
         const btn   = document.getElementById('subtab-btn-cfg-' + s);
         if (!panel || !btn) return;
@@ -1648,6 +1764,7 @@ function switchSubtabCfg(sub) {
         if (typeof cargarConfigOffline === 'function') cargarConfigOffline();
         if (typeof cargarMensajes      === 'function') cargarMensajes();
     }
+    if (sub === 'auditoria' && typeof cargarAuditoria === 'function') cargarAuditoria();
 }
 
 function switchTab(tab) {

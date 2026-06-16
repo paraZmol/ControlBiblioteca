@@ -1840,3 +1840,245 @@ PRIORIDAD DE RESOLUCIÓN RECOMENDADA (rápidas y de alto impacto primero):
 
   NOTA: G-5 es crítico porque puede dejar una PC imposible de bloquear remotamente.
   Abordarlo en la próxima recompilación junto con el flujo offline modificado hoy.
+
+
+  ══════════════════════════════════════════════════════════
+  CORRECCIONES APLICADAS — FASE 1 (2026-06-10, mismo día)
+  ══════════════════════════════════════════════════════════
+  Se corrigieron los críticos que NO requieren recompilar el cliente. Verificado
+  que el servidor compila (py_compile OK) tras los cambios.
+
+  G-3  ✅ RESUELTA — admin/static/js/app.js _renderSospechas:
+       Todos los campos (nombre_alumno, dni, detalle, estado, tipoLbl, revisado_por)
+       ahora pasan por escapeHtml(). Los onclick inline usan un escape específico
+       para contexto de atributo JS (jsAttr) sobre pcSosp/dni/fecha. Cierra el
+       vector XSS que permitía robar el token de sessionStorage.
+
+  G-1  ✅ RESUELTA — server/main.py offline_sync:
+       (a) valida formato del DNI (8 dígitos) antes de procesar;
+       (b) YA NO crea terminales nuevas — si la terminal no existe, rechaza con
+           estado "terminal_desconocida" (evita terminales fantasma sin auth).
+       Sigue sin auth de admin por diseño (lo llama el kiosco), pero ahora la
+       superficie de abuso está acotada.
+
+  G-7  ✅ RESUELTA — _OfflineSyncReq ahora tiene max_length en todos los campos
+       (dni=8, razon=200, hora_inicio/fin=25, terminal=120). Import de Field añadido.
+
+  G-8  ✅ ACLARADA (no era bug) — Se verificó el flujo del cliente
+       (MainWindow.xaml.cs VerificarSesionOfflineAsync): el cliente envía hora_fin
+       al RECONECTAR pero su intención es CONTINUAR la sesión, no cerrarla. Por eso
+       la sesión se mantiene "activa" a propósito y hora_fin se ignora; se cerrará
+       por el flujo normal (logout/bloqueo/desconexión). Documentado en el código.
+
+  G-2  ✅ RESUELTA PARCIAL (auditoría) — server/main.py websocket_admin:
+       (a) se conserva la identidad del operador (op_username, op_rol) tras
+           autenticar — antes se descartaba;
+       (b) auditoría [AUDIT] con username y rol real en bloquear_terminal,
+           remote_command (shutdown) y bloquear_todas → cierra C-6 para el canal WS:
+           ahora SÍ queda registrado quién apagó/bloqueó qué.
+       DECISIÓN DE NEGOCIO (2026-06-10): bloquear/desbloquear/apagar PC y bloquear
+       toda la sala quedan disponibles para AMBOS roles (admin y superadmin) — son
+       funciones operativas del día a día. NO se restringe por rol; la trazabilidad
+       la da la auditoría. (La distinción de rol queda como opción futura si se
+       quisiera endurecer.)
+
+  G-4  ✅ RESUELTA — server/api/endpoints.py:328
+       Terminal(nombre=...) → Terminal(nombre_red=...). El endpoint
+       /terminales/registrar ya no lanza TypeError al crear una terminal nueva.
+
+  G-12 ✅ RESUELTA — server/api/endpoints.py cerrar_todas_sesiones y
+       limpiar_sesiones: estado="disponible" → "bloqueado" (coherente con el resto
+       del sistema; las PCs vuelven a la pantalla de login).
+
+  G-6  ✅ RESUELTA — server/core/websocket_manager.py:
+       broadcast y _broadcast_admins ahora iteran sobre list(...) (copia
+       defensiva) → no más RuntimeError "dict/list changed size during iteration"
+       si una terminal/admin conecta o desconecta durante el envío.
+
+  BUG-1 ✅ RESUELTA (de yapa, estaba en el mismo bloque) —
+       endpoints.py cerrar_todas_sesiones: datetime.utcnow() → datetime.now()
+       (línea ~1330). Las sesiones cerradas en masa ya no quedan con desfase de 5h.
+
+  PENDIENTES TRAS FASE 1 (siguiente tanda):
+    - Bugs funcionales: BUG-2 (id_facultad), BUG-3 (password panel), BUG-5
+      (filtro fecha actividad), BUG-6 (DNI en consola), BUG-7 (rango hora msgs).
+    - Servidor: F-5 (rol en mensajes), F-6 (min_length PIN), F-2 (server-info),
+      F-4 (sesiones REST sin auth), G-9/G-11/G-14/G-15.
+    - Cliente C# (requieren recompilar): G-5, G-16, G-17, G-18, G-19, G-20,
+      E-2, E-3, E-4.
+
+
+  ══════════════════════════════════════════════════════════
+  FEATURE — AUDITORÍA EN BASE DE DATOS (2026-06-10)
+  ══════════════════════════════════════════════════════════
+  Implementada la bitácora persistente de acciones administrativas (antes solo
+  había 3 líneas de log de texto efímero). Resuelve C-6 (auditoría incompleta) y
+  G-10 (limpiar_todo devolvía status 200 en error).
+
+  C-6  ✅ RESUELTA — Nueva tabla `auditoria` (models.py) + helper
+       registrar_auditoria (core/auditoria.py) que persiste quién/qué/cuándo/
+       objetivo/detalle sin romper la acción principal (try/except interno; va en
+       la misma transacción en REST/WS, o sesión propia en acciones sin db).
+       Tabla SIN FK (inmutable, sobrevive a resets). Se creó sola vía create_all.
+
+  G-10 ✅ RESUELTA — limpiar_todo: el `return {...}, 500` (que FastAPI servía como
+       200 con cuerpo array) se cambió a JSONResponse(status_code=500).
+
+  Acciones auditadas (persisten en BD):
+    WS-admin: bloquear_terminal, desbloquear_terminal, apagar_terminal, bloquear_todas.
+    REST: banear_alumno, levantar_ban, crear_usuario, editar_usuario (sin
+      registrar la contraseña), cambiar_config_backdoor, cambiar_config_offline,
+      cambiar_ruta_distribucion, cerrar_todas_sesiones, limpiar_historial_sesiones,
+      limpiar_todo, reset_maestro, reset_total, eliminar_alumno, backup_sql.
+    NUNCA se registran secretos (PIN/contraseña), solo el hecho del cambio.
+
+  Consulta: GET /admin/auditoria (solo superadmin, filtros usuario/accion/fecha,
+    paginación con tope de 200). UI: subtab "Auditoría" en Configuración, oculto
+    para admin no-superadmin (clase bd-solo-superadmin + lista de ids en _aplicarRol).
+
+  AMPLIACIÓN (2026-06-10) — Auditoría del ciclo de vida de PERSONAS:
+    Se agregó auditoría a alta/edición/eliminación/importación de quienes están en
+    el sistema (lo pidió el usuario explícitamente). Acciones nuevas auditadas:
+      Estudiantes (maestro): crear_alumno, editar_alumno, importar_maestro
+                             (eliminar_alumno ya estaba desde la Fase 1).
+      Personal:              crear_personal, editar_personal, eliminar_personal,
+                             importar_personal.
+    Todas con archivo:línea en endpoints.py, username vía admin.username, en la
+    misma transacción. El filtro del panel y las etiquetas JS se ampliaron.
+
+  PENDIENTE (no prioritario): auditar acciones de severidad media restantes
+    (sospechas, incidencias, mensajes programados, procesos ignorados,
+    eliminar_terminal). El helper ya existe; es solo agregar la llamada en cada
+    endpoint cuando se decida. quitar_proceso_ignorado además usa `_: Usuario`
+    (descarta el username) — cambiar a `admin` si se quiere auditar.
+
+
+  ══════════════════════════════════════════════════════════
+  CORRECCIONES APLICADAS — FASE 2: BUGS FUNCIONALES (2026-06-10)
+  ══════════════════════════════════════════════════════════
+  Verificado que el servidor compila e importa tras los cambios.
+
+  BUG-2 ✅ RESUELTA — endpoints.py actualizar_maestro (~1929):
+       (a) ahora asigna alumno.id_facultad (antes NUNCA se actualizaba);
+       (b) solo toca id_escuela cuando se resolvió una escuela real — así editar
+           solo la facultad ya NO borra la escuela existente del alumno.
+
+  BUG-3 ✅ RESUELTA — admin/static/js/app.js (~3324):
+       La validación del panel pasó de length<6 a "8+ caracteres, 1 mayúscula y
+       1 número", idéntica a _validar_complejidad_password del servidor. Ya no hay
+       422 confuso por desajuste front/back.
+
+  BUG-5 ✅ RESUELTA — endpoints.py listar_actividad (~867-868):
+       El filtro de fecha usa `>= inicio del día` y `< inicio del día siguiente`
+       (timedelta(days=1)) en vez de `< 23:59:59` — incluye el día completo, ya no
+       se pierde el último segundo. (Ubicación real confirmada: listar_actividad,
+       NO _aplicar_filtro_fecha como decía el doc original.)
+
+  BUG-6 ✅ RESUELTA — admin/static/js/app.js renderSesiones (~1674):
+       El addLog del refresco de 15s ya NO vuelca el DNI completo a la consola
+       (exportable a .txt). Ahora enmascara: ****últimos4. Coherente con B-8.
+
+  BUG-7 ✅ RESUELTA — main.py crear_mensaje (~1720):
+       Tras el regex de formato HH:MM se valida el RANGO (0–23 / 0–59). Antes
+       aceptaba "25:99" y el mensaje se guardaba pero nunca se enviaba (200 OK
+       engañoso). Ahora devuelve 422 si la hora es imposible.
+
+
+  ══════════════════════════════════════════════════════════
+  CORRECCIONES APLICADAS — FASE 3: SERVIDOR (2026-06-10)
+  ══════════════════════════════════════════════════════════
+  Pendientes rápidos del servidor. Verificado que compila e importa.
+
+  F-5  ✅ RESUELTA (auditoría, NO restricción) — main.py mensajes programados:
+       DECISIÓN DE NEGOCIO: crear/editar/toggle/eliminar mensajes queda disponible
+       para admin y superadmin (es operativo, igual que bloquear/apagar). En vez de
+       restringir rol, se AUDITA cada acción (crear_mensaje, editar_mensaje,
+       toggle_mensaje, eliminar_mensaje) con username — trazabilidad sin quitar la
+       función al admin.
+
+  F-6  ✅ RESUELTA — main.py _ConfiguracionKioscoReq / _ConfiguracionOfflineReq:
+       backdoor_pin y offline_pin ahora tienen Field(min_length=4, max_length=50).
+       Ya no se acepta un PIN vacío o trivial desde el panel.
+
+  F-2  ✅ RESUELTA — main.py /api/server-info:
+       Ahora exige Depends(obtener_usuario_actual). Verificado que solo lo usa el
+       panel (tras login) y NO el cliente kiosco → exigir token no rompe flujos.
+       El panel ahora envía authHeaders() en la llamada. (También se cambió
+       datetime.utcnow() por datetime.now() en el timestamp.)
+
+  F-4  ✅ RESUELTA — endpoints.py /sesiones/iniciar y /sesiones/{id}/cerrar:
+       Ambos ahora exigen Depends(obtener_usuario_actual). Verificado:
+       /iniciar no lo usa nadie (legacy), /cerrar solo lo usa el panel y ya
+       enviaba authHeaders(). Cierra el acceso anónimo a crear/cerrar sesiones.
+
+  G-13 ✅ RESUELTA — endpoints.py: tope de `limit` en los 7 listados paginados
+       (sesiones_activas, listar_sospechas, listar_actividad, listar_maestro,
+       historial_bans, listar_personal, listar_incidencias) + auditoría ya tenía.
+       Cada uno aplica limit = min(max(limit,1), 200) → corta el DoS por
+       ?limit=gigante. Quedan G-9/G-14/G-15 (menores) pendientes.
+
+
+  ══════════════════════════════════════════════════════════
+  CORRECCIONES APLICADAS — FASE 4: PRE-PRUEBA EN CAMPO (2026-06-10)
+  ══════════════════════════════════════════════════════════
+  Antes de la prueba física en la biblioteca. Se aprovechó la recompilación
+  obligatoria del cliente (para el modo offline) para corregir G-5 de una vez.
+  Verificado: servidor compila e importa (76 rutas), cliente C# compila (0
+  errores), app.js sintaxis OK.
+
+  G-5  ✅ RESUELTA — client/Services/OfflineBackdoor.cs + MainWindow.xaml.cs:
+       (a) NotificarReconexion ahora pone _verificandoReconexion=false ANTES del
+           early-return (era la causa raíz);
+       (b) CerrarSesion también limpia el flag;
+       (c) MainWindow.Bloquear() llama OfflineBackdoor.CerrarSesion() para limpiar
+           el estado al bloquear por cualquier vía (incluido el timeout de gracia).
+       Triple cobertura → la bandera ya no puede quedar atascada, la PC siempre
+       se puede bloquear remotamente. REQUIERE redistribuir el .exe nuevo.
+
+  BUG "activa"/"activo" ✅ RESUELTO (lo detectó la verificación general) —
+       main.py:1654 (offline_sync) y :939 (hello modo offline) ponían
+       Terminal.estado="activa" (femenino, valor de Sesion) cuando una Terminal
+       usa "activo". Provocaba que una PC sincronizada offline no se contara en el
+       dashboard ni se mostrara bien. Corregido a "activo".
+
+  AUDITORÍA — cobertura completada. Ahora también se auditan:
+       aprobar_sospecha, descartar_sospecha, crear_incidencia, eliminar_incidencia,
+       agregar_proceso_ignorado, quitar_proceso_ignorado (este último ya NO usa
+       `_: Usuario` — captura el username), eliminar_terminal, y los 4 de mensajes
+       (crear/editar/toggle/eliminar). Total: 36 acciones auditadas, TODAS con
+       etiqueta en el panel y en el filtro (verificado: 0 acciones sin etiqueta).
+       eliminar_terminal además ya no usa t.nombre_red tras el delete (se guarda
+       antes).
+
+  G-1 (complemento) ✅ — /api/offline-sync ahora tiene rate_limit por IP
+       (30/min, igual que /alumnos/validar) → corta la enumeración de DNIs.
+
+  G5-6 ✅ RESUELTA (carrera detectada por el 2do análisis exhaustivo) —
+       client/UI/MainWindow.xaml.cs VerificarSesionOfflineAsync: se toma snapshot
+       de DniActual/RazonActual/HoraInicioActual ANTES del await Task.Delay(1500).
+       La corrección de G-5 había introducido una ventana de ~1.5s donde
+       Bloquear()/CerrarSesion() podían nulear _dniActual en paralelo y producir
+       un payload con dni=null (el servidor lo rechazaba con 422 — sin corrupción,
+       solo se perdía esa sincronización). Con el snapshot se usan los valores que
+       existían al iniciar la verificación. Cliente recompila 0 errores.
+
+  SEGUNDO ANÁLISIS EXHAUSTIVO (2026-06-10) — RESULTADO:
+    Verificado en 3 lenguajes (Python 76 rutas, C# 0 errores, JS OK) + prueba
+    funcional E2E de la auditoría (insert→read→cleanup en MySQL real). G-5 y
+    activa/activo confirmados bien corregidos y completos. Las 36 acciones de
+    auditoría consistentes servidor↔panel (sin strings crudos ni opciones muertas).
+    CERO problemas que rompan el sistema. CERO regresiones. La única carrera nueva
+    (G5-6) corregida. Falsos positivos descartados: dni=null no corrompe BD (422);
+    sin deadlock de Dispatcher; rate_limit no bloquea reconexión; cambios de firma
+    no rompen el contrato cliente/panel.
+    PENDIENTE MENOR (post-prueba, no bloquea): G5-7 (carrera fina de milisegundos,
+    autocompensada, _dniActual no volatile), código muerto OnReconectado, y
+    mantener un orden único de las 3 listas de acciones de auditoría.
+
+  ESTADO DEL CLIENTE C# TRAS ESTA FASE:
+    G-5 resuelto. Quedan pendientes para una próxima recompilación (no bloquean
+    la prueba de campo, son endurecimientos): G-16 (_dniPendiente con timestamp),
+    G-17 (validación robusta de mensajes WS + reensamblar fragmentos), G-18
+    (SendAsync serializado + fugas), G-19 (rate-limit del PIN + PII en logs
+    locales), G-20 (File.Replace atómico + código muerto), E-2/E-3/E-4 (firma del
+    .exe, comandos firmados/TLS, PIN no hardcodeado).
