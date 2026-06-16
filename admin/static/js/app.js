@@ -44,7 +44,7 @@ function _aplicarRol() {
 
     // Estadísticas, equipos y consola: visibles para todos
     const stats = document.getElementById('seccionStats');
-    if (stats) stats.style.display = 'grid';
+    if (stats) stats.style.display = '';   // dejar que el CSS gobierne el layout (flex horizontal); 'grid' era resto de un diseno viejo y forzaba los KPIs en vertical
 
     const equipos = document.getElementById('seccionEquipos');
     if (equipos) equipos.style.display = '';
@@ -81,7 +81,7 @@ function _aplicarRol() {
     const navCfg = document.getElementById('nav-configuracion');
     if (navCfg) navCfg.style.display = '';
 
-    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones'].forEach(s => {
+    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones', 'auditoria'].forEach(s => {
         const btn = document.getElementById('subtab-btn-cfg-' + s);
         if (btn) btn.style.display = esSuperAdmin ? '' : 'none';
     });
@@ -414,7 +414,7 @@ async function obtenerYMostrarIpServidor() {
 
     try {
 
-        const res = await fetch(`${API_BASE}/server-info`, { cache: 'no-store' });
+        const res = await fetch(`${API_BASE}/server-info`, { headers: authHeaders(), cache: 'no-store' });
 
         if (res.ok) {
 
@@ -1671,11 +1671,13 @@ function renderSesiones(sesiones) {
 
     sinSesiones.style.display = 'none';
 
-    sesiones.filter(s => s.activa).forEach(s =>
-
-        addLog('activity', `[ID] ${s.alumno_nombre} | Código: ${s.alumno_codigo} | DNI: ${s.alumno_dni || s.dni || '—'}`)
-
-    );
+    // BUG-6: enmascarar el DNI en la consola del panel (que es exportable a .txt),
+    // coherente con el enmascarado de PII del servidor (B-8). Solo últimos 4 dígitos.
+    sesiones.filter(s => s.activa).forEach(s => {
+        const dni = s.alumno_dni || s.dni || '';
+        const dniMasked = dni ? `****${String(dni).slice(-4)}` : '—';
+        addLog('activity', `[ID] ${s.alumno_nombre} | Código: ${s.alumno_codigo} | DNI: ${dniMasked}`);
+    });
 
     body.innerHTML = sesiones.map(s => {
 
@@ -2947,6 +2949,119 @@ function banHistCambiarPag(dir) {
     cargarHistorialBans();
 }
 
+// ── Auditoría (solo superadmin) ──────────────────────────────────────
+let _audOffset = 0;
+const _audLimit = 50;
+let _audTotal  = 0;
+
+// Etiquetas legibles para cada acción registrada
+const _AUD_ACCION_LABEL = {
+    bloquear_terminal:          'Bloquear terminal',
+    desbloquear_terminal:       'Desbloquear terminal',
+    apagar_terminal:            'Apagar terminal',
+    bloquear_todas:             'Bloquear toda la sala',
+    banear_alumno:              'Banear alumno',
+    levantar_ban:               'Levantar ban',
+    crear_alumno:               'Crear estudiante',
+    editar_alumno:              'Editar estudiante',
+    importar_maestro:           'Importar padrón estudiantes',
+    crear_personal:             'Crear personal',
+    editar_personal:            'Editar personal',
+    eliminar_personal:          'Eliminar personal',
+    importar_personal:          'Importar personal',
+    crear_incidencia:           'Crear incidencia',
+    eliminar_incidencia:        'Eliminar incidencia',
+    aprobar_sospecha:           'Aprobar sospecha',
+    descartar_sospecha:         'Descartar sospecha',
+    agregar_proceso_ignorado:   'Agregar proceso ignorado',
+    quitar_proceso_ignorado:    'Quitar proceso ignorado',
+    eliminar_terminal:          'Eliminar terminal',
+    crear_mensaje:              'Crear mensaje',
+    editar_mensaje:             'Editar mensaje',
+    toggle_mensaje:             'Activar/desactivar mensaje',
+    eliminar_mensaje:           'Eliminar mensaje',
+    editar_usuario:             'Editar usuario (admin)',
+    crear_usuario:              'Crear usuario (admin)',
+    cambiar_config_backdoor:    'Config backdoor',
+    cambiar_config_offline:     'Config offline',
+    cambiar_ruta_distribucion:  'Ruta distribución',
+    cerrar_todas_sesiones:      'Cerrar todas las sesiones',
+    limpiar_historial_sesiones: 'Limpiar historial',
+    limpiar_todo:               'Limpiar todo',
+    reset_maestro:              'Reset maestro',
+    reset_total:                'Reset total',
+    eliminar_alumno:            'Eliminar alumno',
+    backup_sql:                 'Backup SQL',
+};
+
+async function cargarAuditoria() {
+    const usuario = document.getElementById('aud-usuario')?.value.trim() || '';
+    const accion  = document.getElementById('aud-accion')?.value          || '';
+    const desde   = document.getElementById('aud-desde')?.value           || '';
+    const hasta   = document.getElementById('aud-hasta')?.value           || '';
+    const params  = new URLSearchParams({ limit: _audLimit, offset: _audOffset });
+    if (usuario) params.set('usuario', usuario);
+    if (accion)  params.set('accion',  accion);
+    if (desde)   params.set('desde',   desde);
+    if (hasta)   params.set('hasta',   hasta);
+
+    const body = document.getElementById('audBody');
+    if (body) body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--t3)">Cargando...</td></tr>';
+
+    try {
+        const res = await fetch(`${API_BASE}/admin/auditoria?${params}`, { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        _audTotal = data.total || 0;
+        renderAuditoria(data.items || []);
+        _audActualizarPag();
+    } catch (e) {
+        addLog('error', `Error cargando auditoría: ${e.message}`);
+    }
+}
+
+function renderAuditoria(items) {
+    const body  = document.getElementById('audBody');
+    const empty = document.getElementById('sinAud');
+    if (!body) return;
+
+    if (!items.length) {
+        body.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    body.innerHTML = items.map(a => {
+        const fecha     = a.fecha_hora ? new Date(a.fecha_hora).toLocaleString('es-PE') : '—';
+        const accionLbl = _AUD_ACCION_LABEL[a.accion] || a.accion;
+        return `<tr>
+            <td class="px-3 py-3 text-xs whitespace-nowrap"><span class="cell-time">${esc(fecha)}</span></td>
+            <td class="px-3 py-3 text-xs font-medium whitespace-nowrap">${esc(a.usuario)}</td>
+            <td class="px-3 py-3 text-xs whitespace-nowrap">${esc(a.rol)}</td>
+            <td class="px-3 py-3 text-xs whitespace-nowrap">${esc(accionLbl)}</td>
+            <td class="px-3 py-3 text-xs text-zinc-500 dark:text-zinc-400">${esc(a.objetivo)}</td>
+            <td class="px-3 py-3 text-xs text-zinc-500 dark:text-zinc-400">${esc(a.detalle)}</td>
+        </tr>`;
+    }).join('');
+}
+
+function _audActualizarPag() {
+    const info = document.getElementById('aud-pag-info');
+    const prev = document.getElementById('aud-prev');
+    const next = document.getElementById('aud-next');
+    const desde = _audOffset + 1;
+    const hasta = Math.min(_audOffset + _audLimit, _audTotal);
+    if (info) info.textContent = _audTotal ? `${desde}–${hasta} de ${_audTotal}` : '';
+    if (prev) prev.disabled = _audOffset === 0;
+    if (next) next.disabled = _audOffset + _audLimit >= _audTotal;
+}
+
+function audCambiarPag(dir) {
+    _audOffset = Math.max(0, _audOffset + dir * _audLimit);
+    cargarAuditoria();
+}
+
 // ── Incidencias ──────────────────────────────────────────────────────
 
 let _incidenciasCache = [];
@@ -3226,8 +3341,10 @@ async function guardarUsuario(rol) {
         errEl.textContent = 'El username debe tener al menos 3 caracteres';
         return;
     }
-    if (password && password.length < 6) {
-        errEl.textContent = 'La contraseña debe tener al menos 6 caracteres';
+    // BUG-3: la validación debe coincidir con la del servidor
+    // (_validar_complejidad_password: 8+ caracteres, 1 mayúscula y 1 número).
+    if (password && (password.length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password))) {
+        errEl.textContent = 'La contraseña debe tener al menos 8 caracteres, una mayúscula y un número';
         return;
     }
 
@@ -3482,8 +3599,10 @@ function _renderSospechas(items) {
         // Extraer nombre de terminal del detalle: "[PC-01] descripción..."
         const pcMatch = (s.detalle || '').match(/^\[([^\]]+)\]/);
         const pcSosp  = pcMatch ? pcMatch[1] : '';
+        // Escape para contexto de atributo onclick (string JS entre comillas simples)
+        const jsAttr = v => String(v ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
-        const btnVer = `<button onclick="actVerDesdeSospecha('${pcSosp}', '${s.dni}', '${s.fecha || ''}')"
+        const btnVer = `<button onclick="actVerDesdeSospecha('${jsAttr(pcSosp)}', '${jsAttr(s.dni)}', '${jsAttr(s.fecha || '')}')"
                 class="px-2 py-1 text-xs font-semibold rounded-lg bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-200 dark:hover:bg-cyan-800/60 transition-colors ml-1">
                 <i class="ph ph-eye"></i> Ver
             </button>`;
@@ -3497,20 +3616,20 @@ function _renderSospechas(items) {
                     class="px-2 py-1 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ml-1">
                     <i class="ph ph-x"></i> Descartar
                </button>${btnVer}`
-            : `<span class="text-xs text-slate-400">${s.revisado_por || '—'}</span>${btnVer}`;
+            : `<span class="text-xs text-slate-400">${escapeHtml(s.revisado_por || '—')}</span>${btnVer}`;
 
         return `<tr class="hover:bg-violet-50/50 dark:hover:bg-violet-900/10 transition-colors">
             <td class="p-4">
-                <div class="font-semibold text-slate-800 dark:text-slate-200 text-xs">${s.nombre_alumno}</div>
-                <div class="text-[11px] text-slate-400 dark:text-slate-500">${s.dni}</div>
+                <div class="font-semibold text-slate-800 dark:text-slate-200 text-xs">${escapeHtml(s.nombre_alumno)}</div>
+                <div class="text-[11px] text-slate-400 dark:text-slate-500">${escapeHtml(s.dni)}</div>
             </td>
             <td class="p-4">
-                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">${tipoLbl}</span>
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">${escapeHtml(tipoLbl)}</span>
             </td>
-            <td class="p-4 text-xs text-slate-600 dark:text-slate-400 max-w-xs">${s.detalle}</td>
+            <td class="p-4 text-xs text-slate-600 dark:text-slate-400 max-w-xs">${escapeHtml(s.detalle)}</td>
             <td class="p-4 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">${fecha}</td>
             <td class="p-4">
-                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${pillCls}">${s.estado}</span>
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${pillCls}">${escapeHtml(s.estado)}</span>
             </td>
             <td class="p-4">${acciones}</td>
         </tr>`;
@@ -4050,7 +4169,39 @@ async function cargarMensajes() {
         // Extras pendientes (no enviados)
         const extras = data.filter(m => m.tipo === 'extra' && !m.enviado);
         _renderMensajesExtra(extras);
+
+        // Duración del aviso (global, en minutos)
+        try {
+            const rd = await fetch(`${API_BASE}/mensajes/duracion`, { headers: authHeaders() });
+            if (rd.ok) {
+                const dd = await rd.json();
+                const inp = document.getElementById('msg-duracion-min');
+                if (inp && dd.minutos) inp.value = dd.minutos;
+            }
+        } catch (e) { /* silencioso */ }
     } catch (e) { /* silencioso */ }
+}
+
+async function guardarDuracionMensaje() {
+    const inp    = document.getElementById('msg-duracion-min');
+    const status = document.getElementById('msg-duracion-status');
+    const setS   = (msg, cls) => { if (status) { status.textContent = msg; status.className = `text-xs min-h-4 ${cls}`; } };
+    let minutos = parseInt(inp?.value, 10);
+    if (isNaN(minutos) || minutos < 1 || minutos > 15) {
+        setS('Elige un valor entre 1 y 15 minutos.', 'text-red-500');
+        return;
+    }
+    try {
+        const res = await fetch(`${API_BASE}/mensajes/duracion`, {
+            method: 'PUT',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ minutos }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setS(data.detail || 'Error al guardar.', 'text-red-500'); return; }
+        setS('Guardado', 'text-emerald-500');
+        setTimeout(() => { if (status) status.textContent = ''; }, 3000);
+    } catch (e) { setS('Error de conexión.', 'text-red-500'); }
 }
 
 function _renderMensajesExtra(lista) {
@@ -4158,6 +4309,27 @@ async function eliminarMensaje(id) {
         await fetch(`${API_BASE}/mensajes/${id}`, { method: 'DELETE', headers: authHeaders() });
         await cargarMensajes();
     } catch (e) { /* silencioso */ }
+}
+
+// Envía un aviso de prueba inmediato a todas las PCs conectadas (no se guarda).
+async function probarMensajeAhora() {
+    const status = document.getElementById('msg-probar-status');
+    const setS   = (msg, cls) => { if (status) { status.textContent = msg; status.className = `text-xs min-h-4 ${cls}`; } };
+    const texto  = (document.getElementById('msg-cierre-texto')?.value || '').trim()
+                || 'Mensaje de prueba del panel.';
+    try {
+        const res = await fetch(`${API_BASE}/mensajes/probar`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mensaje: texto, hora_envio: '00:00', tipo: 'extra' }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setS(data.detail || 'Error al enviar.', 'text-red-500'); return; }
+        const n = data.entregados ?? 0;
+        if (n > 0) setS(`Enviado a ${n} PC(s) conectada(s).`, 'text-emerald-500');
+        else       setS('Ninguna PC conectada en este momento.', 'text-amber-500');
+        setTimeout(() => { if (status) status.textContent = ''; }, 4000);
+    } catch (e) { setS('Error de conexión.', 'text-red-500'); }
 }
 
 // Al cargar la página: aplicar logo/textos personalizados a la pantalla de login,

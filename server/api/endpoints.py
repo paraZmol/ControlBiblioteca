@@ -6,12 +6,13 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
-from models import AlumnoMaestro, Terminal, Sesion, Usuario, Facultad, Escuela, Ban, PersonalUniversidad, Incidencia, Sospecha, ActividadLog, ProcesoIgnorado
+from models import AlumnoMaestro, Terminal, Sesion, Usuario, Facultad, Escuela, Ban, PersonalUniversidad, Incidencia, Sospecha, ActividadLog, ProcesoIgnorado, Auditoria
 Alumno = AlumnoMaestro  # alias local para compatibilidad con código legacy
 from auth_service import (
     verificar_password, hashear_password, crear_token, obtener_usuario_actual
 )
 from core.websocket_manager import manager
+from core.auditoria import registrar_auditoria
 from core import rate_limit
 from pydantic import BaseModel
 
@@ -155,6 +156,8 @@ async def registrar_usuario(
     )
     db.add(nuevo)
     await db.flush()
+    await registrar_auditoria(admin.username, "crear_usuario", rol=admin.rol,
+                              objetivo=f"{datos.username} (rol={datos.rol})", db=db)
     return {"mensaje": f"Usuario '{datos.username}' creado"}
 
 
@@ -306,9 +309,12 @@ async def eliminar_terminal(
     t = res.scalar_one_or_none()
     if not t:
         raise HTTPException(status_code=404, detail="Terminal no encontrada")
+    nombre_t = t.nombre_red   # guardar antes del delete (luego el objeto expira)
     await db.delete(t)
+    await registrar_auditoria(admin.username, "eliminar_terminal", rol=admin.rol,
+                              objetivo=nombre_t, db=db)
     await db.commit()
-    return {"ok": True, "eliminada": t.nombre_red}
+    return {"ok": True, "eliminada": nombre_t}
 
 
 @router.post("/terminales/registrar")
@@ -325,7 +331,7 @@ async def registrar_terminal(
         terminal.ultima_conexion = datetime.now()
         terminal.estado = "bloqueado"
     else:
-        terminal = Terminal(nombre=datos.nombre, ip=datos.ip, estado="bloqueado", ultima_conexion=datetime.now())
+        terminal = Terminal(nombre_red=datos.nombre, ip=datos.ip, estado="bloqueado", ultima_conexion=datetime.now())
         db.add(terminal)
     await db.flush()
     return {"id": terminal.id, "nombre": terminal.nombre}
@@ -337,7 +343,8 @@ async def registrar_terminal(
 async def iniciar_sesion(
     alumno_codigo: str,
     terminal_ip: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),   # F-4: exigir auth (antes era público)
 ):
     """Iniciar sesión de uso en una terminal."""
     res_alumno = await db.execute(select(AlumnoMaestro).where(
@@ -404,7 +411,8 @@ async def iniciar_sesion(
 async def cerrar_sesion(
     sesion_id: int,
     motivo: str = "manual",
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),   # F-4: exigir auth (el panel ya manda el token)
 ):
     """Cerrar una sesión activa usando exclusivamente el reloj del servidor.
 
@@ -572,6 +580,7 @@ async def sesiones_activas(
     total_result = await db.execute(select(_func.count()).select_from(q.subquery()))
     total = total_result.scalar() or 0
 
+    limit = min(max(limit, 1), 200)   # G-13: tope de seguridad
     q = q.offset(offset).limit(limit)
     result = await db.execute(q)
     rows = []
@@ -721,6 +730,10 @@ async def backup_sql(
 
     logger.info(f"[BACKUP] Generado: {filename} ({len(stdout):,} bytes)")
 
+    # Auditoría en sesión propia (este endpoint no abre transacción de escritura)
+    await registrar_auditoria(admin.username, "backup_sql", rol=admin.rol,
+                              objetivo=dbname, detalle=f"{len(stdout):,} bytes")
+
     return StreamingResponse(
         iter([stdout]),
         media_type="application/octet-stream",
@@ -742,6 +755,7 @@ async def listar_sospechas(
     q = select(Sospecha).order_by(Sospecha.fecha.desc())
     if estado:
         q = q.where(Sospecha.estado == estado)
+    limit = min(max(limit, 1), 200)   # G-13: tope de seguridad
     total = (await db.execute(select(_func.count()).select_from(q.subquery()))).scalar()
     rows  = (await db.execute(q.offset(offset).limit(limit))).scalars().all()
     return {
@@ -790,6 +804,9 @@ async def aprobar_sospecha(
     sospecha.estado        = "aprobada"
     sospecha.revisado_por  = admin.username
     sospecha.fecha_revision = datetime.now()
+    await registrar_auditoria(admin.username, "aprobar_sospecha", rol=admin.rol,
+                              objetivo=f"DNI {sospecha.dni_alumno}",
+                              detalle="creó incidencia leve", db=db)
     await db.commit()
     return {"mensaje": "Sospecha aprobada e incidencia registrada"}
 
@@ -810,6 +827,8 @@ async def descartar_sospecha(
     sospecha.estado         = "descartada"
     sospecha.revisado_por   = admin.username
     sospecha.fecha_revision = datetime.now()
+    await registrar_auditoria(admin.username, "descartar_sospecha", rol=admin.rol,
+                              objetivo=f"DNI {sospecha.dni_alumno}", db=db)
     await db.commit()
     return {"mensaje": "Sospecha descartada"}
 
@@ -857,11 +876,14 @@ async def listar_actividad(
     if fecha:
         try:
             d = date.fromisoformat(fecha)
-            q = q.where(ActividadLog.fecha_hora >= datetime(d.year, d.month, d.day, 0, 0, 0))
-            q = q.where(ActividadLog.fecha_hora <  datetime(d.year, d.month, d.day, 23, 59, 59))
+            # BUG-5: usar < inicio del día siguiente para incluir el día completo
+            # (antes < 23:59:59 dejaba fuera el último segundo del día).
+            q = q.where(ActividadLog.fecha_hora >= datetime(d.year, d.month, d.day))
+            q = q.where(ActividadLog.fecha_hora <  datetime(d.year, d.month, d.day) + timedelta(days=1))
         except ValueError:
             pass
 
+    limit = min(max(limit, 1), 200)   # G-13: tope de seguridad
     total = (await db.execute(select(_func.count()).select_from(q.subquery()))).scalar()
     rows  = (await db.execute(q.offset(offset).limit(limit))).scalars().all()
 
@@ -987,6 +1009,8 @@ async def agregar_proceso_ignorado(
 
     pi = ProcesoIgnorado(nombre_exe=nombre_exe, agregado_por=admin.username)
     db.add(pi)
+    await registrar_auditoria(admin.username, "agregar_proceso_ignorado", rol=admin.rol,
+                              objetivo=nombre_exe, db=db)
     await db.commit()
     return {"ok": True, "id": pi.id, "nombre_exe": nombre_exe}
 
@@ -995,7 +1019,7 @@ async def agregar_proceso_ignorado(
 async def eliminar_proceso_ignorado(
     proceso_id: int,
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual),
+    admin: Usuario = Depends(obtener_usuario_actual),
 ):
     """Quita un proceso de la lista de ignorados — volverá a registrarse."""
     pi = (await db.execute(
@@ -1005,6 +1029,8 @@ async def eliminar_proceso_ignorado(
         raise HTTPException(status_code=404, detail="Proceso no encontrado")
     nombre = pi.nombre_exe
     await db.delete(pi)
+    await registrar_auditoria(admin.username, "quitar_proceso_ignorado", rol=admin.rol,
+                              objetivo=nombre, db=db)
     await db.commit()
     return {"ok": True, "eliminado": nombre}
 
@@ -1327,15 +1353,19 @@ async def cerrar_todas_sesiones(
     res = await db.execute(select(Sesion).where(Sesion.estado == "activa"))
     sesiones = res.scalars().all()
 
-    ahora = datetime.utcnow().replace(tzinfo=None)
+    ahora = datetime.now().replace(tzinfo=None)   # BUG-1: era utcnow() → desfase de 5h en Perú
     for s in sesiones:
         s.activa        = False
         s.hora_salida   = ahora
         s.motivo_cierre = "admin_bulk"
-    
-    # Finalizar libera las terminales — quedan disponibles para el siguiente alumno
-    await db.execute(update(Terminal).values(estado="disponible"))
 
+    # Las PCs vuelven a la pantalla de login → estado "bloqueado" (G-12),
+    # coherente con el resto del sistema (antes usaba "disponible", estado que
+    # ninguna otra parte produce).
+    await db.execute(update(Terminal).values(estado="bloqueado"))
+
+    await registrar_auditoria(admin.username, "cerrar_todas_sesiones", rol=admin.rol,
+                              detalle=f"{len(sesiones)} sesión(es) cerrada(s)", db=db)
     await db.commit()
 
     # Indicar a los clientes WPF que vuelvan a la pantalla de login
@@ -1364,8 +1394,10 @@ async def limpiar_sesiones(
 
     # Borrar solo el historial de sesiones; terminales y alumnos se mantienen
     await db.execute(delete(Sesion))
-    # Dejar terminales en disponible tras el limpiado
-    await db.execute(update(Terminal).values(estado="disponible"))
+    # Las PCs quedan en la pantalla de login → estado "bloqueado" (G-12)
+    await db.execute(update(Terminal).values(estado="bloqueado"))
+    await registrar_auditoria(admin.username, "limpiar_historial_sesiones", rol=admin.rol,
+                              detalle="borró todo el historial de sesiones", db=db)
     await db.commit()
 
     await manager.notificar_evento("Historial borrado. Terminales listas para nuevo periodo.", "warning")
@@ -1747,6 +1779,9 @@ async def importar_maestro(
             errores += 1
             errores_detalle.append(f"Fila {num_fila}: {ex}")
 
+    await registrar_auditoria(admin.username, "importar_maestro", rol=admin.rol,
+                              objetivo="padrón de alumnos",
+                              detalle=f"{insertados} nuevo(s), {actualizados} actualizado(s), {errores} ignorada(s)", db=db)
     await db.commit()
     msg = f"Maestro importado: {insertados} alumno(s) nuevo(s), {actualizados} actualizado(s)"
     if errores:
@@ -1784,6 +1819,7 @@ async def listar_maestro(
         ))
     total_q = select(func.count()).select_from(q.subquery())
     total = (await db.execute(total_q)).scalar()
+    limit = min(max(limit, 1), 200)   # G-13: tope de seguridad
     q = q.order_by(AlumnoMaestro.nombre).offset(offset).limit(limit)
     rows = (await db.execute(q)).all()
     return {
@@ -1870,6 +1906,8 @@ async def crear_usuario_manual(
         id_escuela=id_esc,
     )
     db.add(alumno)
+    await registrar_auditoria(admin.username, "crear_alumno", rol=admin.rol,
+                              objetivo=f"DNI {datos.dni}", detalle=datos.nombre.strip(), db=db)
     await db.commit()
     return {"mensaje": f"Usuario '{datos.nombre.strip()}' registrado correctamente"}
 
@@ -1913,7 +1951,15 @@ async def actualizar_maestro(
                 db.add(esc_obj)
                 await db.flush()
             id_esc = esc_obj.id
-        alumno.id_escuela = id_esc
+        # BUG-2: asignar id_facultad (antes nunca se actualizaba) y solo tocar
+        # id_escuela cuando realmente se resolvió una escuela — así editar solo
+        # la facultad no borra la escuela existente del alumno.
+        if id_fac is not None:
+            alumno.id_facultad = id_fac
+        if id_esc is not None:
+            alumno.id_escuela = id_esc
+    await registrar_auditoria(admin.username, "editar_alumno", rol=admin.rol,
+                              objetivo=f"DNI {dni}", db=db)
     await db.commit()
     return {"mensaje": f"Alumno {dni} actualizado correctamente"}
 
@@ -1934,9 +1980,12 @@ async def eliminar_maestro(
     
     # Eliminar todas las sesiones del alumno primero para evitar violación de llave foránea
     await db.execute(delete(Sesion).where(Sesion.dni_alumno == dni))
-    
+
     # Luego eliminar el alumno
     await db.delete(alumno)
+    await registrar_auditoria(admin.username, "eliminar_alumno", rol=admin.rol,
+                              objetivo=f"DNI {dni}",
+                              detalle="eliminado del maestro con todas sus sesiones", db=db)
     await db.commit()
     return {"mensaje": f"Alumno {dni} eliminado del maestro con todas sus sesiones"}
 
@@ -1962,6 +2011,8 @@ async def reset_maestro(
     await db.execute(delete(Sesion))
     await db.execute(delete(AlumnoMaestro))
     await db.execute(update(Terminal).values(estado="bloqueado"))
+    await registrar_auditoria(admin.username, "reset_maestro", rol=admin.rol,
+                              detalle=f"borró {total_alumnos} alumno(s) y {total_sesiones} sesión(es)", db=db)
     await db.commit()
 
     await manager.forzar_cierre_sesion_todas()
@@ -2022,6 +2073,9 @@ async def crear_ban(
         baneado_por=admin.username,
     )
     db.add(ban)
+    await registrar_auditoria(admin.username, "banear_alumno", rol=admin.rol,
+                              objetivo=f"DNI {datos.dni}",
+                              detalle=f"{datos.dias} día(s) — {datos.motivo.strip()}", db=db)
     await db.commit()
     return {"mensaje": f"Alumno {datos.dni} baneado hasta {fecha_fin.strftime('%d/%m/%Y')}", "fecha_fin": fecha_fin}
 
@@ -2049,6 +2103,8 @@ async def eliminar_ban(
         .where(Incidencia.dni_alumno == ban.dni_alumno, Incidencia.activa == True)
         .values(activa=False)
     )
+    await registrar_auditoria(admin.username, "levantar_ban", rol=admin.rol,
+                              objetivo=f"DNI {ban.dni_alumno}", db=db)
     await db.commit()
     return {"mensaje": "Ban levantado y incidencias reseteadas correctamente"}
 
@@ -2098,6 +2154,7 @@ async def historial_bans(
         raise HTTPException(status_code=403, detail="Solo el superadmin puede ver el historial de bans")
     from sqlalchemy.orm import joinedload
     from sqlalchemy import func as _func
+    limit = min(max(limit, 1), 200)   # G-13: tope de seguridad
     ahora = datetime.now()
     q = select(Ban).options(joinedload(Ban.alumno)).order_by(Ban.fecha_ini.desc())
     if dni:
@@ -2139,6 +2196,60 @@ async def historial_bans(
                 "fecha_levantado":  b.fecha_levantado,
             }
             for b in bans
+        ],
+    }
+
+
+@router.get("/admin/auditoria")
+async def listar_auditoria(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+    usuario: str | None = None,
+    accion: str | None = None,
+    desde: str | None = None,    # ISO date "2026-06-01"
+    hasta: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Bitácora de acciones administrativas (solo superadmin). Filtros: usuario,
+    accion, rango de fechas; con paginación."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede ver la auditoría")
+    from sqlalchemy import func as _func
+    limit = min(max(limit, 1), 200)   # tope de seguridad (G-13)
+    q = select(Auditoria).order_by(Auditoria.fecha_hora.desc())
+    if usuario:
+        q = q.where(Auditoria.usuario == usuario)
+    if accion:
+        q = q.where(Auditoria.accion == accion)
+    if desde:
+        try:
+            q = q.where(Auditoria.fecha_hora >= datetime.fromisoformat(desde))
+        except ValueError:
+            pass
+    if hasta:
+        try:
+            q = q.where(Auditoria.fecha_hora < datetime.fromisoformat(hasta) + timedelta(days=1))
+        except ValueError:
+            pass
+    total_res = await db.execute(select(_func.count()).select_from(q.subquery()))
+    total = total_res.scalar_one()
+    res = await db.execute(q.limit(limit).offset(offset))
+    items = res.scalars().all()
+    return {
+        "total": total,
+        "items": [
+            {
+                "id":         a.id,
+                "fecha_hora": a.fecha_hora.isoformat() if a.fecha_hora else None,
+                "usuario":    a.usuario,
+                "rol":        a.rol or "",
+                "accion":     a.accion,
+                "objetivo":   a.objetivo or "",
+                "detalle":    a.detalle or "",
+                "ip_origen":  a.ip_origen or "",
+            }
+            for a in items
         ],
     }
 
@@ -2185,6 +2296,7 @@ async def listar_personal(
             PersonalUniversidad.cargo.ilike(like),
             PersonalUniversidad.area.ilike(like),
         ))
+    limit = min(max(limit, 1), 200)   # G-13: tope de seguridad
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
     q = q.order_by(PersonalUniversidad.nombre).offset(offset).limit(limit)
     rows = (await db.execute(q)).scalars().all()
@@ -2229,6 +2341,8 @@ async def crear_personal(
         correo=datos.correo.strip() if datos.correo else None,
         telefono=datos.telefono.strip() if datos.telefono else None,
     ))
+    await registrar_auditoria(admin.username, "crear_personal", rol=admin.rol,
+                              objetivo=f"DNI {datos.dni}", detalle=datos.nombre.strip(), db=db)
     await db.commit()
     return {"mensaje": f"Personal '{datos.nombre.strip()}' registrado correctamente"}
 
@@ -2252,6 +2366,8 @@ async def actualizar_personal(
     if datos.area is not None:     p.area     = datos.area.strip() or None
     if datos.correo is not None:   p.correo   = datos.correo.strip() or None
     if datos.telefono is not None: p.telefono = datos.telefono.strip() or None
+    await registrar_auditoria(admin.username, "editar_personal", rol=admin.rol,
+                              objetivo=f"DNI {dni}", db=db)
     await db.commit()
     return {"mensaje": f"Personal {dni} actualizado correctamente"}
 
@@ -2269,7 +2385,10 @@ async def eliminar_personal(
     p = res.scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=404, detail="Personal no encontrado")
+    nombre_p = p.nombre
     await db.delete(p)
+    await registrar_auditoria(admin.username, "eliminar_personal", rol=admin.rol,
+                              objetivo=f"DNI {dni}", detalle=nombre_p, db=db)
     await db.commit()
     return {"mensaje": f"Personal {dni} eliminado correctamente"}
 
@@ -2341,6 +2460,9 @@ async def importar_personal(
             insertados += 1
         if (insertados + actualizados) % 200 == 0:
             await db.flush()
+    await registrar_auditoria(admin.username, "importar_personal", rol=admin.rol,
+                              objetivo="padrón de personal",
+                              detalle=f"{insertados} nuevo(s), {actualizados} actualizado(s), {errores} ignorado(s)", db=db)
     await db.commit()
     return {"mensaje": f"{insertados} nuevo(s), {actualizados} actualizado(s), {errores} ignorado(s)",
             "insertados": insertados, "actualizados": actualizados, "errores": errores}
@@ -2404,6 +2526,9 @@ async def crear_incidencia(
         registrado_por=admin.username,
     )
     db.add(inc)
+    await registrar_auditoria(admin.username, "crear_incidencia", rol=admin.rol,
+                              objetivo=f"DNI {datos.dni}",
+                              detalle=f"{datos.tipo} — {datos.motivo.strip()}", db=db)
     await db.commit()
     # Contar incidencias activas para incluir en la respuesta
     cnt_q = await db.execute(
@@ -2427,6 +2552,7 @@ async def listar_incidencias(
     if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden ver incidencias")
     from sqlalchemy import func
+    limit = min(max(limit, 1), 200)   # G-13: tope de seguridad
     q = select(Incidencia).order_by(Incidencia.fecha.desc())
     if dni:
         q = q.where(Incidencia.dni_alumno == dni)
@@ -2485,6 +2611,9 @@ async def eliminar_incidencia(
     if not inc:
         raise HTTPException(status_code=404, detail="Incidencia no encontrada")
     inc.activa = False
+    await registrar_auditoria(admin.username, "eliminar_incidencia", rol=admin.rol,
+                              objetivo=f"DNI {inc.dni_alumno}",
+                              detalle=f"{inc.tipo} — {inc.motivo or ''}"[:120], db=db)
     await db.commit()
     return {"mensaje": "Incidencia eliminada correctamente"}
 
@@ -2510,6 +2639,8 @@ async def reset_total(
     # Desconectar físicamente todas las terminales para que no se re-registren solo por heartbeat
     await manager.desconectar_todo()
 
+    await registrar_auditoria(admin.username, "reset_total", rol=admin.rol,
+                              detalle="vació sesiones, alumnos y terminales", db=db)
     await db.commit()
     await manager.notificar_evento("RESET TOTAL: El sistema ha sido reseteado por el administrador", "warning")
     return {"mensaje": "Todo el sistema ha sido limpiado correctamente"}
@@ -2628,6 +2759,8 @@ async def guardar_ruta_distribucion(
         _text("INSERT INTO ajustes_sistema (clave, valor) VALUES ('ruta_distribucion', :v) ON DUPLICATE KEY UPDATE valor=:v"),
         {"v": ruta_norm}
     )
+    await registrar_auditoria(admin.username, "cambiar_ruta_distribucion", rol=admin.rol,
+                              objetivo=ruta_norm, db=db)
     await db.commit()
     return {"mensaje": "Ruta actualizada correctamente", "ruta": ruta_norm}
 

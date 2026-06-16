@@ -287,6 +287,7 @@ class ConfiguracionKiosco(Base):
     offline_modifiers:  Mapped[int] = mapped_column(Integer, default=3)      # 0x0003 (Ctrl+Alt)
     offline_key:        Mapped[int] = mapped_column(Integer, default=122)    # 0x7A (F11)
     offline_pin:        Mapped[str] = mapped_column(String(50), default="UNASAM")
+    mensaje_duracion_seg: Mapped[int] = mapped_column(Integer, default=60)   # cuánto se muestra el aviso en el kiosco (segundos); UI lo edita en minutos
 
     def __repr__(self): return f"<ConfiguracionKiosco ID={self.id}>"
 
@@ -304,6 +305,26 @@ class MensajeProgramado(Base):
     fecha_envio: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # solo para tipo="extra"
 
     def __repr__(self): return f"<MensajeProgramado {self.id} {self.hora_envio} tipo={self.tipo}>"
+
+
+class Auditoria(Base):
+    """Bitácora inmutable de acciones administrativas: quién hizo qué, cuándo y
+    sobre qué objeto. Sin FK a propósito — debe sobrevivir a borrados (reset_total
+    elimina usuarios/alumnos; una FK con CASCADE destruiría el rastro). Los datos
+    se guardan como texto plano para preservar la traza histórica."""
+    __tablename__ = "auditoria"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:         Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fecha_hora: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+    usuario:    Mapped[str]      = mapped_column(String(100), nullable=False, index=True)
+    rol:        Mapped[str]      = mapped_column(String(20),  nullable=True)
+    accion:     Mapped[str]      = mapped_column(String(60),  nullable=False, index=True)
+    objetivo:   Mapped[str]      = mapped_column(String(255), nullable=True)   # qué terminal/alumno/config
+    detalle:    Mapped[str]      = mapped_column(String(500), nullable=True)   # contexto libre opcional
+    ip_origen:  Mapped[str]      = mapped_column(String(45),  nullable=True)   # IPv4/IPv6, opcional
+
+    def __repr__(self): return f"<Auditoria {self.id}: {self.usuario} {self.accion}>"
 
 
 # ── Alias legacy: Alumno → AlumnoMaestro para no romper main.py ──────

@@ -1,0 +1,361 @@
+═══════════════════════════════════════════════════════════════════
+  PRUEBAS EN CAMPO (BIBLIOTECA) — Control Biblioteca UNASAM
+  Qué probar físicamente tras los cambios del 2026-06-10.
+  Marcá cada casilla [ ] → [x] cuando la prueba pase.
+═══════════════════════════════════════════════════════════════════
+
+Este archivo es un checklist de verificación PRESENCIAL en la biblioteca (con
+PCs cliente reales y el servidor corriendo). Cubre SOLO lo que se cambió el
+2026-06-10. Si algo no da el "Resultado esperado", anotá abajo de la prueba qué
+pasó realmente.
+
+PREPARACIÓN ANTES DE EMPEZAR (hacer una vez):
+  [ ] En la PC del servidor, reiniciar el servidor:
+        cd server
+        .venv\Scripts\activate
+        uvicorn main:app --host 0.0.0.0 --port 8000
+      Esperar a ver "Application startup complete." sin errores rojos.
+  [ ] Verificar en el log de arranque que NO aparezcan errores de la tabla
+      "auditoria" (se crea sola la primera vez).
+  [ ] En el navegador del panel: Ctrl+Shift+R (recarga fuerte) para tomar el
+      JS/HTML nuevo.
+  [ ] Tener a mano DOS cuentas: una superadmin y una admin (para las pruebas de
+      rol/visibilidad).
+  [ ] IMPORTANTE — recompilar y desplegar el cliente kiosco para las pruebas del
+      modo offline (se modificó el C#):
+        cd client
+        dotnet clean
+        dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o publish\
+      Copiar el .exe a C:\WinSysCache\ y subir el número en version.txt; reiniciar
+      los kioscos para que tomen la versión nueva.
+
+
+───────────────────────────────────────────────────────────────────
+  A. MODO OFFLINE DEL KIOSCO (cliente C# — rediseñado hoy)
+───────────────────────────────────────────────────────────────────
+  Contexto: el flujo cambió. Ahora el alumno llena sus datos normal y el
+  encargado activa el modo offline con el atajo + PIN al final.
+
+  A-1. Flujo offline nuevo — activación por el encargado
+  ───────────────────────────────────────────────────────
+  Pasos:
+    1. En una PC cliente, desconectar la red (desenchufar cable o cortar wifi)
+       para simular que el servidor no es alcanzable.
+    2. Esperar a que el kiosco detecte la desconexión (indicador en rojo
+       "Desconectado").
+    3. En la pantalla de login del alumno: escribir un DNI válido (8 dígitos).
+    4. Verificar que el campo "Razón de uso" solo deja elegir "Otros
+       (Especificar)" y que el campo de texto aparece para escribir el motivo.
+    5. Escribir un motivo y dar clic en "INGRESAR".
+
+  Resultado esperado:
+    - Aparece el mensaje: "Sin conexion al servidor. Contacte al encargado."
+    - La PC NO se desbloquea todavía.
+    - La pantalla se ve IGUAL que siempre (sin la interfaz fea del modo offline
+      anterior).
+
+  A-2. El encargado autoriza con el atajo + PIN
+  ───────────────────────────────────────────────
+  Pasos (continúa de A-1):
+    1. El encargado presiona el atajo configurado (por defecto Ctrl+Alt+F11).
+    2. Aparece un diálogo que pide SOLO el PIN del encargado (NO vuelve a pedir
+       DNI ni motivo — ya los puso el alumno).
+    3. Ingresar el PIN correcto.
+
+  Resultado esperado:
+    - El kiosco se desbloquea con el DNI y motivo que el alumno ya había escrito.
+    - El alumno puede usar la PC.
+    - En el log local del kiosco (offline_sessions.json en su carpeta) queda
+      registrada la sesión offline.
+
+  A-3. PIN incorrecto
+  ────────────────────
+  Pasos: en el diálogo del PIN, escribir un PIN equivocado.
+  Resultado esperado:
+    - Mensaje de PIN incorrecto, la PC sigue bloqueada, permite reintentar.
+
+  A-4. Reconexión con sesión offline activa
+  ──────────────────────────────────────────
+  Pasos:
+    1. Con una sesión offline activa (de A-2), volver a conectar la red.
+    2. Esperar a que el kiosco reconecte al servidor.
+  Resultado esperado:
+    - Si el DNI es válido y no está baneado: la sesión continúa sin cortar al
+      alumno; aparece un aviso "Conexion restaurada. Sesion sincronizada."
+    - Si el DNI NO está registrado o está baneado: cuenta regresiva de 3 minutos
+      con el mensaje correspondiente, luego se bloquea.
+    - En el panel (Nodos), la PC aparece como activa con el alumno.
+
+  A-5. CONFIRMAR LA CORRECCIÓN DE G-5 (la bandera atascada — ya corregida)
+  ─────────────────────────────────────────────────────────────────────────
+    Contexto: antes había un bug donde, si la sesión offline se cerraba por el
+    timeout de gracia ANTES de reconectar, una bandera interna quedaba atascada y
+    la PC NO se podía bloquear remotamente. Se CORRIGIÓ el 2026-06-10. Esta
+    prueba confirma que la corrección funciona (requiere el .exe recompilado).
+  [ ] Pasos:
+        1. Activar modo offline (A-1, A-2).
+        2. Dejar pasar el tiempo de gracia SIN reconectar hasta que la PC se
+           bloquee sola.
+        3. Reconectar la red.
+        4. Desde el panel, intentar BLOQUEAR esa PC.
+      Resultado esperado: la PC SÍ se bloquea desde el panel (corrección OK).
+      Si NO se bloquea → la corrección no tomó efecto; verificar que el .exe
+      desplegado sea el recompilado hoy.
+
+
+───────────────────────────────────────────────────────────────────
+  B. AUDITORÍA EN BASE DE DATOS (nuevo)
+───────────────────────────────────────────────────────────────────
+  Contexto: ahora queda registrado en la BD quién hizo cada acción
+  administrativa, visible en Configuración → Auditoría (solo superadmin).
+
+  B-1. La pestaña existe y es solo-superadmin
+  ─────────────────────────────────────────────
+  Pasos:
+    1. Iniciar sesión como SUPERADMIN.
+    2. Ir a Configuración. Verificar que existe el subtab "Auditoría".
+    3. Cerrar sesión, iniciar como ADMIN normal.
+    4. Ir a Configuración.
+  Resultado esperado:
+    - Superadmin VE el subtab "Auditoría".
+    - Admin normal NO ve el subtab "Auditoría".
+
+  B-2. Se registran las acciones de bloqueo/apagado
+  ───────────────────────────────────────────────────
+  Pasos (como superadmin o admin):
+    1. Bloquear una PC desde Nodos.
+    2. Apagar otra PC.
+    3. Bloquear toda la sala.
+    4. Ir a Configuración → Auditoría.
+  Resultado esperado:
+    - Aparecen 3 registros nuevos con: tu usuario, tu rol, la acción (Bloquear
+      terminal / Apagar terminal / Bloquear toda la sala), el objetivo (nombre
+      de la PC) y la fecha/hora.
+
+  B-3. Se registran ban y levantamiento de ban
+  ───────────────────────────────────────────────
+  Pasos:
+    1. Banear a un alumno (Alertas → Baneados → Nuevo ban).
+    2. Levantar ese ban.
+    3. Ir a Configuración → Auditoría.
+  Resultado esperado:
+    - Dos registros: "Banear alumno" y "Levantar ban", con el DNI del alumno en
+      el objetivo y tu usuario.
+
+  B-4. Se registra el ciclo de vida de PERSONAS (lo que pediste)
+  ─────────────────────────────────────────────────────────────────
+  Pasos:
+    1. Crear un estudiante nuevo (Base de Datos → Estudiantes → Nuevo).
+    2. Editar ese estudiante.
+    3. Eliminar ese estudiante.
+    4. Crear / editar / eliminar un registro de Personal.
+    5. Ir a Configuración → Auditoría y filtrar por las acciones de personas.
+  Resultado esperado:
+    - Aparecen los registros: Crear estudiante, Editar estudiante, Eliminar
+      estudiante, Crear personal, Editar personal, Eliminar personal — todos con
+      tu usuario, el DNI afectado y la hora.
+
+  B-5. Filtros de la auditoría
+  ──────────────────────────────
+  Pasos: en Configuración → Auditoría, usar los filtros:
+    - Escribir un usuario en el filtro "Usuario".
+    - Elegir una acción en el desplegable.
+    - Poner un rango de fechas (Desde / Hasta).
+  Resultado esperado:
+    - La tabla se filtra correctamente. La paginación (Anterior/Siguiente)
+      funciona si hay muchos registros.
+
+  B-6. Cambios de configuración y resets quedan registrados
+  ────────────────────────────────────────────────────────────
+  Pasos:
+    1. Cambiar el PIN del backdoor o del modo offline (Configuración → Backdoor).
+    2. Descargar un backup SQL (Configuración → Copia de seguridad).
+    3. Ir a Configuración → Auditoría.
+  Resultado esperado:
+    - Registros "Config backdoor" / "Config offline" (SIN mostrar el PIN, solo
+      el hecho del cambio) y "Backup SQL".
+
+
+───────────────────────────────────────────────────────────────────
+  C. PERSISTENCIA DE SESIÓN DEL PANEL (F5 ya no cierra sesión)
+───────────────────────────────────────────────────────────────────
+  C-1. F5 mantiene la sesión y la pestaña
+  ──────────────────────────────────────────
+  Pasos:
+    1. Iniciar sesión en el panel.
+    2. Ir a una pestaña distinta de la inicial (ej: Configuración).
+    3. Presionar F5 (recargar la página).
+  Resultado esperado:
+    - NO vuelve a pedir login (sigue logueado).
+    - Vuelve a la MISMA pestaña donde estabas (Configuración), no a Nodos.
+    - NO se ve un parpadeo de la pantalla de login al recargar.
+
+  C-2. Cerrar la pestaña sí cierra la sesión
+  ──────────────────────────────────────────────
+  Pasos:
+    1. Logueado en el panel, cerrar la pestaña/ventana del navegador.
+    2. Volver a abrir el panel.
+  Resultado esperado:
+    - Pide login de nuevo (la sesión se borró al cerrar la pestaña — correcto
+      para una PC compartida).
+
+  C-3. Logout limpia la sesión
+  ──────────────────────────────
+  Pasos: cerrar sesión con el botón, luego F5.
+  Resultado esperado: muestra el login (no re-entra solo).
+
+
+───────────────────────────────────────────────────────────────────
+  D. PERSONALIZACIÓN DEL PANEL (ícono y textos del login)
+───────────────────────────────────────────────────────────────────
+  D-1. Ícono del administrador
+  ──────────────────────────────
+  Pasos: Configuración → Aplicación → "Ícono del Administrador" → subir imagen
+         → Aplicar logo.
+  Resultado esperado:
+    - El ícono del sidebar (la "U") cambia a tu imagen.
+    - El ícono de la pestaña del navegador (favicon) cambia.
+    - El logo del login también cambia.
+
+  D-2. Textos del login del panel
+  ─────────────────────────────────
+  Pasos: Configuración → Aplicación → "Textos del Login del Panel Administrador"
+         → editar título/subtítulo/pie → Guardar textos → cerrar sesión.
+  Resultado esperado:
+    - La pantalla de login muestra los textos nuevos.
+    - Si se borra un campo y se guarda, vuelve al texto por defecto (no queda
+      en blanco).
+    - NOTA: esto es solo del PANEL, no afecta al kiosco del alumno.
+
+
+───────────────────────────────────────────────────────────────────
+  E. INCIDENCIAS Y BANEO DIRECTO
+───────────────────────────────────────────────────────────────────
+  E-1. Botón banear en incidencia grave
+  ─────────────────────────────────────────
+  Pasos: Alertas → Incidencias → registrar una incidencia tipo GRAVE.
+  Resultado esperado:
+    - En la fila de esa incidencia (columna Acciones) aparece un botón de banear
+      (ícono de prohibición naranja), además del de eliminar.
+    - En incidencias LEVES, ese botón NO aparece.
+    - Al hacer clic, abre el modal de baneo con el DNI ya cargado.
+
+  E-2. Tabla de incidencias responsive
+  ───────────────────────────────────────
+  Pasos: abrir Alertas → Incidencias con varias incidencias; achicar la ventana
+         del navegador o ver en pantalla chica.
+  Resultado esperado:
+    - La tabla hace scroll horizontal limpio, no se desborda ni se encima.
+
+
+───────────────────────────────────────────────────────────────────
+  F. BACKUP DE LA BASE DE DATOS (corregido hoy)
+───────────────────────────────────────────────────────────────────
+  F-1. El backup ahora incluye los datos
+  ──────────────────────────────────────────
+  Pasos:
+    1. Como superadmin: Configuración → Copia de seguridad → Descargar backup.
+    2. Abrir el archivo .sql descargado con un editor de texto (Bloc de notas).
+  Resultado esperado:
+    - El archivo contiene CREATE TABLE (estructura) Y MUCHAS líneas
+      "INSERT INTO ..." (los datos: alumnos, sesiones, etc.).
+    - ANTES el bug era que solo tenía la estructura sin datos. Ahora debe tener
+      ambos.
+
+
+───────────────────────────────────────────────────────────────────
+  G. BUGS FUNCIONALES CORREGIDOS (verificación rápida)
+───────────────────────────────────────────────────────────────────
+  G-1. Editar facultad de un alumno no borra la escuela (BUG-2)
+  ──────────────────────────────────────────────────────────────────
+  Pasos:
+    1. Base de Datos → Estudiantes → editar un alumno que tenga facultad Y
+       escuela cargadas.
+    2. Cambiar SOLO la facultad (dejar la escuela como está) y guardar.
+    3. Volver a abrir ese alumno.
+  Resultado esperado:
+    - La escuela del alumno NO se borró; la facultad quedó actualizada.
+
+  G-2. Validación de contraseña en el panel (BUG-3)
+  ────────────────────────────────────────────────────
+  Pasos: Configuración → Credenciales → intentar poner una contraseña de menos
+         de 8 caracteres, o sin mayúscula, o sin número.
+  Resultado esperado:
+    - El panel avisa de inmediato: "debe tener al menos 8 caracteres, una
+      mayúscula y un número" (ya no deja enviar una débil que el servidor
+      rechazaría con un error confuso).
+
+  G-3. Mensajes programados rechazan hora inválida (BUG-7)
+  ───────────────────────────────────────────────────────────
+  Pasos: Configuración → Backdoor → Mensajes Programados → intentar programar
+         una hora imposible (si la interfaz lo permite escribir algo como 25:99).
+  Resultado esperado:
+    - El servidor rechaza con error de "hora fuera de rango"; no guarda un
+      mensaje que nunca se enviaría.
+
+  G-4. Historial de actividad incluye el día completo (BUG-5)
+  ──────────────────────────────────────────────────────────────
+  Pasos: Eventos → filtrar por una fecha que tenga actividad cerca de medianoche.
+  Resultado esperado:
+    - Aparecen TODOS los eventos del día, incluido cualquiera de las 23:59.
+
+  G-5. DNI enmascarado en la consola del panel (BUG-6)
+  ───────────────────────────────────────────────────────
+  Pasos: con sesiones activas, mirar la consola de "Actividad del Sistema" en
+         Configuración (o descargar el log).
+  Resultado esperado:
+    - Los DNI aparecen enmascarados como ****1234 (solo últimos 4 dígitos), no
+      el DNI completo.
+
+
+───────────────────────────────────────────────────────────────────
+  H. SEGURIDAD / ROLES (cambios de hoy)
+───────────────────────────────────────────────────────────────────
+  H-1. Admin y superadmin pueden bloquear/apagar/bloquear sala
+  ────────────────────────────────────────────────────────────────
+  Pasos: iniciar sesión como ADMIN normal (no superadmin) e intentar bloquear
+         una PC, apagar una PC y bloquear toda la sala.
+  Resultado esperado:
+    - Las tres acciones funcionan (NO se restringió a superadmin; quedó por
+      decisión que ambos roles pueden). Y cada una queda en la Auditoría.
+
+  H-2. El servidor reinicia y cierra sesiones colgadas
+  ────────────────────────────────────────────────────────
+  Pasos: detener el servidor (Ctrl+C) con alguna sesión activa y volver a
+         arrancarlo.
+  Resultado esperado:
+    - Al arrancar imprime "Application startup complete."
+    - Las sesiones que estaban activas quedan cerradas; las terminales pasan a
+      "offline" y los kioscos reconectan solos.
+
+  H-3. Reconexión masiva tras reinicio
+  ───────────────────────────────────────
+  Pasos: con varias PCs conectadas, reiniciar el servidor.
+  Resultado esperado:
+    - Todas las PCs vuelven a aparecer en Nodos en estado "bloqueado" (no
+      "activo"), esperando login. No se cae el servidor por la reconexión
+      simultánea (se corrigió una condición de carrera en el broadcast).
+
+
+───────────────────────────────────────────────────────────────────
+  NOTAS / OBSERVACIONES DURANTE LA PRUEBA
+───────────────────────────────────────────────────────────────────
+  (anotar acá lo que falle o se comporte distinto a lo esperado, con la PC y la
+   hora, para revisarlo después)
+
+  -
+  -
+  -
+
+
+───────────────────────────────────────────────────────────────────
+  PENDIENTE QUE NO SE PUEDE PROBAR AÚN (requiere otra versión del cliente)
+───────────────────────────────────────────────────────────────────
+  Estos NO se tocaron todavía; se mencionan para no confundir si aparecen:
+    - G-5 (bandera offline atascada): ver prueba A-5 arriba; si falla, es bug
+      conocido a corregir en la próxima compilación del cliente.
+    - Auto-actualización del .exe sin verificar firma/hash (E-2).
+    - Comandos del servidor sin firma / canal sin TLS (E-3).
+    - PIN del backdoor hardcodeado en el cliente (E-4).
+  Todos requieren modificar y recompilar el cliente C# y se abordarán juntos en
+  una próxima sesión coordinada con el despliegue.

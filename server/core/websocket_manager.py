@@ -91,15 +91,23 @@ class ConnectionManager:
             self.desconectar(tid)
         await self.notificar_admins()
 
-    async def broadcast(self, mensaje: dict):
+    async def broadcast(self, mensaje: dict) -> int:
+        """Difunde a todas las terminales conectadas. Devuelve a cuántas llegó
+        realmente (las caídas se descuentan), para que el llamador pueda decidir
+        si marcar un mensaje como 'enviado' o reintentar en el próximo ciclo."""
         muertos = []
-        for ip, ws in self.conexiones_activas.items():
+        entregados = 0
+        # Iterar sobre una copia (G-6): el dict vivo puede mutar si una terminal
+        # conecta/desconecta durante un await → RuntimeError "dict changed size".
+        for ip, ws in list(self.conexiones_activas.items()):
             try:
                 await ws.send_json(mensaje)
+                entregados += 1
             except Exception:
                 muertos.append(ip)
         for ip in muertos:
             self.desconectar(ip)
+        return entregados
 
     # ── Panel Admin ───────────────────────────────────────────────────
 
@@ -119,7 +127,9 @@ class ConnectionManager:
     async def _broadcast_admins(self, payload: dict):
         """Envía payload a todos los admins conectados, limpiando los caídos."""
         muertos = []
-        for ws in self._admins:
+        # Copia defensiva (G-6): _admins puede mutar durante un await si un admin
+        # se conecta/desconecta mientras se difunde.
+        for ws in list(self._admins):
             try:
                 await ws.send_json(payload)
             except Exception:

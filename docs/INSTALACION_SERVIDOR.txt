@@ -1,0 +1,481 @@
+═══════════════════════════════════════════════════════════════════
+  INSTALACIÓN DEL SERVIDOR — Control Biblioteca UNASAM
+  Versión actual del sistema: 4.4x (muy por encima de la 3.0 original)
+  Para: la PC del administrador / encargado del centro de cómputo (Windows)
+  Actualizado: 2026-06-10
+═══════════════════════════════════════════════════════════════════
+
+Este instructivo reemplaza al de la versión 3.0. El sistema cambió bastante
+desde entonces (nueva estructura de base de datos, auditoría, roles
+admin/superadmin, modo offline, etc.), por eso conviene seguir ESTE documento
+y no el viejo.
+
+LO MÁS IMPORTANTE — LEER ANTES DE EMPEZAR:
+  >>> Si en esta PC YA HAY una versión vieja (3.0) instalada y con datos, NO
+      sigas la instalación a ciegas: primero HACÉ UN RESPALDO de la base de
+      datos vieja (ver SECCIÓN F al final). La estructura de la BD cambió, así
+      que NO se puede simplemente "apuntar" el sistema nuevo a la base vieja.
+      Los datos (alumnos, personal) se migran con los import de Excel; el
+      historial viejo se conserva aparte. Detalle en la SECCIÓN F.
+
+
+───────────────────────────────────────────────────────────────────
+  QUÉ NECESITÁS ANTES DE EMPEZAR
+───────────────────────────────────────────────────────────────────
+  - PC con Windows (la del encargado), con una IP fija en la red local.
+  - Conexión a la red local de la biblioteca (no hace falta internet para
+    que el sistema funcione; internet solo se usa para la consulta opcional
+    al SGA, que tiene respaldo en la base local).
+  - La carpeta del proyecto copiada en la PC (la carpeta "control" completa,
+    que contiene "server", "admin" y "client").
+  - Permisos de Administrador en Windows (para el instalador).
+
+
+───────────────────────────────────────────────────────────────────
+  SECCIÓN A — REQUISITOS PREVIOS (instalar una vez)
+───────────────────────────────────────────────────────────────────
+
+  A-1. MySQL / MariaDB (el motor de base de datos)
+  ──────────────────────────────────────────────────
+    El sistema usa MySQL/MariaDB (NO usa SQLite — eso era una confusión de
+    versiones viejas; hoy el servidor se NIEGA a arrancar si no apunta a MySQL).
+
+    Opción recomendada — XAMPP (trae MariaDB, fácil de manejar):
+      1. Descargar XAMPP: https://www.apachefriends.org/es/index.html
+      2. Instalarlo (por defecto queda en C:\xampp).
+      3. Abrir el "XAMPP Control Panel" y arrancar el módulo "MySQL".
+      4. Anotar: por defecto el usuario es "root", el puerto 3306, y la
+         contraseña suele estar vacía o ser la que definas. En este proyecto
+         se viene usando usuario "root" y contraseña "impo2010".
+
+    Opción alternativa — MySQL Server 8.x:
+      https://dev.mysql.com/downloads/mysql/  (tipo "Server Only", puerto 3306,
+      anotar la contraseña de root).
+
+    IMPORTANTE: MySQL debe quedar CORRIENDO siempre que el servidor funcione.
+    Si usás XAMPP, el MySQL debe estar arrancado (ver que diga "Running" en
+    verde en el panel de XAMPP).
+
+  A-2. Python 3.11 o superior
+  ─────────────────────────────
+    1. Descargar: https://www.python.org/downloads/
+    2. Durante la instalación, MARCAR la casilla "Add Python to PATH"
+       (es fácil olvidarla y luego nada funciona).
+    3. Verificar: abrir CMD y escribir  python --version  → debe mostrar 3.11+.
+
+
+───────────────────────────────────────────────────────────────────
+  SECCIÓN B — CONFIGURAR ANTES DE INSTALAR (importante)
+───────────────────────────────────────────────────────────────────
+  Antes de correr el instalador, revisá/editá el archivo de configuración para
+  que apunte a esta PC y a tu MySQL.
+
+  Archivo: server\config.json
+  Ejemplo de su contenido (editá los valores que correspondan):
+
+    {
+      "database": {
+        "user": "root",
+        "password": "impo2010",        <- la contraseña de TU MySQL/MariaDB
+        "host": "localhost",
+        "port": 3306,
+        "name": "biblioteca_unasam"     <- nombre de la base (dejar así)
+      },
+      "network": {
+        "server_static_ip": "192.168.1.33",  <- la IP FIJA de ESTA PC en la red
+        "port": 8000
+      },
+      "security": {
+        "pass_nivel2": "max123"
+      },
+      "actualizaciones": {
+        "ruta_distribucion": "C:\\WinSysCache"
+      }
+    }
+
+  Qué editar sí o sí:
+    - database.password → la contraseña real de tu MySQL (si XAMPP no tiene
+      contraseña, dejala vacía: "").
+    - network.server_static_ip → la IP fija de esta PC en la red local. Para
+      saberla: abrí CMD y escribí  ipconfig  → mirá "Dirección IPv4". Conviene
+      que esa IP sea FIJA (reservada en el router) para que las PCs cliente
+      siempre encuentren al servidor.
+
+  NOTA DE SEGURIDAD: el instalador generará automáticamente una SECRET_KEY
+  fuerte y única (para los tokens de sesión). No tenés que hacer nada con eso.
+
+
+───────────────────────────────────────────────────────────────────
+  SECCIÓN C — INSTALACIÓN (el instalador hace casi todo)
+───────────────────────────────────────────────────────────────────
+
+  C-1. Ejecutar el instalador
+  ─────────────────────────────
+    1. Asegurate de que MySQL/MariaDB esté CORRIENDO (XAMPP en verde).
+    2. Ir a la carpeta server\
+    3. Clic derecho sobre  instalar_servidor.bat  → "Ejecutar como administrador".
+    4. Esperar a que termine (2 a 5 minutos).
+
+    El instalador hace automáticamente:
+      [1/4] Crea el entorno virtual de Python (.venv).
+      [2/4] Instala las dependencias (FastAPI, SQLAlchemy, etc.).
+      [3/4] Ejecuta el configurador: genera el archivo .env (con la SECRET_KEY
+            fuerte), CREA la base de datos "biblioteca_unasam" si no existe, y
+            crea las tablas.
+      [4/4] Habilita el puerto 8000 en el firewall de Windows y configura el
+            arranque automático del servidor al iniciar Windows.
+
+    Si el configurador falla, lo más común es que MySQL no esté corriendo o que
+    la contraseña en config.json esté mal. Corregí config.json y volvé a correr
+    el .bat.
+
+  C-2. Arrancar el servidor
+  ───────────────────────────
+    - Automático: reiniciá la PC. El servidor arranca solo al iniciar Windows.
+    - Manual: doble clic en  server\servidor_run.bat  (abre una ventana de
+      consola; si la cerrás, el servidor se detiene).
+    - Silencioso (sin ventana): el instalador dejó un acceso en el inicio de
+      Windows que lo arranca sin ventana.
+
+  C-3. Verificar que funciona
+  ─────────────────────────────
+    En el navegador de esta misma PC, entrá a:
+      http://localhost:8000/admin
+    Si carga la pantalla de login del panel, el servidor está funcionando.
+
+    Desde una PC cliente en la red:
+      http://<IP_DEL_SERVIDOR>:8000/admin
+      (ejemplo: http://192.168.1.33:8000/admin)
+
+    Si NO carga:
+      - Verificá que MySQL esté corriendo.
+      - Verificá que el proceso python.exe exista (Administrador de Tareas →
+        pestaña Detalles).
+      - Mirá la ventana de consola del servidor: el error aparece ahí (ej.
+        "Can't connect to MySQL" = arrancar MySQL).
+
+
+───────────────────────────────────────────────────────────────────
+  SECCIÓN D — CARPETA DE DISTRIBUCIÓN DEL CLIENTE (C:\WinSysCache)
+───────────────────────────────────────────────────────────────────
+  PARA QUÉ SIRVE: es la carpeta DESDE DONDE SE ACTUALIZAN los kioscos. Cada PC
+  cliente, al arrancar, le pregunta al servidor qué versión hay disponible; el
+  servidor responde leyendo esta carpeta, y si la PC tiene una versión más vieja,
+  descarga el .exe de acá y se reinicia sola. Sin esta carpeta lista, los kioscos
+  no pueden descargar ni actualizar el cliente.
+
+  El nombre "WinSysCache" es a propósito (parece una carpeta de sistema de
+  Windows) para que nadie la borre por error. Está en la PC del servidor.
+
+  D-1. Crear la carpeta y poner los archivos
+  ──────────────────────────────────────────────
+    Ruta por defecto:  C:\WinSysCache\
+    (si no existe, creala; el servidor también la busca ahí por defecto).
+
+    Archivos que debe contener:
+
+      [obligatorio] ControlBiblioteca.Client.exe
+                    El ejecutable del kiosco que descargan las PCs cliente.
+
+      [obligatorio] version.txt
+                    Un archivo de texto con SOLO el número de versión, sin "v"
+                    ni espacios. Ejemplo de su único contenido:
+                        4.44
+                    (Si lo editás con el Bloc de notas, guardá como UTF-8; el
+                     servidor tolera el BOM, pero NO pongas comillas ni saltos
+                     de línea extra.)
+
+    Eso es TODO lo necesario: con esos dos archivos las actualizaciones
+    funcionan. Tu instalación actual ya los tiene.
+
+    (NOTA TÉCNICA, no hace falta crearlo) El servidor sabe leer también un
+    archivo opcional cliente.sha256 y lo informa, pero la versión ACTUAL del
+    cliente NO verifica ese hash al descargar: solo comprueba que el .exe
+    bajado sea un ejecutable válido (firma de Windows + tamaño mínimo). Por eso
+    no hace falta generar cliente.sha256 hoy; no cambia nada.
+
+  D-2. Publicar una versión NUEVA del cliente (cuando recompilás)
+  ─────────────────────────────────────────────────────────────────
+    Cada vez que haya cambios en el cliente y quieras que TODAS las PCs se
+    actualicen solas:
+
+      1. Compilar el cliente (desde la carpeta client\):
+           dotnet clean
+           dotnet publish -c Release -r win-x64 --self-contained true ^
+                          /p:PublishSingleFile=true -o publish\
+      2. Copiar el .exe generado (publish\ControlBiblioteca.Client.exe) a
+         C:\WinSysCache\ , reemplazando el anterior.
+      3. Editar C:\WinSysCache\version.txt y SUBIR el número (ej. de 4.44 a 4.45).
+         El número nuevo debe ser MAYOR que el que tienen los kioscos (el kiosco
+         compara como número de versión: 4.45 > 4.44; "4.10" es mayor que "4.9").
+      4. Reiniciar el servidor para que relea version.txt.
+
+    Qué pasa después en cada PC cliente:
+      - Al reiniciarse el kiosco, detecta que la versión del servidor es mayor.
+      - Descarga el nuevo .exe, valida que sea un ejecutable real y se reinicia.
+      - La nueva versión queda visible en la pantalla de login del kiosco.
+      - Si una PC ya estaba corriendo y no se reinició, se actualiza en su
+        próximo reinicio.
+
+  D-3. La ruta es configurable (no estás obligado a usar C:\WinSysCache)
+  ─────────────────────────────────────────────────────────────────────────
+    Si preferís otra carpeta, se cambia desde el panel (SOLO superadmin):
+      Configuración → (sección de distribución / ruta del cliente) → escribir la
+      ruta nueva → guardar.
+    El servidor pasa a leer version.txt y el .exe desde esa carpeta. Por defecto,
+    si nunca lo tocaste, usa C:\WinSysCache. También se puede fijar por la
+    variable de entorno RUTA_DISTRIBUCION_BASE en server\.env (avanzado).
+
+  D-4. Si un kiosco no se actualiza
+  ───────────────────────────────────
+    - Verificá que el servidor esté corriendo y accesible desde esa PC.
+    - Abrí C:\WinSysCache\version.txt y confirmá que tenga el número correcto,
+      sin espacios ni comillas.
+    - Confirmá que el .exe nuevo esté efectivamente copiado en la carpeta.
+    - Reiniciá el servidor (relee version.txt al arrancar).
+    - El kiosco anota en su log de actualización (autoupdate.log, en la misma
+      carpeta del .exe del kiosco) si la descarga falló y por qué.
+
+  D-5. Instalar el kiosco en una PC nueva (terminal nueva)
+  ───────────────────────────────────────────────────────────
+    Cuando agregás una PC más a la sala:
+      1. Copiar ControlBiblioteca.Client.exe a la PC nueva (desde C:\WinSysCache\
+         del servidor, o desde donde tengas el .exe del cliente).
+      2. En la MISMA carpeta del .exe, crear el archivo kiosco.config.json con
+         este contenido EXACTO (las claves son ServerIp y ServerPort, separadas;
+         NO es una sola URL):
+             {
+               "ServerIp": "192.168.1.33",
+               "ServerPort": 8000
+             }
+         - Poné la IP REAL del servidor en ServerIp (la misma de config.json →
+           network.server_static_ip).
+         - ServerPort va SIN comillas (es un número), normalmente 8000.
+         - Si el archivo falta o queda mal, el kiosco asume 127.0.0.1:8000 y NO
+           encontrará al servidor (esa es una causa típica de "no conecta").
+      3. Ejecutar el .exe como Administrador.
+
+    Qué tiene que pasar:
+      - El kiosco se conecta y, en el panel (Nodos), aparece una tarjeta nueva
+        con el nombre (hostname) de esa PC, en estado "bloqueado".
+      - La terminal queda registrada sola en la base; el encargado la desbloquea
+        desde el panel cuando quiera habilitarla.
+
+    (Detalle completo de este flujo: docs\CASOS_DE_USO.txt, caso F-4.)
+
+
+───────────────────────────────────────────────────────────────────
+  SECCIÓN E — PRIMER INGRESO Y CONFIGURACIÓN INICIAL
+───────────────────────────────────────────────────────────────────
+
+  E-1. Entrar al panel
+  ──────────────────────
+    URL:        http://localhost:8000/admin
+    Usuario:    superadmin   (o admin)
+    Contraseña: admin123     (es la contraseña inicial por defecto)
+
+    Hay DOS usuarios creados automáticamente:
+      - superadmin → acceso COMPLETO. Además de todo lo del admin, puede:
+        Configuración, backup SQL, auditoría, gestión de usuarios/contraseñas,
+        BANEAR alumnos, importar/exportar datos (alumnos, personal, historial),
+        eliminar terminales y las limpiezas masivas de la base.
+      - admin      → acceso OPERATIVO del día a día: monitoreo de las PCs en
+        vivo, BLOQUEAR / APAGAR / DESBLOQUEAR terminales (y bloquear toda la
+        sala), ver el historial de sesiones, ver y crear incidencias.
+        El admin NO puede: banear alumnos, importar/exportar, hacer backup,
+        ver auditoría, crear usuarios ni entrar a Configuración. Esas acciones
+        muestran "Solo superadmin" si las intenta.
+
+    En resumen: el admin opera la sala; el superadmin además administra datos,
+    sanciones y configuración. (Bloquear/apagar PCs SÍ lo hacen los dos.)
+
+  E-2. CAMBIAR LAS CONTRASEÑAS (hacelo de inmediato)
+  ─────────────────────────────────────────────────────
+    La contraseña "admin123" es pública (está en este instructivo). Cambiala:
+      1. Entrá como superadmin.
+      2. Ir a Configuración → Credenciales.
+      3. Cambiar la contraseña del superadmin y la del admin.
+      REQUISITO de la contraseña nueva: mínimo 8 caracteres, al menos una
+      mayúscula y al menos un número (ej: "Biblioteca2026").
+
+  E-3. Cargar los alumnos
+  ─────────────────────────
+    1. Ir a Base de Datos → Estudiantes.
+    2. Clic en "Importar" y subir el Excel del padrón de alumnos.
+       Columnas que reconoce (flexible): DNI, Código, Nombre Completo,
+       Facultad, Escuela. (El DNI es de 8 dígitos.)
+    3. El panel muestra cuántos se importaron / actualizaron / ignoraron.
+
+  E-4. Cargar el personal (opcional)
+  ────────────────────────────────────
+    Base de Datos → Personal Universitario → "Importar" con el Excel de personal
+    (columnas: DNI, Nombre, Cargo, Área, Correo, Teléfono).
+
+
+───────────────────────────────────────────────────────────────────
+  SECCIÓN F — MIGRAR DATOS DESDE LA VERSIÓN 3.0 (¡CUIDADO!)
+───────────────────────────────────────────────────────────────────
+  ESTO ES LO MÁS DELICADO. La PC del administrador YA TIENE una base de datos de
+  la versión 3.0 con datos reales (alumnos, historial). La estructura interna de
+  esa base (nombres de tablas y columnas) es DIFERENTE a la de la versión actual.
+
+  Por eso NO sirve copiar/restaurar la base vieja sobre la nueva: un volcado .sql
+  de la v3.0 trae los nombres de tabla y columnas viejos, y al cargarlo en la base
+  nueva CHOCARÍA (tablas que no existen, columnas con otro nombre → errores). El
+  sistema actual tampoco tiene un botón de "restaurar" en el panel.
+
+  LA MIGRACIÓN REAL SE HACE CON EXCEL. El Excel guarda LOS DATOS (DNI, nombre,
+  facultad, etc.), no la estructura de las tablas; por eso es independiente de los
+  cambios internos y el importador de la versión nueva sabe mapear cada columna a
+  su lugar. Es la forma práctica y segura que evita los errores de estructura.
+
+  ───── PASO 0 (OBLIGATORIO): RESPALDO DE SEGURIDAD DE LA BASE VIEJA ─────
+    Antes de tocar NADA, hacé un volcado completo de la base v3.0. Esto NO es para
+    restaurarlo en la versión nueva (no es compatible), sino como RED DE SEGURIDAD:
+    si algo sale mal, podés volver a tener la v3.0 exactamente como estaba.
+
+      1. Abrir CMD en la PC del administrador.
+      2. Ir a la carpeta de mysqldump (XAMPP: C:\xampp\mysql\bin). Ejemplo:
+           cd C:\xampp\mysql\bin
+      3. Hacer el volcado (reemplazá el nombre real de la base vieja y la
+         contraseña):
+           mysqldump -u root -p NOMBRE_BASE_VIEJA > C:\respaldo_v3_ANTES_DE_MIGRAR.sql
+         (te pedirá la contraseña de MySQL; si XAMPP no tiene, dejá -p sin valor o
+          quitalo).
+      4. Verificar que el archivo C:\respaldo_v3_ANTES_DE_MIGRAR.sql exista y NO
+         esté vacío (pesá unos KB/MB). Copialo a un USB.
+    Con esto tenés la base v3.0 entera guardada. Recién ahora seguí.
+
+  ───── PASO 1: EXPORTAR LOS DATOS DE LA v3.0 A EXCEL ─────
+    En el panel VIEJO (v3.0), todavía funcionando, exportá a Excel:
+      - El maestro de alumnos.
+      - El personal (si la v3.0 lo tenía).
+      - El historial de sesiones (si querés conservarlo).
+    Guardá esos Excel junto al respaldo (USB / carpeta segura).
+
+  ───── PASO 2: INSTALAR LA VERSIÓN NUEVA ─────
+    Seguí las secciones A–C de este instructivo. El configurador crea una base de
+    datos NUEVA y limpia llamada "biblioteca_unasam" (no toca la vieja).
+    NOTA: si la base vieja se llamaba distinto, conviven sin problema; si se
+    llamaba igual, hacé el respaldo del PASO 0 primero y, si hace falta, renombrá
+    o vaciá la vieja — pero NO sin tener el .sql del PASO 0 guardado.
+
+  ───── PASO 3: IMPORTAR LOS DATOS A LA VERSIÓN NUEVA (desde los Excel) ─────
+    En el panel NUEVO, como superadmin:
+      - Alumnos:  Base de Datos → Estudiantes → "Importar" (subir el Excel).
+      - Personal: Base de Datos → Personal → "Importar".
+      - Historial (opcional): Historial → "Importar Historial" (solo superadmin).
+        Crea una terminal virtual "IMPORTADO" para esas sesiones. Usalo solo si el
+        Excel tiene el formato esperado (DNI, Código, Estudiante, Actividad,
+        Inicio, Salida, Fecha). Si solo querés conservar el historial viejo para
+        consulta, dejalo como archivo Excel/PDF y NO lo reimportes.
+
+  ───── PASO 4: VERIFICAR ─────
+    Revisá en el panel nuevo que estén todos los alumnos y el personal. Recién
+    cuando confirmes que todo está correcto, considerá la migración terminada.
+
+  REGLA DE ORO: NO borres la base de datos vieja ni el respaldo .sql del PASO 0
+  hasta confirmar que el sistema nuevo quedó con todos los datos correctos. El
+  respaldo del PASO 0 es tu botón de "deshacer" para volver a la v3.0.
+
+  (CAMINO AVANZADO, solo informativo) Restaurar un .sql del MISMO sistema actual
+  —no de la v3.0— se hace por línea de comandos:
+       mysql -u root -p biblioteca_unasam < backup_biblioteca_unasam_FECHA.sql
+  Esto sirve para mover/restaurar una base ENTRE instalaciones de la MISMA versión,
+  no para migrar desde la v3.0.
+
+
+───────────────────────────────────────────────────────────────────
+  SECCIÓN G — IMPORTAR Y EXPORTAR (qué hay disponible hoy)
+───────────────────────────────────────────────────────────────────
+  Verificado en la versión actual. Lo que existe y dónde está:
+
+  EXPORTAR (descargar):
+    [✔] Alumnos a Excel       → Base de Datos → Estudiantes → "Exportar"
+    [✔] Personal a Excel      → Base de Datos → Personal → "Exportar"
+    [✔] Historial a Excel     → Historial → "Exportar Excel" (exporta TODO)
+    [✔] Historial a PDF       → Historial → "Exportar PDF" (respeta filtros)
+    [✔] Backup SQL completo   → Configuración → Copia de seguridad → "Descargar
+                                 backup" (solo superadmin; incluye estructura Y
+                                 datos de todas las tablas)
+
+  IMPORTAR (subir):
+    [✔] Alumnos desde Excel   → Base de Datos → Estudiantes → "Importar"
+    [✔] Personal desde Excel  → Base de Datos → Personal → "Importar"
+    [✔] Historial desde Excel → Historial → "Importar Historial" (SOLO superadmin;
+                                 crea una terminal virtual "IMPORTADO" para esas
+                                 sesiones. Usar con cuidado para no mezclar datos.)
+    [✖] Restaurar backup SQL  → NO existe desde el panel. Se hace por línea de
+                                 comandos (ver SECCIÓN F camino avanzado).
+
+  RESPALDO PERIÓDICO RECOMENDADO:
+    Cada cierto tiempo (o antes de cualquier cambio grande), entrá como
+    superadmin a Configuración → Copia de seguridad → "Descargar backup" y
+    guardá el archivo .sql en un lugar seguro. Ese backup SÍ incluye todos los
+    datos y sirve para restaurar la MISMA versión del sistema.
+
+
+───────────────────────────────────────────────────────────────────
+  SECCIÓN H — DATOS DE REFERENCIA RÁPIDA
+───────────────────────────────────────────────────────────────────
+  Carpeta del servidor:   ...\control\server\
+  Arranque manual:        server\servidor_run.bat
+  Configuración:          server\config.json   (editar antes de instalar)
+  Variables generadas:    server\.env          (lo crea el configurador, NO
+                                                 editar a mano salvo que sepas)
+  Base de datos:          MySQL/MariaDB, base "biblioteca_unasam", puerto 3306
+  Panel admin:            http://localhost:8000/admin
+  Puerto del servidor:    8000
+  Usuarios iniciales:     superadmin / admin   (contraseña inicial: admin123)
+  Python:                 3.11 o superior
+
+  Las tablas de la base de datos se crean SOLAS la primera vez que arranca el
+  servidor (no hay que crear tablas a mano). Si agregás una versión nueva del
+  servidor sobre la misma base, las tablas que falten se crean solas; las
+  existentes NO se borran.
+
+
+───────────────────────────────────────────────────────────────────
+  SECCIÓN I — PROBLEMAS COMUNES
+───────────────────────────────────────────────────────────────────
+  "El servidor no arranca / el panel no carga"
+    → MySQL no está corriendo. Arrancá MySQL (XAMPP en verde) y reintentá.
+
+  "Can't connect to MySQL" en la consola del servidor
+    → Mismo caso: MySQL apagado, o la contraseña en config.json/.env está mal.
+
+  "DATABASE_URL no configurado o no apunta a MySQL" al arrancar
+    → El .env no se generó o quedó mal. Volvé a correr el configurador
+      (instalar_servidor.bat) con MySQL corriendo.
+
+  "SECRET_KEY es débil o es un placeholder"
+    → El .env tiene una clave inválida. Borrá el .env y volvé a correr el
+      configurador, que genera una clave fuerte automáticamente.
+
+  "Address already in use" (puerto 8000 ocupado)
+    → Ya hay un servidor corriendo. Cerralo (Administrador de Tareas →
+      python.exe) antes de arrancar otro.
+
+  Las PCs cliente no encuentran al servidor
+    → Verificá que la IP del servidor sea la correcta y FIJA, que el puerto
+      8000 esté abierto en el firewall (el instalador lo hace), y que cliente
+      y servidor estén en la misma red local.
+
+  Olvidé la contraseña del superadmin
+    → Ver docs\CASOS_DE_USO.txt (caso A-3): se actualiza el hash directamente
+      en la base de datos con un comando; no hay que reinstalar nada.
+
+
+═══════════════════════════════════════════════════════════════════
+  RESUMEN ULTRA-CORTO (para quien ya lo hizo antes)
+═══════════════════════════════════════════════════════════════════
+  1. MySQL corriendo (XAMPP).
+  2. Python 3.11+ con "Add to PATH".
+  3. Editar server\config.json (contraseña MySQL + IP fija de la PC).
+  4. instalar_servidor.bat como Administrador.
+  5. Reiniciar PC (o servidor_run.bat).
+  6. C:\WinSysCache\ con el .exe del cliente + version.txt (para que los kioscos
+     se actualicen). Detalle: SECCIÓN D.
+  7. http://localhost:8000/admin → superadmin / admin123 → CAMBIAR contraseñas.
+  8. Importar alumnos por Excel. Migración desde v3.0: ver SECCIÓN F.
+═══════════════════════════════════════════════════════════════════

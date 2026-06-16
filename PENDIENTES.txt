@@ -19,19 +19,20 @@ A–G) y las mejoras en MEJORAS.txt. Este archivo es la lista operativa corta.
          (endpoints.py:328) — hoy lanza TypeError al crear terminal nueva.
 [ ] G-12 Cierre masivo deja terminales en estado "disponible" → usar "bloqueado"
          (endpoints.py:1337, 1368).
-[ ] G-6  broadcast del WS: iterar list(...) para evitar RuntimeError.
+[x] G-6  broadcast del WS: iterar list(...) — RESUELTO (Fase 1).
 [ ] G-11 Rol en aprobar/descartar sospecha (endpoints.py:766-814) si aplica.
-[ ] G-13 Tope máximo de limit en listados (DoS por limit gigante).
-[ ] BUG-1 datetime.utcnow() → datetime.now() en cerrar_todas (endpoints.py:1330).
-[ ] BUG-2 actualizar_maestro no asigna id_facultad y BORRA escuela al editar solo
-         facultad (endpoints.py:1916).
-[ ] BUG-5 listar_actividad excluye último segundo del día (endpoints.py:861).
-[ ] BUG-3 Validación de password en el panel (6 → 8 + mayúscula + número).
-[ ] BUG-6 Enmascarar DNI en la consola del panel (app.js:1674-1678).
-[ ] BUG-7 Validar rango de hora en mensajes programados (main.py:1685).
-[ ] F-5  Rol superadmin en POST/PUT/DELETE /api/mensajes.
-[ ] F-2  /api/server-info: evaluar si exigir auth (bajo, kiosco lo usa).
-[ ] F-6  min_length en backdoor_pin/offline_pin (Pydantic).
+[x] G-13 Tope máximo de limit en listados — RESUELTO (Fase 3, los 7 listados).
+[x] BUG-1 datetime.utcnow() → datetime.now() en cerrar_todas — RESUELTO (Fase 1).
+[x] BUG-2 actualizar_maestro id_facultad + escuela — RESUELTO (Fase 2).
+[x] BUG-5 listar_actividad último segundo del día — RESUELTO (Fase 2).
+[x] BUG-3 Validación de password en el panel — RESUELTO (Fase 2).
+[x] BUG-6 Enmascarar DNI en la consola del panel — RESUELTO (Fase 2).
+[x] BUG-7 Validar rango de hora en mensajes programados — RESUELTO (Fase 2).
+[x] F-5  Mensajes programados — RESUELTO: se auditan (decisión: admin y superadmin
+         pueden gestionarlos, igual que bloquear/apagar). No se restringe rol.
+[x] F-2  /api/server-info — RESUELTO: ahora exige auth (solo lo usa el panel).
+[x] F-6  min_length en backdoor_pin/offline_pin — RESUELTO (Field min_length=4).
+[x] F-4  /sesiones/iniciar y /cerrar — RESUELTO: ahora exigen auth.
 
 REQUIEREN RECOMPILAR EL CLIENTE C# (coordinar con despliegue en biblioteca):
 [ ] G-5  _verificandoReconexion atascado → PC no bloqueable. CRÍTICO.
@@ -66,10 +67,7 @@ SEGURIDAD
 [x] WebSocket /ws/admin sin autenticación — RESUELTO (A-1, valida JWT al conectar)
 [x] Rate limiting en endpoints públicos del kiosco — RESUELTO (E-6, por IP)
 
-[ ] F-4: POST /api/sesiones/iniciar y POST /api/sesiones/{id}/cerrar siguen SIN
-    autenticación (el panel los llama con JWT pero el endpoint lo ignora; el
-    cliente C# no los usa — van por WebSocket). Decidir: agregar auth o eliminar
-    si son legacy. Ver VULNERABILIDADES.txt F-4.
+[x] F-4: /sesiones/iniciar y /cerrar — RESUELTO (Fase 3): ambos exigen auth.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -90,6 +88,20 @@ MEJORAS PENDIENTES
 COMPLETADO RECIENTEMENTE (referencia)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+[x] (2026-06-10) Auditoría en BD: tabla `auditoria` + bitácora persistente de
+    quién hizo cada acción administrativa (bloquear/desbloquear/apagar/bloqueo
+    global/ban/levantar/usuarios/config/resets/limpiezas/backup) + pestaña de
+    consulta en Configuración solo-superadmin con filtros. Resuelve C-6.
+[x] (2026-06-10) Auditoría del ciclo de vida de PERSONAS: alta/edición/eliminación/
+    importación de estudiantes (crear/editar/importar maestro) y de personal
+    (crear/editar/eliminar/importar). Quién creó/modificó/borró a quién queda
+    registrado en la bitácora.
+[x] (2026-06-10) Fase 1 de seguridad: G-3 (XSS Sospechas), G-1 (offline-sync
+    validado), G-2 (auditoría WS), G-4 (registrar_terminal), G-6 (race broadcast),
+    G-12 (estado bloqueado en cierres), G-10 (status 500 en limpiar_todo), BUG-1.
+[x] (2026-06-10) Fase 2 bugs funcionales: BUG-2 (id_facultad + escuela borrada),
+    BUG-3 (validación password panel), BUG-5 (filtro fecha último segundo),
+    BUG-6 (DNI enmascarado en consola), BUG-7 (rango de hora en mensajes).
 [x] (2026-06-10) Persistencia de sesión del panel: F5 ya no cierra sesión
     (token en sessionStorage + /auth/me + restaura pestaña activa)
 [x] (2026-06-10) Backup SQL corregido: ahora incluye datos (no solo estructura)

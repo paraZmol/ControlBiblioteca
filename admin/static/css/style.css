@@ -2,6 +2,15 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 button { font-family: inherit; cursor: pointer; }
 
+/* Accesibilidad (Fase 3): foco visible para navegacion por teclado.
+   Aparece solo al navegar con Tab, no al hacer clic con el mouse (focus-visible). */
+:focus-visible {
+    outline: 2px solid var(--a);
+    outline-offset: 2px;
+    border-radius: var(--r-xs);
+}
+:focus:not(:focus-visible) { outline: none; }
+
 /* ══════════════════════════════════════════════
    DESIGN TOKENS
 ══════════════════════════════════════════════ */
@@ -199,7 +208,7 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 14px;
+    padding: 0;                /* sin margen: el panel va de borde a borde (sin "ventana flotante") */
     background: #d4d4d8;       /* zinc-300 light */
     overflow: hidden;
 }
@@ -215,23 +224,15 @@ html.dark .dashboard {
     display: flex;
     flex-direction: row;
     gap: 0;
-    border-radius: 20px;
+    border-radius: 0;          /* plano: sin el contorno redondeado de "ventana" */
     overflow: hidden;
     background: #f4f4f5;
-    border: 1px solid rgba(255,255,255,0.80);
-    box-shadow:
-        0 0 0 1px rgba(0,0,0,0.08),
-        0 20px 60px rgba(0,0,0,0.14),
-        0 4px 16px rgba(0,0,0,0.08);
+    border: none;
+    box-shadow: none;
 }
 .dark .app-window,
 html.dark .app-window {
     background: #18181b;
-    border-color: rgba(255,255,255,0.06);
-    box-shadow:
-        0 0 0 1px rgba(255,255,255,0.04),
-        0 20px 60px rgba(0,0,0,0.60),
-        0 4px 16px rgba(0,0,0,0.40);
 }
 
 /* Main content area (right of sidebar) */
@@ -551,6 +552,19 @@ html.dark .terminal-card {
 /* State variants — solo opacidad en offline, sin border de color */
 .terminal-card.offline  { opacity: .55; }
 
+/* Acento de estado a la izquierda — estado legible "de un vistazo".
+   Solo presentacion; la tarjeta ya recibe la clase activo/bloqueado/offline. */
+.terminal-card.activo::before,
+.terminal-card.bloqueado::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 16px; bottom: 16px;
+    width: 3px; border-radius: 0 3px 3px 0;
+    pointer-events: none;
+}
+.terminal-card.activo::before    { background: var(--ok); }
+.terminal-card.bloqueado::before { background: var(--wrn); }
+
 /* Header row: dot + name/ip left, badge right */
 .tc-header {
     display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
@@ -616,7 +630,7 @@ html.dark .terminal-card {
 .btn-card-desbloquear,
 .btn-card-apagar {
     flex: 1; border-radius: 12px;
-    padding: 9px 10px;
+    padding: 10px 12px; min-height: 40px;
     font: 600 12px/1 var(--font);
     display: flex; align-items: center; justify-content: center; gap: 6px;
     border: 1px solid transparent;
@@ -677,7 +691,7 @@ html.dark .btn-card-apagar {
 /* Eliminar terminal fantasma — solo superadmin, solo en tarjetas offline */
 .btn-card-eliminar-terminal {
     flex: 1; border-radius: 12px;
-    padding: 9px 10px;
+    padding: 10px 12px; min-height: 40px;
     font: 600 12px/1 var(--font);
     display: flex; align-items: center; justify-content: center; gap: 6px;
     border: 1px dashed #fca5a5;
@@ -1215,18 +1229,25 @@ html:not(.dark) .console-header { color: var(--t1); }
     display: grid;
     grid-template-columns: 1fr 260px 240px;
     gap: 16px;
-    align-items: stretch;
+    align-items: stretch;   /* las 3 tarjetas de arriba quedan a la misma altura */
     min-width: 0;
 }
 .mon-bento-top > * { min-width: 0; }
 
 @media (max-width: 1100px) {
     .mon-bento-top { grid-template-columns: 1fr 1fr; }
-    .mon-events-card { display: none; }
+    /* Reacomodar en vez de ocultar: el hero ocupa el ancho completo y
+       Alertas + Eventos bajan a la fila siguiente (lado a lado). Nada desaparece. */
+    .mon-hero-card { grid-column: 1 / -1; min-height: 0; }
+    /* Hero a todo el ancho: compactar la altura (sin el alto fijo ni el
+       space-between que lo estiraban) y dejar los 3 KPIs en fila horizontal,
+       que envuelve si no entran. */
+    .mon-hero-left  { justify-content: flex-start; gap: 14px; }
+    .mon-hero-stats { flex-direction: row; flex-wrap: wrap; row-gap: 14px; }
 }
 @media (max-width: 700px) {
     .mon-bento-top { grid-template-columns: 1fr; }
-    .mon-alerts-card { display: none; }
+    /* Una sola columna: hero, Alertas y Eventos quedan apilados, ninguno se oculta. */
 }
 
 /* ── Hero card ── */
@@ -1249,7 +1270,7 @@ html:not(.dark) .console-header { color: var(--t1); }
 }
 .mon-hero-left {
     display: flex; flex-direction: column;
-    justify-content: space-between; gap: 20px;
+    justify-content: flex-start; gap: 22px;   /* titulo arriba; los KPIs ocupan y se centran en lo que queda */
     flex: 1;
 }
 .mon-hero-title {
@@ -1279,17 +1300,22 @@ html:not(.dark) .console-header { color: var(--t1); }
 }
 
 .mon-hero-stats {
-    display: flex; gap: 24px; flex-wrap: nowrap;
-    align-items: flex-end;
+    display: flex; gap: 28px; flex-wrap: wrap;
+    align-items: flex-start;
+    align-content: center;            /* centra verticalmente la fila de KPIs en el alto disponible */
+    justify-content: space-between;   /* extremos pegados a los bordes: el ultimo KPI llega a la derecha */
+    width: 100%;
+    flex: 1;                          /* toma el alto que queda debajo del titulo */
 }
-.mon-hero-kpi { flex-shrink: 0; }
+/* Cada KPI toma su ancho natural; space-between los reparte de borde a borde. */
+.mon-hero-kpi { flex: 0 0 auto; }
 .mon-hero-kpi-lbl {
-    font-size: 10px; font-weight: 700; color: var(--t3);
+    font-size: 11px; font-weight: 700; color: var(--t3);
     text-transform: uppercase; letter-spacing: .08em;
     white-space: nowrap;
 }
 .mon-hero-kpi-val {
-    font-size: 26px; font-weight: 800; color: var(--t1);
+    font-size: 30px; font-weight: 800; color: var(--t1);
     letter-spacing: -.03em; line-height: 1.1; margin-top: 3px;
     display: flex; align-items: baseline; gap: 2px;
 }
@@ -1301,7 +1327,15 @@ html:not(.dark) .console-header { color: var(--t1); }
     letter-spacing: 0; margin-left: 4px;
     white-space: nowrap;
 }
+/* Fase 2 — jerarquia: el primer KPI ("Equipos Online") es el dato primario que
+   el operador mira de un vistazo. Solo enfasis visual: los 3 KPIs siguen en el
+   mismo lugar y con la misma data; ninguno se quita ni se achica. */
+.mon-hero-stats .mon-hero-kpi:first-child .mon-hero-kpi-val {
+    font-size: 44px;
+    color: var(--ok);
+}
 .mon-hero-right {
+    position: absolute; top: 28px; right: 28px; z-index: 2;
     display: flex; align-items: flex-start; justify-content: flex-end;
 }
 

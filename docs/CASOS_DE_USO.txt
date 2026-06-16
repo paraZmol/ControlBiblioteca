@@ -1,7 +1,7 @@
 ═══════════════════════════════════════════════════════════════════
   CASOS DE USO — Control Biblioteca UNASAM
   Pasos exactos y respuesta esperada del sistema para cada operación.
-  Actualizado: 2026-06-06
+  Actualizado: 2026-06-15
 ═══════════════════════════════════════════════════════════════════
 
 Este archivo responde: "¿Cómo hago X? ¿Qué debería pasar?"
@@ -53,6 +53,24 @@ FLUJO_ALUMNO.txt.
   G. Personalización visual
      G-1. Cambiar el logo de la aplicación (kiosco)
      G-2. Cambiar los textos del login del kiosco
+
+  ............................................
+  H. Mensajes programados al kiosco  [NUEVO]
+     H-1. Programar un mensaje de cierre diario
+     H-2. Programar un mensaje extra (único)
+     H-3. Qué ve el alumno cuando llega el mensaje
+
+  I. Modo offline del kiosco  [NUEVO]
+     I-1. Qué es el modo offline y cuándo se activa
+     I-2. Cómo usar el modo offline (flujo completo)
+     I-3. Qué pasa cuando la red vuelve (sincronización)
+     I-4. Log local de sesiones offline
+
+  J. Atajo de mantenimiento (salida de emergencia)  [NUEVO]
+     J-1. Para qué sirve el atajo de mantenimiento
+     J-2. Cómo usarlo (dos métodos)
+     J-3. Configurar el PIN y la tecla desde el panel
+  ............................................
 
   MEJORAS PENDIENTES (detectadas al documentar)
      → ver sección al final
@@ -667,9 +685,17 @@ FLUJO_ALUMNO.txt.
   Pasos:
     1. Copiar el archivo ControlBiblioteca.Client.exe a la PC nueva.
        (desde C:\WinSysCache\ del servidor)
-    2. Crear en la misma carpeta el archivo kiosco.config.json:
-         {"ServidorUrl": "http://<IP_DEL_SERVIDOR>:8000"}
-       Reemplazar <IP_DEL_SERVIDOR> con la IP real de la PC del servidor.
+    2. Crear en la misma carpeta el archivo kiosco.config.json con este
+       contenido EXACTO (las claves son ServerIp y ServerPort, separadas;
+       NO es una sola URL):
+         {
+           "ServerIp": "<IP_DEL_SERVIDOR>",
+           "ServerPort": 8000
+         }
+       Reemplazar <IP_DEL_SERVIDOR> con la IP real de la PC del servidor
+       (ej: "192.168.1.33"). ServerPort va SIN comillas (es un número).
+       Si el archivo falta o está mal, el kiosco usa 127.0.0.1:8000 por defecto
+       (es decir, no encontrará al servidor en otra PC).
     3. Ejecutar el .exe como Administrador.
 
   Respuesta esperada:
@@ -722,6 +748,284 @@ FLUJO_ALUMNO.txt.
   NOTA: los textos que vienen del servidor (nombre del alumno,
   mensajes de error de validación) no se cambian en el XAML sino en
   server/main.py y server/api/endpoints.py.
+
+
+............................................................................
+  H. MENSAJES PROGRAMADOS AL KIOSCO  [NUEVO]
+............................................................................
+
+  Hay dos tipos de mensajes que el servidor puede enviar a todas las PCs
+  kiosco en una hora determinada:
+    - "cierre"  → se repite cada día a la misma hora (ej: aviso de cierre
+                  a las 21:45). El sistema lo marca como "enviado hoy" y
+                  lo vuelve a enviar el día siguiente.
+    - "extra"   → se envía una sola vez en la fecha/hora indicada y queda
+                  marcado como enviado para no repetirse.
+
+  El kiosco muestra el mensaje como un TOAST (aviso superpuesto en pantalla)
+  durante 5 segundos, sin interrumpir la sesión activa.
+
+  H-1. PROGRAMAR UN MENSAJE DE CIERRE DIARIO
+  ─────────────────────────────────────────────
+  Caso de uso: avisar a todos los alumnos "La sala cerrará en 15 minutos"
+  todos los días a las 21:45.
+
+  Quién puede hacerlo: SOLO SUPERADMIN.
+
+  Pasos:
+    1. Ir a Configuración → Actividad del Sistema (sub-pestaña).
+    2. Buscar la sección "Mensajes programados".
+    3. Elegir tipo: "Cierre diario".
+    4. Escribir el mensaje (ej: "La sala cerrará en 15 minutos.").
+    5. Elegir la hora de envío (formato HH:MM).
+    6. Guardar.
+
+  Respuesta esperada:
+    - Cada día a esa hora, el servidor envía el mensaje a TODAS las PCs
+      conectadas en ese momento.
+    - Las PCs apagadas o sin conexión en ese instante NO reciben el
+      mensaje (no se reenvía cuando reconectan).
+    - En la consola del servidor aparece:
+        [MSG] Mensaje de cierre enviado: "La sala cerrará..."
+
+  PARA PROBARLO:
+    1. Crear un mensaje de cierre con la hora actual + 1 minuto.
+    2. Esperar. Verificar que el toast aparece en los kioscos conectados.
+
+
+  H-2. PROGRAMAR UN MENSAJE EXTRA (ÚNICO)
+  ────────────────────────────────────────
+  Caso de uso: avisar sobre un evento puntual ("Hoy no hay clases en el
+  piso 2") que solo debe salir una vez.
+
+  Pasos:
+    1. Igual que H-1, pero elegir tipo: "Mensaje extra".
+    2. Escribir el mensaje.
+    3. Elegir hora de envío.
+    4. Guardar.
+
+  Respuesta esperada:
+    - El mensaje se envía una única vez cuando llega la hora.
+    - Después queda marcado como "enviado" y no vuelve a enviarse aunque
+      la hora coincida al día siguiente.
+
+  PARA PROBARLO:
+    1. Crear un mensaje extra con la hora actual + 1 minuto.
+    2. Verificar que aparece en los kioscos.
+    3. Esperar otro minuto y verificar que NO se repite.
+
+
+  H-3. QUÉ VE EL ALUMNO CUANDO LLEGA EL MENSAJE
+  ────────────────────────────────────────────────
+  - Aparece un TOAST (banda de aviso) superpuesto en la pantalla del
+    kiosco, con el texto del mensaje, durante 5 segundos.
+  - Si el alumno está en plena sesión, el aviso no la interrumpe: el
+    toast desaparece solo y el alumno puede seguir trabajando.
+  - Si la PC está bloqueada (pantalla de login), el aviso también
+    aparece.
+
+
+............................................................................
+  I. MODO OFFLINE DEL KIOSCO  [NUEVO]
+............................................................................
+
+  I-1. QUÉ ES EL MODO OFFLINE Y CUÁNDO SE ACTIVA
+  ─────────────────────────────────────────────────
+  El modo offline permite que un alumno use una PC aunque el servidor no
+  sea alcanzable por red. Lo activa el ENCARGADO (no el alumno solo),
+  mediante un atajo de teclado secreto + PIN.
+
+  Se activa SOLO cuando el kiosco está en estado desconectado:
+    - El contador de reconexión está corriendo (pantalla de desconexión).
+    - Si hay conexión activa, el atajo no funciona.
+
+  Datos registrados offline:
+    - DNI del alumno, razón de uso, hora de inicio, terminal (hostname).
+    - Todo queda en offline_sessions.json en la carpeta del kiosco.
+    - Cuando la red vuelve, el servidor intenta sincronizar la sesión.
+
+  NOTA: el modo offline es de emergencia, no el flujo habitual. Requiere
+  que el encargado esté físicamente presente en la PC.
+
+
+  I-2. CÓMO USAR EL MODO OFFLINE (FLUJO COMPLETO)
+  ──────────────────────────────────────────────────
+  Escenario: el servidor está caído o la red no llega. Un alumno necesita
+  usar la PC y el encargado decide habilitarla manualmente.
+
+  Pasos:
+    1. Verificar que el kiosco muestra la pantalla de desconexión
+       (contador de reconexión corriendo). Si hay conexión, el atajo
+       no funciona.
+    2. El alumno escribe su DNI y razón de uso en el formulario
+       principal del kiosco (los campos ya visibles en la pantalla).
+    3. El encargado presiona el atajo de teclado offline (por defecto:
+       Ctrl+Alt+F11, configurable desde el panel — ver I-4 / J-3).
+    4. Aparece una ventana: "Acceso Offline — Encargado".
+       El encargado escribe su PIN offline y presiona "Continuar".
+       - Si el PIN es incorrecto, el campo se limpia y se puede reintentar.
+       - Escapar (ESC) cancela sin dejar rastro.
+    5. Si el PIN es correcto:
+       - El kiosco se desbloquea con el DNI y razón ya escritos.
+       - Muestra "Bienvenido, [DNI]" (sin nombre porque no hay servidor).
+       - La sesión queda activa de forma indefinida hasta que el alumno
+         termine o el encargado bloquee manualmente.
+    6. Cuando el alumno termina: el encargado cierra la sesión normalmente
+       (o la PC se bloquea al perder alimentación).
+
+  Si el DNI NO se escribió antes de presionar el atajo:
+    - Aparece un diálogo adicional donde el encargado escribe el DNI y
+      la razón directamente (flujo de respaldo).
+
+  Respuesta esperada en el log (autoupdate.log o App.log de la PC):
+    [Offline] Hotkey registrado (Mod:X Key:Y)
+    [Offline] Sesión iniciada — DNI:12345678 Razón:tarea
+
+  PARA PROBARLO:
+    1. Desconectar la PC del servidor (apagar el servidor o desenchufar
+       el cable de red).
+    2. Esperar que el kiosco muestre la pantalla de desconexión.
+    3. Escribir un DNI y razón.
+    4. Presionar Ctrl+Alt+F11.
+    5. Ingresar el PIN (por defecto: ver kiosco.config.json campo
+       "OfflinePin", o el que se haya configurado en el panel).
+    6. Verificar que el kiosco se desbloquea.
+
+
+  I-3. QUÉ PASA CUANDO LA RED VUELVE (SINCRONIZACIÓN)
+  ──────────────────────────────────────────────────────
+  Cuando el kiosco detecta que el servidor volvió a ser alcanzable
+  mientras hay una sesión offline activa:
+
+  a) El kiosco muestra el toast: "Conexión restaurada. Verificando
+     datos del alumno..."
+
+  b) El servidor verifica el DNI:
+     - Existe en el maestro de alumnos.
+     - No tiene un ban activo.
+
+  c) Resultado "ok":
+     - El kiosco muestra: "Conexión restaurada. Sesión sincronizada."
+     - La sesión offline pasa a ser una sesión normal y se registra
+       en el historial del servidor.
+     - El alumno puede seguir trabajando sin interrupción.
+
+  d) Resultado "baneado" o "no registrado":
+     - Aparece un contador de 3 minutos visible con el motivo
+       (ej: "DNI baneado. La sesión se cerrará en X segundos.").
+     - Al terminar el contador, la PC se bloquea automáticamente.
+     - El encargado debe atender al alumno.
+
+  Registro local:
+    - En offline_sessions.json queda la entrada con estado:
+        "sync:ok"        → sincronización exitosa
+        "sync:baneado"   → alumno estaba baneado
+        "sync:no_existe" → DNI no encontrado en el servidor
+
+
+  I-4. LOG LOCAL DE SESIONES OFFLINE
+  ─────────────────────────────────────
+  Cada sesión offline genera una entrada en el archivo:
+    offline_sessions.json
+  (en la misma carpeta donde está el .exe del kiosco)
+
+  Cada entrada incluye:
+    { "dni": "...", "razon": "...", "hora_inicio": "...",
+      "hora_fin": "...", "estado": "...", "terminal": "PC-01" }
+
+  Estados posibles:
+    "activa"         → sesión en curso (la PC no se cerró limpiamente)
+    "cerrada_manual" → el encargado cerró la sesión manualmente
+    "sync:ok"        → se sincronizó con el servidor al reconectar
+    "sync:baneado"   → el DNI tenía ban, sesión terminada por el sistema
+    "sync:no_existe" → DNI no reconocido por el servidor
+
+  El archivo es de solo-append. Si el kiosco se apaga durante una sesión
+  offline activa, la entrada queda con estado "activa" (sin hora_fin).
+
+
+............................................................................
+  J. ATAJO DE MANTENIMIENTO (SALIDA DE EMERGENCIA)  [NUEVO]
+............................................................................
+
+  J-1. PARA QUÉ SIRVE
+  ─────────────────────
+  El atajo de mantenimiento permite que el encargado cierre el kiosco
+  de emergencia y regrese al escritorio de Windows, sin necesidad de
+  contraseña de Windows ni de cerrar sesión del servidor.
+
+  Casos de uso típicos:
+    - La PC kiosco colgó y hay que reiniciarla.
+    - Se necesita instalar una actualización manual.
+    - El kiosco tiene un problema que requiere acceso al escritorio.
+
+  ACLARACIÓN IMPORTANTE: esta salida cierra el kiosco completamente
+  (EscaparAExplorer). NO es lo mismo que bloquear al alumno: la PC
+  vuelve al escritorio de Windows, no a la pantalla de login del kiosco.
+  Volver al kiosco requiere volver a ejecutar el .exe.
+
+
+  J-2. CÓMO USARLO (DOS MÉTODOS)
+  ─────────────────────────────────
+
+  MÉTODO 1 — Atajo rápido (Ctrl+Alt+F10, configurable):
+    1. Presionar la combinación configurada (por defecto: Ctrl+Alt+F10).
+    2. El kiosco se cierra inmediatamente y regresa al escritorio.
+    - NO pide confirmación ni PIN. Es instantáneo.
+    - Funciona tanto si el kiosco está bloqueado como si hay sesión activa.
+    - Si había sesión activa, el servidor la detecta como desconexión
+      y cierra la sesión con motivo "desconexion_red".
+
+  MÉTODO 2 — Secuencia Ctrl+M + 5x ESC (método legado/alternativo):
+    1. Presionar Ctrl+M. El kiosco activa el modo de escape internamente
+       (no hay aviso visual — solo se registra en el log interno).
+    2. Dentro de los 5 segundos siguientes, presionar ESC exactamente 5 veces.
+    3. El kiosco se cierra y regresa al escritorio.
+    - Si pasan más de 5 segundos sin completar los 5 ESC, el contador
+      se resetea y hay que empezar desde Ctrl+M otra vez.
+    - No pide PIN.
+
+  PARA PROBARLO (método 1):
+    1. Con el kiosco corriendo (bloqueado o con sesión), presionar
+       Ctrl+Alt+F10.
+    2. Verificar que el kiosco se cierra y el escritorio de Windows
+       queda visible.
+    3. En el log del servidor debería aparecer la terminal como "offline".
+
+
+  J-3. CONFIGURAR EL PIN Y LA TECLA DESDE EL PANEL
+  ───────────────────────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN.
+
+  El atajo y PIN del modo offline (Ctrl+Alt+F11 por defecto) y el atajo
+  de mantenimiento (Ctrl+Alt+F10) se pueden cambiar desde el panel sin
+  tener que editar archivos en cada PC: el servidor los distribuye
+  automáticamente a todos los kioscos conectados.
+
+  Pasos:
+    1. Ir a Configuración → sub-pestaña "Backdoor" (solo visible para
+       superadmin).
+    2. Ajustar:
+         - "Atajo de mantenimiento": la combinación de teclas.
+         - "PIN de mantenimiento": mínimo 4 caracteres.
+    3. Guardar.
+    4. El servidor envía la nueva configuración a TODOS los kioscos
+       conectados en ese momento via WebSocket (tipo: config_backdoor_update).
+       Los kioscos desconectados la recibirán al reconectar.
+
+  Para el modo offline (Ctrl+Alt+F11), el flujo es el mismo pero en la
+  sub-pestaña "Offline" del mismo panel.
+
+  NOTA: si el kiosco no está conectado cuando se cambia la config, la
+  nueva configuración llega al reconectarse. Hasta ese momento usa el
+  PIN y atajo anteriores.
+
+  PARA PROBARLO:
+    1. Cambiar el PIN de mantenimiento desde el panel.
+    2. En un kiosco conectado, verificar que el nuevo PIN funciona
+       inmediatamente (sin reiniciar).
+    3. Desconectar un kiosco, cambiar el PIN otra vez, reconectar el
+       kiosco y verificar que adopta el nuevo PIN.
 
 
 ───────────────────────────────────────────────────────────────────

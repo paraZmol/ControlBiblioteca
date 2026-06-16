@@ -10,7 +10,7 @@ import asyncio
 
 import hashlib
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, delete
@@ -18,10 +18,12 @@ from database import init_db, async_session
 from models import AlumnoMaestro, Usuario, Terminal, Sesion, Facultad, Escuela, Ban, PersonalUniversidad, ActividadLog, Sospecha, MensajeProgramado
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
-from pydantic import BaseModel as _BaseModel
+from pydantic import BaseModel as _BaseModel, Field as _Field
 from auth_service import hashear_password, obtener_usuario_actual
 from api.endpoints import router as api_router
 from core.websocket_manager import manager
+from core.auditoria import registrar_auditoria
+from core import rate_limit
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
@@ -205,58 +207,94 @@ async def consultar_sga(dni: str) -> Optional[dict]:
 
 
 async def _scheduler_mensajes():
-    """Comprueba cada minuto si hay mensajes programados que enviar."""
+    """Comprueba periódicamente si hay mensajes programados que enviar.
+
+    BUG-MSG (corregido): antes comparaba la hora con IGUALDAD EXACTA de minuto
+    (hora_envio == "HH:MM") y dormía 60s al inicio de cada vuelta. Como cada
+    iteración tarda 60s + el tiempo de la query, el reloj del scheduler derivaba
+    y el minuto programado podía no compararse NUNCA → el mensaje no se enviaba.
+    Ahora:
+      - Tick cada 20s (sin desfase acumulado relevante).
+      - Dispara cuando la hora programada YA LLEGÓ ese día (hora_envio <= ahora),
+        no solo en el minuto exacto.
+      - Solo marca un mensaje como enviado si llegó al menos a UNA terminal
+        (broadcast devuelve la cantidad de entregas). Si no hay nadie conectado,
+        reintenta en el próximo ciclo en vez de perderse.
+    """
     while True:
-        await asyncio.sleep(60)
         try:
             ahora = datetime.now()
             hora_actual = ahora.strftime("%H:%M")
+            hoy = ahora.date()
             async with async_session() as db:
-                # Cierre diario: activo, no enviado hoy, hora coincide
+                # Duración del aviso en el kiosco (configurable; default 60s)
+                from models import ConfiguracionKiosco
+                _resc = await db.execute(select(ConfiguracionKiosco).limit(1))
+                _cfg = _resc.scalar_one_or_none()
+                duracion_seg = (_cfg.mensaje_duracion_seg if _cfg and _cfg.mensaje_duracion_seg else 60)
+
+                # ── Cierre diario: activo, no enviado hoy, ya llegó la hora ──
                 res_c = await db.execute(
                     select(MensajeProgramado).where(
                         MensajeProgramado.tipo == "cierre",
                         MensajeProgramado.activo == True,
-                        MensajeProgramado.hora_envio == hora_actual,
+                        MensajeProgramado.hora_envio <= hora_actual,
                     )
                 )
                 for msg in res_c.scalars().all():
                     ultima = msg.fecha_envio
-                    if ultima is None or ultima.date() < ahora.date():
-                        await manager.broadcast({
-                            "tipo": "mensaje_broadcast",
-                            "mensaje": msg.mensaje,
-                            "origen": "cierre",
-                        })
+                    ya_enviado_hoy = ultima is not None and ultima.date() >= hoy
+                    if ya_enviado_hoy:
+                        continue
+                    entregados = await manager.broadcast({
+                        "tipo": "mensaje_broadcast",
+                        "mensaje": msg.mensaje,
+                        "origen": "cierre",
+                        "duracion_seg": duracion_seg,
+                    })
+                    if entregados > 0:
                         msg.fecha_envio = ahora
-                        logger.info(f"[MSG] Mensaje de cierre enviado: {msg.mensaje!r}")
+                        logger.info(f"[MSG] Cierre enviado a {entregados} terminal(es): {msg.mensaje!r}")
+                    else:
+                        logger.info(f"[MSG] Cierre pendiente (0 terminales conectadas): {msg.mensaje!r}")
 
-                # Extras: no enviados, hora coincide, fecha_envio es hoy o nula
+                # ── Extras: no enviados, ya llegó su fecha/hora programada ──
                 res_e = await db.execute(
                     select(MensajeProgramado).where(
                         MensajeProgramado.tipo == "extra",
                         MensajeProgramado.activo == True,
                         MensajeProgramado.enviado == False,
-                        MensajeProgramado.hora_envio == hora_actual,
+                        MensajeProgramado.hora_envio <= hora_actual,
                     )
                 )
                 for msg in res_e.scalars().all():
-                    fecha_prog = msg.fecha_envio
-                    if fecha_prog is None or fecha_prog.date() == ahora.date():
-                        await manager.broadcast({
-                            "tipo": "mensaje_broadcast",
-                            "mensaje": msg.mensaje,
-                            "origen": "extra",
-                        })
+                    # fecha_envio en un extra = fecha PROGRAMADA (no "última vez").
+                    # Sin fecha => se envía hoy. Con fecha => solo cuando ya llegó ese día.
+                    fecha_prog = msg.fecha_envio.date() if msg.fecha_envio else hoy
+                    if fecha_prog > hoy:
+                        continue  # programado para más adelante
+                    entregados = await manager.broadcast({
+                        "tipo": "mensaje_broadcast",
+                        "mensaje": msg.mensaje,
+                        "origen": "extra",
+                        "duracion_seg": duracion_seg,
+                    })
+                    if entregados > 0:
                         msg.enviado = True
-                        msg.fecha_envio = ahora
-                        logger.info(f"[MSG] Mensaje extra enviado: {msg.mensaje!r}")
+                        logger.info(f"[MSG] Extra enviado a {entregados} terminal(es): {msg.mensaje!r}")
+                    else:
+                        logger.info(f"[MSG] Extra pendiente (0 terminales conectadas): {msg.mensaje!r}")
 
                 await db.commit()
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"[SCHEDULER] Error: {e}")
+
+        try:
+            await asyncio.sleep(20)
+        except asyncio.CancelledError:
+            break
 
 
 async def _migrar_columnas():
@@ -278,6 +316,9 @@ async def _migrar_columnas():
             except Exception: pass
             try:
                 await db.execute(text("ALTER TABLE catalogo_motivos ADD COLUMN activo BOOLEAN DEFAULT TRUE"))
+            except Exception: pass
+            try:
+                await db.execute(text("ALTER TABLE configuracion_kiosco ADD COLUMN mensaje_duracion_seg INT DEFAULT 60"))
             except Exception: pass
             # Tabla mensajes_programados
             try:
@@ -560,13 +601,15 @@ if os.path.exists(admin_path):
 # ── Endpoint de información del servidor ───────────────────────────
 
 @app.get("/api/server-info")
-async def server_info():
-    """Devuelve información del servidor: IP local y puerto."""
+async def server_info(_: Usuario = Depends(obtener_usuario_actual)):
+    """Devuelve información del servidor: IP local y puerto.
+    F-2: requiere autenticación — el panel lo llama tras el login, y el cliente
+    kiosco no lo usa, así que exigir token no rompe ningún flujo."""
     return {
         "ip": _IP_LOCAL,
         "port": 8000,
         "ws_url": f"ws://{_IP_LOCAL}:8000/ws/admin",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now().isoformat()
     }
 
 
@@ -636,6 +679,13 @@ async def actualizar_usuario(
     if not datos.nuevo_username and not datos.nueva_password:
         raise HTTPException(status_code=400, detail="Nada que actualizar")
 
+    # Auditoría SIN registrar la contraseña, solo el hecho del cambio
+    cambios = []
+    if datos.nuevo_username: cambios.append("username")
+    if datos.nueva_password: cambios.append("contraseña")
+    await registrar_auditoria(superadmin.username, "editar_usuario", rol=superadmin.rol,
+                              objetivo=f"usuario rol={datos.rol_objetivo}",
+                              detalle="cambió " + " y ".join(cambios), db=db)
     await db.commit()
     return {"mensaje": "Usuario actualizado correctamente"}
 
@@ -643,12 +693,12 @@ async def actualizar_usuario(
 class _ConfiguracionKioscoReq(_BaseModel):
     backdoor_modifiers: int
     backdoor_key: int
-    backdoor_pin: str
+    backdoor_pin: str = _Field(..., min_length=4, max_length=50)   # F-6: no aceptar PIN vacío/trivial
 
 class _ConfiguracionOfflineReq(_BaseModel):
     offline_modifiers: int
     offline_key: int
-    offline_pin: str
+    offline_pin: str = _Field(..., min_length=4, max_length=50)    # F-6
 
 @app.get("/api/config/backdoor")
 async def obtener_config_backdoor(
@@ -688,6 +738,8 @@ async def actualizar_config_backdoor(
     cfg.backdoor_modifiers = datos.backdoor_modifiers
     cfg.backdoor_key = datos.backdoor_key
     cfg.backdoor_pin = datos.backdoor_pin
+    await registrar_auditoria(admin.username, "cambiar_config_backdoor", rol=admin.rol,
+                              objetivo="config kiosco", detalle="actualizó PIN/atajo de mantenimiento", db=db)
     await db.commit()
     await manager.broadcast({
         "tipo": "config_backdoor_update",
@@ -735,6 +787,8 @@ async def actualizar_config_offline(
     cfg.offline_modifiers = datos.offline_modifiers
     cfg.offline_key = datos.offline_key
     cfg.offline_pin = datos.offline_pin
+    await registrar_auditoria(admin.username, "cambiar_config_offline", rol=admin.rol,
+                              objetivo="config kiosco", detalle="actualizó PIN/atajo offline", db=db)
     await db.commit()
     await manager.broadcast({
         "tipo": "config_offline_update",
@@ -778,6 +832,9 @@ async def limpiar_todo(
             for terminal in result.scalars().all():
                 terminal.estado = "offline"
                 terminal.ultima_conexion = None
+            await registrar_auditoria(admin.username, "limpiar_todo", rol=admin.rol,
+                                      objetivo="todo el sistema",
+                                      detalle="borró sesiones y reseteó terminales", db=db)
             await db.commit()
             logger.info("[LIMPIEZA] Todas las terminales reseteadas a estado 'offline'")
 
@@ -785,7 +842,9 @@ async def limpiar_todo(
         return {"estado": "ok", "mensaje": "Sistema limpiado completamente", "ejecutado_por": admin.username}
     except Exception as e:
         logger.error(f"[LIMPIEZA] Error durante limpieza: {e}")
-        return {"estado": "error", "mensaje": "Error durante la limpieza. Revise los logs del servidor."}, 500
+        # G-10: devolver un status 500 real (antes la tupla daba 200 con cuerpo array)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={"estado": "error", "mensaje": "Error durante la limpieza. Revise los logs del servidor."})
 
 
 # ── Helpers internos WebSocket ─────────────────────────────────────
@@ -916,8 +975,9 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     res2 = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
                     t_by_ip = res2.scalar_one_or_none()
 
-                    # En modo offline el cliente ya tiene sesión activa — no pisar estado
-                    estado_inicial = "activa" if cliente_modo_offline else "bloqueado"
+                    # En modo offline el cliente ya tiene sesión activa — no pisar estado.
+                    # Terminal usa "activo" (masculino); "activa" es de Sesion.
+                    estado_inicial = "activo" if cliente_modo_offline else "bloqueado"
 
                     if t:
                         t.ip = terminal_ip
@@ -1341,9 +1401,13 @@ async def websocket_admin(websocket: WebSocket):
         await websocket.close(code=4003, reason="Token inválido o expirado")
         return
 
-    # Conexión autenticada — registrar en el manager (ya aceptada arriba)
+    # Conexión autenticada — registrar en el manager (ya aceptada arriba).
+    # Conservamos la identidad del operador (G-2) para auditar comandos y para
+    # restringir las acciones más destructivas a superadmin.
+    op_username = user.username
+    op_rol      = user.rol
     manager._admins.append(websocket)
-    logger.info("Panel admin conectado (autenticado)")
+    logger.info(f"Panel admin conectado (autenticado): {op_username} [{op_rol}]")
     await manager._enviar_estado(websocket)
     try:
         while True:
@@ -1392,6 +1456,8 @@ async def websocket_admin(websocket: WebSocket):
                             sesion_activa.activa        = False
                             sesion_activa.motivo_cierre = "bloqueo_admin"
                             logger.info(f"[WS-Admin] Sesión cerrada por bloqueo admin en {tid}: {ahora_bloqueo.strftime('%I:%M:%S %p')}")
+                        await registrar_auditoria(op_username, "bloquear_terminal", rol=op_rol,
+                                                  objetivo=tid, db=db)
                         await db.commit()
                 msg = f"Terminal {tid} bloqueada" if ok else f"Terminal {tid} no conectada (BD actualizada)"
                 await websocket.send_json({"tipo": "ok", "mensaje": msg})
@@ -1455,6 +1521,8 @@ async def websocket_admin(websocket: WebSocket):
                     )
                     terminal_db.estado = "activo"
                     db.add(sesion)
+                    await registrar_auditoria(op_username, "desbloquear_terminal", rol=op_rol,
+                                              objetivo=tid, detalle=f"DNI {alumno.dni}", db=db)
                     await db.commit()
                     logger.info(f"[WS-Admin] Sesión creada id={sesion.id} para {_mask_nombre(alumno.nombre)}")
 
@@ -1493,6 +1561,7 @@ async def websocket_admin(websocket: WebSocket):
                             break
                 ok = await manager.enviar_comando(tid, {"tipo": "remote_command", "action": action})
                 if ok:
+                    await registrar_auditoria(op_username, "apagar_terminal", rol=op_rol, objetivo=tid)
                     await websocket.send_json({"tipo": "ok", "mensaje": f"Comando '{action}' enviado a {tid}"})
                 else:
                     await websocket.send_json({"tipo": "error", "motivo": f"Terminal {tid} no conectada"})
@@ -1516,13 +1585,16 @@ async def websocket_admin(websocket: WebSocket):
                             sesion_activa.activa        = False
                             sesion_activa.motivo_cierre = "bloqueo_admin"
                             cerradas += 1
-                    logger.info(f"[WS-Admin] bloqueo_todas: {cerradas} sesión(es) cerrada(s) (solo conectadas)")
+                    logger.warning(f"[AUDIT] {op_username} [{op_rol}] ejecutó BLOQUEO GLOBAL: {cerradas} sesión(es) cerrada(s) (solo conectadas)")
 
                     res_terms = await db.execute(select(Terminal))
                     for t in res_terms.scalars().all():
                         if t.nombre_red in ids_conectados or t.ip in ips_conectadas:
                             t.estado = "bloqueado"
                         # Las offline/desconectadas conservan su estado actual
+                    await registrar_auditoria(op_username, "bloquear_todas", rol=op_rol,
+                                              objetivo="toda la sala",
+                                              detalle=f"{cerradas} sesión(es) cerrada(s)", db=db)
                     await db.commit()
 
                 # Enviar comando "bloquear" solo a los kioscos conectados
@@ -1547,22 +1619,33 @@ class _MensajeReq(_BaseModel):
 
 
 class _OfflineSyncReq(_BaseModel):
-    dni:         str
-    razon:       str
-    hora_inicio: str
-    hora_fin:    str
-    terminal:    str
+    dni:         str = _Field(..., max_length=8)
+    razon:       str = _Field("", max_length=200)
+    hora_inicio: str = _Field("", max_length=25)
+    hora_fin:    str = _Field("", max_length=25)
+    terminal:    str = _Field("", max_length=120)
 
 
 @app.post("/api/offline-sync")
-async def offline_sync(datos: _OfflineSyncReq, db: AsyncSession = Depends(get_db)):
+async def offline_sync(datos: _OfflineSyncReq, request: Request, db: AsyncSession = Depends(get_db)):
     """
     Recibe una sesión offline al reconectar.
     Verifica si el alumno existe y no está baneado.
     Si todo está bien, registra la sesión en el historial con hora retroactiva.
     No requiere autenticación de admin — lo llama el kiosco directamente.
+    Por eso valida formato del DNI y NO crea terminales nuevas aquí (G-1/G-7):
+    una sesión offline solo puede asociarse a una terminal que ya conectó antes.
     """
+    # Rate limit por IP (mismo límite que /alumnos/validar): corta enumeración
+    # de DNIs desde la LAN por respuestas distinguibles (not_found vs ok).
+    rate_limit.exigir(request, "kiosco", limite=30, ventana_seg=60)
+
     dni = datos.dni.strip()
+
+    # Validar formato del DNI (8 dígitos), igual que el login normal — evita
+    # inyección de basura y enumeración por payloads arbitrarios.
+    if len(dni) != 8 or not dni.isdigit():
+        return {"estado": "not_found", "motivo": "DNI inválido."}
 
     # Verificar existencia
     alumno = await db.get(AlumnoMaestro, dni)
@@ -1580,21 +1663,20 @@ async def offline_sync(datos: _OfflineSyncReq, db: AsyncSession = Depends(get_db
     if ban:
         return {"estado": "baneado", "motivo": f"Acceso restringido: {ban.motivo}"}
 
-    # Buscar terminal por nombre
+    # Buscar terminal por nombre. NO se crea aquí (G-1): una sesión offline
+    # legítima proviene de una PC que ya estaba registrada. Si no existe, se
+    # rechaza para no permitir crear terminales fantasma sin autenticación.
     res_t = await db.execute(select(Terminal).where(Terminal.nombre_red == datos.terminal))
     terminal = res_t.scalar_one_or_none()
     if terminal is None:
-        # Crear terminal si no existe (puede ocurrir si nunca conectó antes)
-        terminal = Terminal(
-            nombre_red=datos.terminal,
-            ip="offline",
-            estado="activa",
-            ultima_conexion=datetime.now()
-        )
-        db.add(terminal)
-        await db.flush()
+        logger.warning(f"[OfflineSync] Terminal desconocida rechazada: {datos.terminal}")
+        return {"estado": "terminal_desconocida", "motivo": "Terminal no registrada en el sistema."}
 
-    # Parsear horas
+    # Parsear hora de inicio (retroactiva). NOTA sobre hora_fin (G-8): el cliente
+    # envía hora_fin al RECONECTAR, pero su intención es CONTINUAR la sesión (que
+    # el alumno siga trabajando), no cerrarla. Por eso la sesión se registra como
+    # 'activa' y hora_fin se ignora a propósito aquí: la sesión se cerrará por el
+    # flujo normal (logout, bloqueo, desconexión) cuando realmente termine.
     try:
         hora_inicio = datetime.strptime(datos.hora_inicio, "%Y-%m-%d %H:%M:%S")
     except ValueError:
@@ -1614,7 +1696,7 @@ async def offline_sync(datos: _OfflineSyncReq, db: AsyncSession = Depends(get_db
         fecha_uso    = datetime.now().date(),
     )
     db.add(sesion)
-    terminal.estado = "activa"
+    terminal.estado = "activo"   # Terminal usa "activo" (masculino); "activa" es de Sesion
     terminal.ultima_conexion = datetime.now()
     await db.commit()
     await db.refresh(sesion)
@@ -1674,6 +1756,41 @@ async def listar_mensajes(
     ]
 
 
+class _DuracionMensajeReq(_BaseModel):
+    minutos: int = _Field(..., ge=1, le=15)   # UI en minutos; se persiste en segundos
+
+
+@app.get("/api/mensajes/duracion")
+async def obtener_duracion_mensaje(
+    admin: Usuario = Depends(obtener_usuario_actual),
+    db: AsyncSession = Depends(get_db),
+):
+    from models import ConfiguracionKiosco
+    res = await db.execute(select(ConfiguracionKiosco).limit(1))
+    cfg = res.scalar_one_or_none()
+    seg = (cfg.mensaje_duracion_seg if cfg and cfg.mensaje_duracion_seg else 60)
+    return {"minutos": max(1, round(seg / 60)), "segundos": seg}
+
+
+@app.put("/api/mensajes/duracion")
+async def guardar_duracion_mensaje(
+    datos: _DuracionMensajeReq,
+    admin: Usuario = Depends(obtener_usuario_actual),
+    db: AsyncSession = Depends(get_db),
+):
+    from models import ConfiguracionKiosco
+    res = await db.execute(select(ConfiguracionKiosco).limit(1))
+    cfg = res.scalar_one_or_none()
+    if not cfg:
+        cfg = ConfiguracionKiosco()
+        db.add(cfg)
+    cfg.mensaje_duracion_seg = datos.minutos * 60
+    await registrar_auditoria(admin.username, "cambiar_duracion_mensaje", rol=admin.rol,
+                              objetivo=f"{datos.minutos} min", db=db)
+    await db.commit()
+    return {"minutos": datos.minutos, "segundos": cfg.mensaje_duracion_seg}
+
+
 @app.post("/api/mensajes")
 async def crear_mensaje(
     datos: _MensajeReq,
@@ -1682,8 +1799,13 @@ async def crear_mensaje(
 ):
     from datetime import date as _date
     import re
+    # BUG-7: validar formato Y rango. Antes el regex aceptaba "25:99" (formato
+    # correcto pero hora imposible): el mensaje se guardaba pero nunca se enviaba.
     if not re.match(r"^\d{2}:\d{2}$", datos.hora_envio):
         raise HTTPException(status_code=422, detail="hora_envio debe ser HH:MM")
+    _h, _m = map(int, datos.hora_envio.split(":"))
+    if not (0 <= _h <= 23 and 0 <= _m <= 59):
+        raise HTTPException(status_code=422, detail="hora_envio fuera de rango (00:00–23:59)")
     if datos.tipo not in ("cierre", "extra"):
         raise HTTPException(status_code=422, detail="tipo debe ser 'cierre' o 'extra'")
     if not datos.mensaje.strip():
@@ -1694,9 +1816,18 @@ async def crear_mensaje(
         res = await db.execute(select(MensajeProgramado).where(MensajeProgramado.tipo == "cierre"))
         existente = res.scalar_one_or_none()
         if existente:
-            existente.mensaje    = datos.mensaje.strip()
-            existente.hora_envio = datos.hora_envio
-            existente.activo     = True
+            # BUG-MSG2: al cambiar la hora hay que RESETEAR fecha_envio. Si quedaba
+            # con la marca "enviado hoy" de un disparo anterior, el scheduler veía
+            # ya_enviado_hoy=True y NUNCA reenviaba con la hora nueva. Por eso
+            # "lo programo para dentro de 2 min y no sale". Al guardar, lo dejamos
+            # listo para volver a dispararse hoy.
+            existente.mensaje     = datos.mensaje.strip()
+            existente.hora_envio  = datos.hora_envio
+            existente.activo      = True
+            existente.fecha_envio = None
+            await registrar_auditoria(admin.username, "editar_mensaje", rol=admin.rol,
+                                      objetivo=f"cierre {datos.hora_envio}",
+                                      detalle=datos.mensaje.strip()[:120], db=db)
             await db.commit()
             return {"id": existente.id, "mensaje": "Mensaje de cierre actualizado"}
 
@@ -1716,9 +1847,39 @@ async def crear_mensaje(
         fecha_envio = fecha_dt,
     )
     db.add(nuevo)
+    await registrar_auditoria(admin.username, "crear_mensaje", rol=admin.rol,
+                              objetivo=f"{datos.tipo} {datos.hora_envio}",
+                              detalle=datos.mensaje.strip()[:120], db=db)
     await db.commit()
     await db.refresh(nuevo)
     return {"id": nuevo.id, "mensaje": "Mensaje creado"}
+
+
+@app.post("/api/mensajes/probar")
+async def probar_mensaje(
+    datos: _MensajeReq,
+    admin: Usuario = Depends(obtener_usuario_actual),
+    db: AsyncSession = Depends(get_db),
+):
+    """Envía un mensaje de prueba INMEDIATO a todas las terminales conectadas,
+    sin guardarlo ni esperar a la hora programada. Sirve para verificar en campo
+    que el aviso se ve en los kioscos. Devuelve a cuántas terminales llegó."""
+    texto = (datos.mensaje or "").strip() or "Mensaje de prueba del panel."
+    from models import ConfiguracionKiosco
+    _resc = await db.execute(select(ConfiguracionKiosco).limit(1))
+    _cfg = _resc.scalar_one_or_none()
+    duracion_seg = (_cfg.mensaje_duracion_seg if _cfg and _cfg.mensaje_duracion_seg else 60)
+    entregados = await manager.broadcast({
+        "tipo": "mensaje_broadcast",
+        "mensaje": texto,
+        "origen": "prueba",
+        "duracion_seg": duracion_seg,
+    })
+    await registrar_auditoria(admin.username, "probar_mensaje", rol=admin.rol,
+                              objetivo=f"{entregados} terminal(es)",
+                              detalle=texto[:120], db=db)
+    await db.commit()
+    return {"entregados": entregados}
 
 
 @app.put("/api/mensajes/{msg_id}/toggle")
@@ -1732,6 +1893,9 @@ async def toggle_mensaje(
     if not msg:
         raise HTTPException(status_code=404, detail="Mensaje no encontrado")
     msg.activo = not msg.activo
+    await registrar_auditoria(admin.username, "toggle_mensaje", rol=admin.rol,
+                              objetivo=f"{msg.tipo} {msg.hora_envio}",
+                              detalle="activado" if msg.activo else "desactivado", db=db)
     await db.commit()
     return {"activo": msg.activo}
 
@@ -1746,7 +1910,10 @@ async def eliminar_mensaje(
     msg = res.scalar_one_or_none()
     if not msg:
         raise HTTPException(status_code=404, detail="Mensaje no encontrado")
+    _info = f"{msg.tipo} {msg.hora_envio}"
     await db.delete(msg)
+    await registrar_auditoria(admin.username, "eliminar_mensaje", rol=admin.rol,
+                              objetivo=_info, db=db)
     await db.commit()
     return {"mensaje": "Eliminado"}
 
