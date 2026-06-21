@@ -27,7 +27,7 @@
         }
     </script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link rel="stylesheet" href="static/css/style.css?v=33">
+    <link rel="stylesheet" href="static/css/style.css?v=38">
     <style>
         ::-webkit-scrollbar { width:6px; height:6px; }
         .dark ::-webkit-scrollbar-track { background:transparent; }
@@ -126,6 +126,12 @@
                     class="nav-item nav-item-active">
                     <i class="ph ph-cpu"></i>
                     <span>Monitoreo</span>
+                </button>
+
+                <button onclick="switchTab('indicadores')" id="nav-indicadores"
+                    class="nav-item">
+                    <i class="ph ph-chart-bar"></i>
+                    <span>Indicadores</span>
                 </button>
 
                 <button onclick="switchTab('actividad')" id="nav-actividad"
@@ -448,9 +454,17 @@
                             class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-student"></i> Estudiantes
                         </button>
-                        <button id="subtab-btn-personal" onclick="switchSubtab('personal')"
+                        <button id="subtab-btn-egresados" onclick="switchSubtab('egresados')"
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
-                            <i class="ph ph-identification-badge"></i> Personal Universitario
+                            <i class="ph ph-graduation-cap"></i> Egresados
+                        </button>
+                        <button id="subtab-btn-docentes" onclick="switchSubtab('docentes')"
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-chalkboard-teacher"></i> Docentes
+                        </button>
+                        <button id="subtab-btn-autoridad" onclick="switchSubtab('autoridad')"
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-shield-star"></i> Autoridad
                         </button>
                     </div>
 
@@ -504,35 +518,136 @@
                         </section>
                     </div>
 
-                    <!-- Panel: Personal Universitario -->
-                    <div id="subtab-personal" style="display:none" class="bd-solo-superadmin">
+                    <!-- Panel: Egresados (visual — sin vincular al backend por ahora) -->
+                    <div id="subtab-egresados" style="display:none">
                         <section class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors">
                             <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
                                 <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                                    <i class="ph ph-identification-badge text-indigo-600 dark:text-indigo-400"></i> Personal de la Universidad
+                                    <i class="ph ph-graduation-cap text-indigo-600 dark:text-indigo-400"></i> Egresados
                                 </h3>
                                 <div class="flex gap-2 flex-wrap items-center">
-                                    <button onclick="abrirNuevoPersonal()" class="db-btn db-btn-new">
-                                        <i class="ph ph-user-plus"></i> Nuevo Personal
+                                    <button onclick="abrirNuevoGrupo('egresados')" class="db-btn db-btn-new">
+                                        <i class="ph ph-user-plus"></i> Nuevo
                                     </button>
-                                    <button onclick="exportarPersonal()" class="db-btn db-btn-export">
+                                    <button onclick="exportarGrupo('egresados')" class="db-btn db-btn-export">
                                         <i class="ph ph-file-xls"></i> Exportar Excel
                                     </button>
                                     <label class="db-btn db-btn-import cursor-pointer">
                                         <i class="ph ph-upload-simple"></i> Importar Excel
-                                        <input id="inputPersonalExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="importarPersonal(this)">
+                                        <input id="egresadosExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="importarGrupo('egresados', this)">
                                     </label>
                                 </div>
                             </div>
-                            <div id="personalResultado" style="display:none" class="maestro-resultado mb-4"></div>
+                            <div id="egresadosResultado" style="display:none" class="maestro-resultado mb-4"></div>
                             <div class="flex gap-3 mb-4 items-center flex-wrap">
                                 <div class="relative flex-1 min-w-52">
                                     <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
-                                    <input id="personalBuscar" type="text" placeholder="Buscar por nombre, DNI, cargo o área..."
+                                    <input id="egresadosBuscar" type="text" placeholder="Buscar por nombre, DNI o código..."
                                         class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
-                                        oninput="buscarPersonal()">
+                                        oninput="buscarGrupo('egresados')">
                                 </div>
-                                <span id="personalTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
+                                <span id="egresadosTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
+                            </div>
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                <table class="tabla w-full text-left text-sm">
+                                    <thead>
+                                        <tr class="bg-zinc-100 dark:bg-zinc-950/50 text-zinc-500 dark:text-zinc-400 text-xs uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-800">
+                                            <th class="p-4 font-semibold" style="width:90px">DNI</th>
+                                            <th class="p-4 font-semibold">Nombre Completo</th>
+                                            <th class="p-4 font-semibold" style="width:110px">Código Univ.</th>
+                                            <th class="p-4 font-semibold">Escuela</th>
+                                            <th class="p-4 font-semibold" style="width:110px">Año Egreso</th>
+                                            <th class="p-4 font-semibold" style="width:100px">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="egresadosBody" class="divide-y divide-zinc-100 dark:divide-zinc-800/50"></tbody>
+                                </table>
+                            </div>
+                            <p id="sinEgresados" class="empty-msg text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm" style="display:none">No hay egresados registrados</p>
+                            <div id="egresadosPaginacion" class="flex gap-1 justify-center mt-4 flex-wrap"></div>
+                        </section>
+                    </div>
+
+                    <!-- Panel: Docentes (visual — sin vincular al backend por ahora) -->
+                    <div id="subtab-docentes" style="display:none">
+                        <section class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors">
+                            <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                                    <i class="ph ph-chalkboard-teacher text-indigo-600 dark:text-indigo-400"></i> Docentes
+                                </h3>
+                                <div class="flex gap-2 flex-wrap items-center">
+                                    <button onclick="abrirNuevoGrupo('docentes')" class="db-btn db-btn-new">
+                                        <i class="ph ph-user-plus"></i> Nuevo
+                                    </button>
+                                    <button onclick="exportarGrupo('docentes')" class="db-btn db-btn-export">
+                                        <i class="ph ph-file-xls"></i> Exportar Excel
+                                    </button>
+                                    <label class="db-btn db-btn-import cursor-pointer">
+                                        <i class="ph ph-upload-simple"></i> Importar Excel
+                                        <input id="docentesExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="importarGrupo('docentes', this)">
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="docentesResultado" style="display:none" class="maestro-resultado mb-4"></div>
+                            <div class="flex gap-3 mb-4 items-center flex-wrap">
+                                <div class="relative flex-1 min-w-52">
+                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
+                                    <input id="docentesBuscar" type="text" placeholder="Buscar por nombre, DNI o correo..."
+                                        class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
+                                        oninput="buscarGrupo('docentes')">
+                                </div>
+                                <span id="docentesTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
+                            </div>
+                            <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                <table class="tabla w-full text-left text-sm">
+                                    <thead>
+                                        <tr class="bg-zinc-100 dark:bg-zinc-950/50 text-zinc-500 dark:text-zinc-400 text-xs uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-800">
+                                            <th class="p-4 font-semibold" style="width:90px">DNI</th>
+                                            <th class="p-4 font-semibold">Nombre Completo</th>
+                                            <th class="p-4 font-semibold">Facultad</th>
+                                            <th class="p-4 font-semibold">Escuela</th>
+                                            <th class="p-4 font-semibold">Correo</th>
+                                            <th class="p-4 font-semibold" style="width:120px">Teléfono</th>
+                                            <th class="p-4 font-semibold" style="width:100px">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="docentesBody" class="divide-y divide-zinc-100 dark:divide-zinc-800/50"></tbody>
+                                </table>
+                            </div>
+                            <p id="sinDocentes" class="empty-msg text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm" style="display:none">No hay docentes registrados</p>
+                            <div id="docentesPaginacion" class="flex gap-1 justify-center mt-4 flex-wrap"></div>
+                        </section>
+                    </div>
+
+                    <!-- Panel: Autoridad (visual — sin vincular al backend por ahora) -->
+                    <div id="subtab-autoridad" style="display:none">
+                        <section class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors">
+                            <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                                    <i class="ph ph-shield-star text-indigo-600 dark:text-indigo-400"></i> Autoridad
+                                </h3>
+                                <div class="flex gap-2 flex-wrap items-center">
+                                    <button onclick="abrirNuevoGrupo('autoridades')" class="db-btn db-btn-new">
+                                        <i class="ph ph-user-plus"></i> Nuevo
+                                    </button>
+                                    <button onclick="exportarGrupo('autoridades')" class="db-btn db-btn-export">
+                                        <i class="ph ph-file-xls"></i> Exportar Excel
+                                    </button>
+                                    <label class="db-btn db-btn-import cursor-pointer">
+                                        <i class="ph ph-upload-simple"></i> Importar Excel
+                                        <input id="autoridadesExcel" type="file" accept=".xlsx,.xls" style="display:none" onchange="importarGrupo('autoridades', this)">
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="autoridadesResultado" style="display:none" class="maestro-resultado mb-4"></div>
+                            <div class="flex gap-3 mb-4 items-center flex-wrap">
+                                <div class="relative flex-1 min-w-52">
+                                    <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
+                                    <input id="autoridadesBuscar" type="text" placeholder="Buscar por nombre, DNI o cargo..."
+                                        class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
+                                        oninput="buscarGrupo('autoridades')">
+                                </div>
+                                <span id="autoridadesTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
                             </div>
                             <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
                                 <table class="tabla w-full text-left text-sm">
@@ -541,17 +656,16 @@
                                             <th class="p-4 font-semibold" style="width:90px">DNI</th>
                                             <th class="p-4 font-semibold">Nombre Completo</th>
                                             <th class="p-4 font-semibold">Cargo</th>
-                                            <th class="p-4 font-semibold">Área / Dependencia</th>
                                             <th class="p-4 font-semibold">Correo</th>
-                                            <th class="p-4 font-semibold">Teléfono</th>
+                                            <th class="p-4 font-semibold" style="width:120px">Teléfono</th>
                                             <th class="p-4 font-semibold" style="width:100px">Acciones</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="personalBody" class="divide-y divide-zinc-100 dark:divide-zinc-800/50"></tbody>
+                                    <tbody id="autoridadesBody" class="divide-y divide-zinc-100 dark:divide-zinc-800/50"></tbody>
                                 </table>
                             </div>
-                            <p id="sinPersonal" class="empty-msg text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm" style="display:none">No hay personal registrado</p>
-                            <div id="personalPaginacion" class="flex gap-1 justify-center mt-4 flex-wrap"></div>
+                            <p id="sinAutoridades" class="empty-msg text-center text-zinc-400 dark:text-zinc-600 py-8 text-sm" style="display:none">No hay autoridades registradas</p>
+                            <div id="autoridadesPaginacion" class="flex gap-1 justify-center mt-4 flex-wrap"></div>
                         </section>
                     </div>
 
@@ -786,10 +900,113 @@
 
                 </div>
 
+                <!-- ══ TAB: INDICADORES (KPIs) ══ -->
+                <div id="tab-indicadores" style="display:none" class="kpi-view">
+                    <div class="kpi-hdr">
+                        <div>
+                            <h2 class="kpi-title">Indicadores</h2>
+                            <p class="kpi-subtitle">Métricas del sistema en tiempo real</p>
+                        </div>
+                        <div class="kpi-hdr-actions">
+                            <button id="kpi-btn-refrescar" onclick="cargarIndicadores()" class="kpi-btn-sec" aria-label="Refrescar indicadores">
+                                <i class="ph ph-arrows-clockwise"></i> Refrescar
+                            </button>
+                            <!-- Solo superadmin: oculto por defecto (fail-closed), revelado por JS -->
+                            <button id="kpi-btn-personalizar" onclick="kpiAbrirEditor()" class="kpi-btn-pri bd-solo-superadmin" style="display:none" aria-label="Personalizar indicadores">
+                                <i class="ph ph-sliders-horizontal"></i> Personalizar
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Sub-pestañas: clasifican los indicadores por ámbito -->
+                    <div class="kpi-tabs" role="tablist" aria-label="Categorías de indicadores">
+                        <button class="kpi-tab kpi-tab-activo" data-pestana="equipos" role="tab" aria-selected="true" onclick="kpiSetPestana('equipos')">
+                            <i class="ph ph-desktop" aria-hidden="true"></i> Equipos
+                        </button>
+                        <button class="kpi-tab" data-pestana="usuarios" role="tab" aria-selected="false" onclick="kpiSetPestana('usuarios')">
+                            <i class="ph ph-users" aria-hidden="true"></i> Usuarios
+                        </button>
+                        <button class="kpi-tab" data-pestana="programas" role="tab" aria-selected="false" onclick="kpiSetPestana('programas')">
+                            <i class="ph ph-squares-four" aria-hidden="true"></i> Programas
+                        </button>
+                    </div>
+
+                    <!-- Grilla de KPIs activos de la pestaña actual -->
+                    <div id="kpi-grid" class="kpi-grid">
+                        <p class="kpi-empty">Cargando indicadores...</p>
+                    </div>
+
+                    <!-- Gráficos (el de la pestaña activa) -->
+                    <div id="kpi-graf-zona">
+                        <div class="kpi-graf-hdr">
+                            <h3 class="kpi-graf-titulo">Gráficos</h3>
+                            <div class="kpi-periodo" role="group" aria-label="Período de los gráficos">
+                                <button class="kpi-periodo-btn kpi-periodo-activo" data-periodo="semana" onclick="kpiSetPeriodo('semana')">Semana</button>
+                                <button class="kpi-periodo-btn" data-periodo="mes" onclick="kpiSetPeriodo('mes')">Mes</button>
+                                <button class="kpi-periodo-btn" data-periodo="rango" onclick="kpiSetPeriodo('rango')">Rango</button>
+                                <span id="kpi-rango-campos" class="kpi-rango-campos" style="display:none">
+                                    <input type="date" id="kpi-rango-desde" class="kpi-rango-input" aria-label="Fecha desde">
+                                    <span class="kpi-rango-sep">—</span>
+                                    <input type="date" id="kpi-rango-hasta" class="kpi-rango-input" aria-label="Fecha hasta">
+                                    <button class="kpi-periodo-btn" onclick="kpiAplicarRango()">Aplicar</button>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="kpi-graf-grid">
+                            <!-- Gráfico de EQUIPOS: uso por facultad -->
+                            <div class="kpi-graf-card" data-graf-pestana="equipos">
+                                <h4 class="kpi-graf-card-titulo"><i class="ph ph-buildings" aria-hidden="true"></i> Uso por facultad</h4>
+                                <div id="graf-facultades" class="kpi-graf-canvas"><p class="kpi-empty">Cargando...</p></div>
+                            </div>
+                            <!-- Gráfico de USUARIOS: atenciones por día -->
+                            <div class="kpi-graf-card" data-graf-pestana="usuarios">
+                                <h4 class="kpi-graf-card-titulo"><i class="ph ph-chart-line-up" aria-hidden="true"></i> Atenciones por día</h4>
+                                <div id="graf-atenciones" class="kpi-graf-canvas"><p class="kpi-empty">Cargando...</p></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Aviso de pestaña Programas (aún sin banco de programas) -->
+                    <div id="kpi-programas-aviso" class="kpi-proximamente" style="display:none">
+                        <i class="ph ph-squares-four" aria-hidden="true"></i>
+                        <h3>Programas más usados</h3>
+                        <p>Próximamente. Aquí verás los programas más utilizados por los estudiantes una vez que se configure el banco de programas reconocidos.</p>
+                    </div>
+                </div>
+
+                <!-- Modal: Personalizar indicadores (solo superadmin) -->
+                <div id="modal-kpi" class="modal-overlay" style="display:none" role="dialog" aria-modal="true" aria-label="Personalizar indicadores">
+                    <div class="modal-content kpi-modal-content">
+                        <h3><i class="ph ph-sliders-horizontal"></i> Personalizar indicadores</h3>
+                        <p>Activa los que quieras mostrar y arrástralos para reordenarlos dentro de cada pestaña. Esta configuración es para todo el panel.</p>
+                        <div id="kpi-editor-lista" class="kpi-editor-lista"></div>
+                        <div class="modal-buttons">
+                            <button onclick="kpiCerrarEditor()" class="kpi-btn-sec">Cancelar</button>
+                            <button onclick="kpiGuardarConfig()" id="kpi-btn-guardar" class="kpi-btn-pri">
+                                <i class="ph ph-floppy-disk"></i> Guardar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- ══ TAB: ACTIVIDAD ══ -->
                 <div id="tab-actividad" style="display:none" class="act-view">
 
-                    <div class="bento-card act-card">
+                    <!-- Sub-pestañas de Eventos: Flujo / Banco de apps / Banco de ruido -->
+                    <div class="kpi-tabs" role="tablist" aria-label="Vistas de eventos">
+                        <button class="kpi-tab kpi-tab-activo" data-actvista="flujo" role="tab" aria-selected="true" onclick="actSetVista('flujo')">
+                            <i class="ph ph-pulse" aria-hidden="true"></i> Flujo
+                        </button>
+                        <button class="kpi-tab" data-actvista="banco-apps" role="tab" aria-selected="false" onclick="actSetVista('banco-apps')">
+                            <i class="ph ph-check-square" aria-hidden="true"></i> Banco de apps
+                        </button>
+                        <button class="kpi-tab" data-actvista="banco-ruido" role="tab" aria-selected="false" onclick="actSetVista('banco-ruido')">
+                            <i class="ph ph-wave-sine" aria-hidden="true"></i> Banco de ruido
+                        </button>
+                    </div>
+
+                    <!-- ── Vista FLUJO (lo de siempre) ── -->
+                    <div id="act-vista-flujo" class="bento-card act-card">
 
                         <!-- Cabecera -->
                         <div class="act-card-hdr">
@@ -857,6 +1074,126 @@
                             </div>
                         </div>
 
+                    </div>
+
+                    <!-- ── Vista BANCO DE APPS ── -->
+                    <div id="act-vista-banco-apps" class="bento-card act-card" style="display:none">
+                        <div class="act-card-hdr">
+                            <div>
+                                <h2 class="act-title">Banco de apps</h2>
+                                <p class="act-subtitle">Programas reconocidos. Lo que no esté aquí ni en el banco de ruido se marca como sospechoso.</p>
+                            </div>
+                            <button id="banco-apps-nuevo" onclick="bancoAbrirNuevo('app')" class="kpi-btn-pri bd-solo-superadmin" style="display:none">
+                                <i class="ph ph-plus"></i> Agregar programa
+                            </button>
+                        </div>
+
+                        <!-- Pendientes por clasificar -->
+                        <div id="banco-pendientes-zona" class="banco-pend-zona">
+                            <div class="banco-pend-hdr">
+                                <h3 class="banco-pend-titulo"><i class="ph ph-warning-circle" aria-hidden="true"></i> Pendientes por clasificar</h3>
+                                <span id="banco-pend-contador" class="banco-pend-badge">—</span>
+                            </div>
+                            <p class="banco-pend-ayuda">Programas vistos en actividad que aún no están clasificados. Decide si son apps reales o ruido.</p>
+                            <div id="banco-pendientes-body" class="banco-pend-lista"><p class="kpi-empty">Cargando...</p></div>
+                        </div>
+
+                        <!-- Tabla del banco de apps -->
+                        <div class="act-filters-row">
+                            <input id="banco-apps-buscar" type="text" placeholder="Buscar programa..." class="act-filter-input" oninput="bancoCargarApps()">
+                        </div>
+                        <div class="act-list-wrap">
+                            <table class="act-table">
+                                <thead class="act-thead">
+                                    <tr>
+                                        <th class="act-th">Programa</th>
+                                        <th class="act-th">Ejecutable</th>
+                                        <th class="act-th">Categoría</th>
+                                        <th class="act-th">Descripción</th>
+                                        <th class="act-th act-th-ico"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="banco-apps-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- ── Vista BANCO DE RUIDO ── -->
+                    <div id="act-vista-banco-ruido" class="bento-card act-card" style="display:none">
+                        <div class="act-card-hdr">
+                            <div>
+                                <h2 class="act-title">Banco de ruido</h2>
+                                <p class="act-subtitle">Procesos de fondo que no son actividad del alumno. Se ocultan de la vista del Flujo.</p>
+                            </div>
+                            <button id="banco-ruido-nuevo" onclick="bancoAbrirNuevo('ruido')" class="kpi-btn-pri bd-solo-superadmin" style="display:none">
+                                <i class="ph ph-plus"></i> Agregar ruido
+                            </button>
+                        </div>
+                        <div class="act-filters-row">
+                            <input id="banco-ruido-buscar" type="text" placeholder="Buscar proceso..." class="act-filter-input" oninput="bancoCargarRuido()">
+                        </div>
+                        <div class="act-list-wrap">
+                            <table class="act-table">
+                                <thead class="act-thead">
+                                    <tr>
+                                        <th class="act-th">Proceso</th>
+                                        <th class="act-th">Ejecutable</th>
+                                        <th class="act-th">Pertenece a</th>
+                                        <th class="act-th">Descripción</th>
+                                        <th class="act-th act-th-ico"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="banco-ruido-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modal: agregar/clasificar en banco (apps o ruido) -->
+                <div id="modal-banco" class="modal-overlay" style="display:none" role="dialog" aria-modal="true" aria-label="Banco de programas">
+                    <div class="modal-content">
+                        <h3 id="modal-banco-titulo"><i class="ph ph-check-square"></i> Agregar al banco</h3>
+                        <div class="banco-form">
+                            <!-- Selector de destino: visible al clasificar desde el Flujo -->
+                            <div id="banco-f-grupo-destino" style="display:none">
+                                <label class="banco-lbl">¿Qué es?</label>
+                                <div class="banco-destino-toggle" role="group" aria-label="Tipo">
+                                    <button type="button" id="banco-dest-app" class="banco-dest-btn" onclick="bancoSetDestino('app')">
+                                        <i class="ph ph-check-square"></i> Programa
+                                    </button>
+                                    <button type="button" id="banco-dest-ruido" class="banco-dest-btn" onclick="bancoSetDestino('ruido')">
+                                        <i class="ph ph-wave-sine"></i> Ruido
+                                    </button>
+                                </div>
+                            </div>
+
+                            <label class="banco-lbl" for="banco-f-exe">Ejecutable (.exe)</label>
+                            <input id="banco-f-exe" type="text" class="banco-input" placeholder="ej. winword.exe" maxlength="120">
+
+                            <label class="banco-lbl" for="banco-f-nombre">Nombre amigable</label>
+                            <input id="banco-f-nombre" type="text" class="banco-input" placeholder="ej. Microsoft Word" maxlength="200">
+
+                            <div id="banco-f-grupo-cat">
+                                <label class="banco-lbl" for="banco-f-cat">Categoría</label>
+                                <input id="banco-f-cat" type="text" class="banco-input" placeholder="ej. Ofimática" maxlength="60">
+                            </div>
+
+                            <div id="banco-f-grupo-dueno" style="display:none">
+                                <label class="banco-lbl" for="banco-f-dueno">Pertenece a</label>
+                                <select id="banco-f-dueno" class="banco-input">
+                                    <option value="__sistema__">Windows / Sistema</option>
+                                </select>
+                            </div>
+
+                            <label class="banco-lbl" for="banco-f-desc">Descripción</label>
+                            <input id="banco-f-desc" type="text" class="banco-input" placeholder="qué es este proceso" maxlength="300">
+                        </div>
+                        <div class="modal-buttons">
+                            <button onclick="bancoCerrarModal()" class="kpi-btn-sec">Cancelar</button>
+                            <button onclick="bancoGuardarModal()" id="banco-btn-guardar" class="kpi-btn-pri">
+                                <i class="ph ph-floppy-disk"></i> Guardar
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -1573,6 +1910,20 @@
     </div>
 </div>
 
+<!-- MODAL GENÉRICO: Egresados / Docentes / Autoridad (campos dinámicos) -->
+<div id="modal-grupo" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 id="grupo-modal-titulo" class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"></h3>
+        <p id="grupo-modal-sub" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
+        <div id="grupo-modal-campos"></div>
+        <p id="grupo-modal-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
+        <div class="modal-buttons flex gap-3 justify-end">
+            <button id="btn-grupo-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+            <button id="btn-grupo-guardar" class="btn-confirmar text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Guardar</button>
+        </div>
+    </div>
+</div>
+
 <div id="modal-ban" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
         <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-prohibit text-rose-500"></i> Banear Usuario</h3>
@@ -1617,7 +1968,7 @@
 </div>
 
 
-<script src="static/js/app.js?v=25"></script>
+<script src="static/js/app.js?v=33"></script>
 <script>
 // Tema
 (function() {
@@ -1687,7 +2038,7 @@ function cerrarSidebar() {
 }
 
 function switchSubtab(sub) {
-    ['estudiantes', 'personal'].forEach(s => {
+    ['estudiantes', 'egresados', 'docentes', 'autoridad'].forEach(s => {
         const panel = document.getElementById('subtab-' + s);
         const btn   = document.getElementById('subtab-btn-' + s);
         if (!panel || !btn) return;
@@ -1707,7 +2058,9 @@ function switchSubtab(sub) {
         btn.classList.toggle('border-transparent',   !active);
     });
     if (sub === 'estudiantes') { const s = document.getElementById('seccionMaestro'); if(s) s.style.display = ''; cargarMaestro(); }
-    if (sub === 'personal')    cargarPersonal();
+    if (sub === 'egresados')   cargarGrupo('egresados');
+    if (sub === 'docentes')    cargarGrupo('docentes');
+    if (sub === 'autoridad')   cargarGrupo('autoridades');
 }
 
 function switchSubtabInc(sub) {
@@ -1768,9 +2121,10 @@ function switchSubtabCfg(sub) {
 }
 
 function switchTab(tab) {
-    const tabs = ['monitoreo', 'historial', 'basedatos', 'incidencias', 'actividad', 'configuracion'];
+    const tabs = ['monitoreo', 'indicadores', 'historial', 'basedatos', 'incidencias', 'actividad', 'configuracion'];
     const titles = {
         monitoreo:    'Monitoreo en Vivo',
+        indicadores:  'Indicadores',
         historial:    'Historial de Sesiones',
         basedatos:    'Base de Datos',
         incidencias:  'Incidencias',
@@ -1794,11 +2148,12 @@ function switchTab(tab) {
 
     cerrarSidebar();
 
+    if (tab === 'indicadores')   cargarIndicadores();
     if (tab === 'historial')     aplicarFiltros();
     if (tab === 'basedatos')     switchSubtab('estudiantes');
     if (tab === 'incidencias')   switchSubtabInc('inc');
     if (tab === 'configuracion') switchSubtabCfg(_rolServidor === 'superadmin' ? 'actividad' : 'backdoor');
-    if (tab === 'actividad')     cargarActividad();
+    if (tab === 'actividad')     actSetVista('flujo');
 
     // Recordar la pestaña activa para sobrevivir a F5
     try { sessionStorage.setItem('panel_tab', tab); } catch (e) {}

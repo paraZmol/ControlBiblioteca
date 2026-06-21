@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
-from models import AlumnoMaestro, Terminal, Sesion, Usuario, Facultad, Escuela, Ban, PersonalUniversidad, Incidencia, Sospecha, ActividadLog, ProcesoIgnorado, Auditoria
+from models import AlumnoMaestro, Terminal, Sesion, Usuario, Facultad, Escuela, Ban, PersonalUniversidad, Incidencia, Sospecha, ActividadLog, ProcesoIgnorado, Auditoria, Egresado, Docente, Autoridad, BancoApp, BancoRuido
 Alumno = AlumnoMaestro  # alias local para compatibilidad con código legacy
 from auth_service import (
     verificar_password, hashear_password, crear_token, obtener_usuario_actual
@@ -863,15 +863,20 @@ async def listar_actividad(
     if nivel:
         q = q.where(ActividadLog.nivel == nivel)
 
-    # Por defecto se ocultan los procesos marcados como ignorados (vista limpia).
-    # Los sospechosos SIEMPRE se muestran, aunque su exe esté en la lista.
-    # incluir_ignorados=True (al investigar una sospecha) muestra todo.
+    # Por defecto se ocultan los procesos marcados como ignorados Y los que el
+    # banco de ruido cataloga como ruido (vista limpia). Los sospechosos SIEMPRE
+    # se muestran, aunque su exe esté en esas listas. incluir_ignorados=True (al
+    # investigar una sospecha) muestra todo.
     if not incluir_ignorados:
-        subq_ign = select(ProcesoIgnorado.nombre_exe)
+        subq_ign   = select(ProcesoIgnorado.nombre_exe)
+        subq_ruido = select(BancoRuido.nombre_exe)
         q = q.where(
             (ActividadLog.nivel == "sospechoso")
             | (ActividadLog.proceso_exe.is_(None))
-            | (ActividadLog.proceso_exe.notin_(subq_ign))
+            | (
+                ActividadLog.proceso_exe.notin_(subq_ign)
+                & _func.lower(ActividadLog.proceso_exe).notin_(subq_ruido)
+            )
         )
     if fecha:
         try:
@@ -1033,6 +1038,323 @@ async def eliminar_proceso_ignorado(
                               objetivo=nombre, db=db)
     await db.commit()
     return {"ok": True, "eliminado": nombre}
+
+
+# ── Banco de programas y banco de ruido (lista blanca / clasificación) ──
+# Modelo de 3 estados de un .exe visto en actividad:
+#   · banco_apps  -> app real del alumno (normal, contará para el Top).
+#   · banco_ruido -> proceso de fondo (normal pero OCULTO de la vista limpia).
+#   · ninguno     -> SOSPECHOSO hasta que el superadmin lo clasifique.
+# Las herramientas peligrosas (cmd, powershell…) NO se ponen aquí a propósito.
+
+def _norm_exe(s: str) -> str:
+    """Normaliza un nombre de ejecutable: minúsculas, sin basura. Vacío si inválido."""
+    import re as _re
+    return _re.sub(r"[^\w.\- ]", "", (s or "").strip()).lower()[:120]
+
+
+async def _refrescar_cache_bancos():
+    """Pide a main.py que recargue su caché de bancos en memoria.
+    Import perezoso para evitar dependencia circular endpoints<->main."""
+    import logging as _logging
+    try:
+        import main as _main
+        from database import async_session
+        async with async_session() as _db:
+            await _main._refrescar_bancos(_db)
+    except Exception as e:
+        _logging.getLogger("control").warning(f"[BANCO] No se pudo refrescar la caché: {e}")
+
+
+@router.get("/admin/banco-apps")
+async def listar_banco_apps(
+    q: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    """Lista el banco de programas reconocidos (ver: cualquier admin)."""
+    query = select(BancoApp).order_by(BancoApp.nombre_amigable)
+    if q:
+        like = f"%{q.strip()}%"
+        query = query.where((BancoApp.nombre_amigable.ilike(like)) | (BancoApp.nombre_exe.ilike(like)))
+    rows = (await db.execute(query)).scalars().all()
+    return {
+        "items": [
+            {"nombre_exe": r.nombre_exe, "nombre_amigable": r.nombre_amigable,
+             "categoria": r.categoria, "descripcion": r.descripcion,
+             "aprobado_por": r.aprobado_por, "fecha": r.fecha}
+            for r in rows
+        ]
+    }
+
+
+class _BancoAppReq(BaseModel):
+    nombre_exe: str
+    nombre_amigable: str | None = None
+    categoria: str | None = None
+    descripcion: str | None = None
+
+
+@router.post("/admin/banco-apps")
+async def agregar_banco_app(
+    datos: _BancoAppReq,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Agrega/actualiza un programa en el banco (solo superadmin)."""
+    _exige_super(admin)
+    exe = _norm_exe(datos.nombre_exe)
+    if not exe:
+        raise HTTPException(status_code=422, detail="Nombre de ejecutable inválido")
+    nombre = (datos.nombre_amigable or exe).strip()[:200]
+    existe = (await db.execute(select(BancoApp).where(BancoApp.nombre_exe == exe))).scalar_one_or_none()
+    if existe:
+        existe.nombre_amigable = nombre
+        existe.categoria = (datos.categoria or existe.categoria)
+        existe.descripcion = (datos.descripcion or existe.descripcion)
+    else:
+        db.add(BancoApp(nombre_exe=exe, nombre_amigable=nombre,
+                        categoria=(datos.categoria or None), descripcion=(datos.descripcion or None),
+                        aprobado_por=admin.username))
+    await registrar_auditoria(admin.username, "agregar_banco_app", rol=admin.rol, objetivo=exe, db=db)
+    await db.commit()
+    await _refrescar_cache_bancos()
+    return {"ok": True, "nombre_exe": exe}
+
+
+@router.delete("/admin/banco-apps/{nombre_exe}")
+async def eliminar_banco_app(
+    nombre_exe: str,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Quita un programa del banco (solo superadmin). Volverá a caer como sospechoso."""
+    _exige_super(admin)
+    exe = _norm_exe(nombre_exe)
+    row = (await db.execute(select(BancoApp).where(BancoApp.nombre_exe == exe))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Programa no encontrado en el banco")
+    await db.delete(row)
+    await registrar_auditoria(admin.username, "quitar_banco_app", rol=admin.rol, objetivo=exe, db=db)
+    await db.commit()
+    await _refrescar_cache_bancos()
+    return {"ok": True, "eliminado": exe}
+
+
+@router.get("/admin/banco-ruido")
+async def listar_banco_ruido(
+    q: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    """Lista el banco de ruido. Resuelve el nombre del dueño contra banco_apps."""
+    query = select(BancoRuido).order_by(BancoRuido.nombre_amigable)
+    if q:
+        like = f"%{q.strip()}%"
+        query = query.where((BancoRuido.nombre_amigable.ilike(like)) | (BancoRuido.nombre_exe.ilike(like)))
+    rows = (await db.execute(query)).scalars().all()
+    # Mapa exe->nombre amigable de las apps, para mostrar el dueño legible.
+    apps = {a.nombre_exe: a.nombre_amigable for a in (await db.execute(select(BancoApp))).scalars().all()}
+    def _dueno_legible(d):
+        if not d:
+            return "—"
+        if d == "__sistema__":
+            return "Windows / Sistema"
+        return apps.get(d, d)
+    return {
+        "items": [
+            {"nombre_exe": r.nombre_exe, "nombre_amigable": r.nombre_amigable,
+             "descripcion": r.descripcion, "dueno_exe": r.dueno_exe,
+             "dueno_legible": _dueno_legible(r.dueno_exe),
+             "aprobado_por": r.aprobado_por, "fecha": r.fecha}
+            for r in rows
+        ]
+    }
+
+
+class _BancoRuidoReq(BaseModel):
+    nombre_exe: str
+    nombre_amigable: str | None = None
+    descripcion: str | None = None
+    dueno_exe: str | None = None   # exe de banco_apps, o "__sistema__"
+
+
+@router.post("/admin/banco-ruido")
+async def agregar_banco_ruido(
+    datos: _BancoRuidoReq,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Agrega/actualiza un proceso de ruido (solo superadmin)."""
+    _exige_super(admin)
+    exe = _norm_exe(datos.nombre_exe)
+    if not exe:
+        raise HTTPException(status_code=422, detail="Nombre de ejecutable inválido")
+    dueno = (datos.dueno_exe or "").strip().lower()
+    if dueno and dueno != "__sistema__":
+        dueno = _norm_exe(dueno)
+    dueno = dueno or None
+    existe = (await db.execute(select(BancoRuido).where(BancoRuido.nombre_exe == exe))).scalar_one_or_none()
+    if existe:
+        existe.nombre_amigable = (datos.nombre_amigable or existe.nombre_amigable)
+        existe.descripcion = (datos.descripcion or existe.descripcion)
+        existe.dueno_exe = dueno
+    else:
+        db.add(BancoRuido(nombre_exe=exe, nombre_amigable=(datos.nombre_amigable or None),
+                          descripcion=(datos.descripcion or None), dueno_exe=dueno,
+                          aprobado_por=admin.username))
+    await registrar_auditoria(admin.username, "agregar_banco_ruido", rol=admin.rol, objetivo=exe, db=db)
+    await db.commit()
+    await _refrescar_cache_bancos()
+    return {"ok": True, "nombre_exe": exe}
+
+
+@router.delete("/admin/banco-ruido/{nombre_exe}")
+async def eliminar_banco_ruido(
+    nombre_exe: str,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Quita un proceso del banco de ruido (solo superadmin)."""
+    _exige_super(admin)
+    exe = _norm_exe(nombre_exe)
+    row = (await db.execute(select(BancoRuido).where(BancoRuido.nombre_exe == exe))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Proceso no encontrado en el banco de ruido")
+    await db.delete(row)
+    await registrar_auditoria(admin.username, "quitar_banco_ruido", rol=admin.rol, objetivo=exe, db=db)
+    await db.commit()
+    await _refrescar_cache_bancos()
+    return {"ok": True, "eliminado": exe}
+
+
+@router.get("/admin/banco/pendientes")
+async def listar_pendientes_banco(
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    _: Usuario = Depends(obtener_usuario_actual),
+):
+    """Ejecutables vistos en actividad que NO están en ningún banco.
+    Para cada uno: cuántos alumnos distintos lo usaron, última vez, y una
+    sugerencia (app/ruido + nombre/descr) si el catálogo lo reconoce."""
+    from core.catalogo_apps import describir
+    from sqlalchemy import func as _func
+    limit = min(max(limit, 1), 200)
+    # Conteo por exe (solo eventos de proceso con exe), por alumnos distintos.
+    q = (
+        select(
+            _func.lower(ActividadLog.proceso_exe).label("exe"),
+            _func.count(_func.distinct(ActividadLog.dni_alumno)).label("alumnos"),
+            _func.count(ActividadLog.id).label("veces"),
+            _func.max(ActividadLog.fecha_hora).label("ultima"),
+            _func.max(ActividadLog.descripcion).label("ej_desc"),
+        )
+        .where(ActividadLog.tipo == "proceso", ActividadLog.proceso_exe.isnot(None))
+        .group_by(_func.lower(ActividadLog.proceso_exe))
+        .order_by(_func.count(_func.distinct(ActividadLog.dni_alumno)).desc())
+    )
+    rows = (await db.execute(q)).all()
+    apps   = {r[0] for r in (await db.execute(select(BancoApp.nombre_exe))).all()}
+    ruido  = {r[0] for r in (await db.execute(select(BancoRuido.nombre_exe))).all()}
+    pendientes = []
+    for r in rows:
+        exe = r.exe
+        if not exe or exe in apps or exe in ruido:
+            continue
+        tipo_sug, nom_sug, desc_sug, dueno_sug = describir(exe)
+        pendientes.append({
+            "nombre_exe":  exe,
+            "alumnos":     int(r.alumnos or 0),
+            "veces":       int(r.veces or 0),
+            "ultima":      r.ultima,
+            "ejemplo":     r.ej_desc,
+            "sugerencia_tipo":  tipo_sug,    # 'app' | 'ruido' | None
+            "sugerencia_nombre": nom_sug,
+            "sugerencia_desc":   desc_sug,
+            "sugerencia_dueno":  dueno_sug,
+        })
+        if len(pendientes) >= limit:
+            break
+    return {"total": len(pendientes), "items": pendientes}
+
+
+class _ClasificarReq(BaseModel):
+    nombre_exe: str
+    destino: str                    # 'app' | 'ruido'
+    nombre_amigable: str | None = None
+    categoria: str | None = None
+    descripcion: str | None = None
+    dueno_exe: str | None = None    # solo si destino='ruido'
+
+
+@router.post("/admin/banco/clasificar")
+async def clasificar_pendiente(
+    datos: _ClasificarReq,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Manda un ejecutable a banco_apps o banco_ruido, de forma RETROACTIVA:
+    los eventos pasados de ese .exe que quedaron como sospechosos pasan a normal
+    y sus sospechas pendientes se cierran (descartadas)."""
+    from sqlalchemy import func as _func
+    _exige_super(admin)
+    exe = _norm_exe(datos.nombre_exe)
+    if not exe:
+        raise HTTPException(status_code=422, detail="Nombre de ejecutable inválido")
+    destino = (datos.destino or "").strip().lower()
+    if destino not in ("app", "ruido"):
+        raise HTTPException(status_code=422, detail="destino debe ser 'app' o 'ruido'")
+
+    # 1) Alta en el banco que corresponda (idempotente).
+    if destino == "app":
+        if not (await db.execute(select(BancoApp).where(BancoApp.nombre_exe == exe))).scalar_one_or_none():
+            db.add(BancoApp(nombre_exe=exe, nombre_amigable=(datos.nombre_amigable or exe).strip()[:200],
+                            categoria=(datos.categoria or None), descripcion=(datos.descripcion or None),
+                            aprobado_por=admin.username))
+    else:
+        dueno = (datos.dueno_exe or "").strip().lower()
+        if dueno and dueno != "__sistema__":
+            dueno = _norm_exe(dueno)
+        if not (await db.execute(select(BancoRuido).where(BancoRuido.nombre_exe == exe))).scalar_one_or_none():
+            db.add(BancoRuido(nombre_exe=exe, nombre_amigable=(datos.nombre_amigable or None),
+                              descripcion=(datos.descripcion or None), dueno_exe=(dueno or None),
+                              aprobado_por=admin.username))
+
+    # 2) Retroactivo: bajar logs sospechosos de ese exe a normal.
+    res_logs = await db.execute(
+        select(ActividadLog).where(
+            _func.lower(ActividadLog.proceso_exe) == exe,
+            ActividadLog.nivel == "sospechoso",
+        )
+    )
+    logs = res_logs.scalars().all()
+    corregidos = 0
+    for lg in logs:
+        lg.nivel = "normal"
+        corregidos += 1
+
+    # 3) Cerrar sospechas pendientes de actividad cuyo detalle menciona ese exe.
+    res_sosp = await db.execute(
+        select(Sospecha).where(
+            Sospecha.estado == "pendiente",
+            Sospecha.tipo == "actividad_sospechosa",
+            Sospecha.detalle.ilike(f"%{exe}%"),
+        )
+    )
+    sosp = res_sosp.scalars().all()
+    cerradas = 0
+    for s in sosp:
+        s.estado = "descartada"
+        s.revisado_por = admin.username
+        s.fecha_revision = datetime.now()
+        cerradas += 1
+
+    await registrar_auditoria(admin.username, f"clasificar_{destino}", rol=admin.rol, objetivo=exe,
+                              detalle=f"{corregidos} evento(s) corregido(s), {cerradas} sospecha(s) cerrada(s)", db=db)
+    await db.commit()
+    await _refrescar_cache_bancos()
+    return {"ok": True, "nombre_exe": exe, "destino": destino,
+            "eventos_corregidos": corregidos, "sospechas_cerradas": cerradas}
 
 
 @router.get("/admin/exportar-excel")
@@ -2764,4 +3086,849 @@ async def guardar_ruta_distribucion(
     await db.commit()
     return {"mensaje": "Ruta actualizada correctamente", "ruta": ruta_norm}
 
+
+# ════════════════════════════════════════════════════════════════════════
+#  KPIs / INDICADORES  (aditivo — no toca ningún flujo existente)
+#  - Catálogo curado de indicadores calculados desde la BD actual.
+#  - Config global (qué KPIs se muestran y en qué orden) en ajustes_sistema.
+#  - La edición es solo-superadmin; la lectura, cualquier usuario del panel.
+# ════════════════════════════════════════════════════════════════════════
+
+import json as _kpi_json
+
+# Catálogo: clave -> (etiqueta, categoria, formato, solo_superadmin)
+# formato: "num" (entero), "pct" (porcentaje), "dur" (minutos -> "Xh Ym")
+# Catálogo de KPIs. Tupla por clave:
+#   (etiqueta, categoria, formato, solo_superadmin, pestana)
+# - categoria: agrupación temática para el ícono/etiqueta de la tarjeta.
+# - pestana: a qué pestaña de Indicadores pertenece -> "equipos" | "usuarios" | "programas".
+KPI_CATALOGO = {
+    # ── Pestaña EQUIPOS (estado de la sala / máquinas) ──
+    "equipos_total":        ("Equipos totales",          "Equipos",   "num", False, "equipos"),
+    "equipos_online":       ("Equipos conectados",       "Equipos",   "num", False, "equipos"),  # activo + bloqueado (online)
+    "equipos_en_uso":       ("Equipos en uso ahora",     "Equipos",   "num", False, "equipos"),  # solo con alumno activo
+    "equipos_bloqueados":   ("Equipos libres (bloqueados)","Equipos", "num", False, "equipos"),  # conectados sin alumno
+    "ocupacion_pct":        ("Ocupación de la sala",     "Equipos",   "pct", False, "equipos"),
+    "sesiones_activas":     ("Sesiones en curso ahora",  "Equipos",   "num", False, "equipos"),
+    # ── Pestaña USUARIOS (alumnos / atención / disciplina) ──
+    "alumnos_total":        ("Alumnos en el padrón",     "Alumnos",   "num", False, "usuarios"),
+    "atendidos_hoy":        ("Alumnos atendidos (hoy)",  "Alumnos",   "num", False, "usuarios"),  # personas distintas
+    "atendidos_semana":     ("Alumnos atendidos (semana)","Alumnos",  "num", False, "usuarios"),
+    "atendidos_mes":        ("Alumnos atendidos (mes)",  "Alumnos",   "num", False, "usuarios"),
+    "sesiones_hoy":         ("Visitas de hoy",           "Alumnos",   "num", False, "usuarios"),  # total de sesiones (un alumno puede tener varias)
+    "duracion_prom_hoy":    ("Duración prom. de visita (hoy)","Alumnos","dur", False, "usuarios"),
+    "bans_activos":         ("Bans activos ahora",       "Seguridad", "num", False, "usuarios"),
+    "bans_mes":             ("Bans aplicados (mes)",     "Seguridad", "num", False, "usuarios"),
+    "incidencias_leves":    ("Incidencias leves activas","Seguridad", "num", False, "usuarios"),
+    "incidencias_graves":   ("Incidencias graves activas","Seguridad","num", False, "usuarios"),
+    "sospechas_pend":       ("Sospechas por revisar",    "Seguridad", "num", False, "usuarios"),
+    "eventos_sosp_hoy":     ("Eventos sospechosos (hoy)","Seguridad", "num", False, "usuarios"),
+    "eventos_hoy":          ("Eventos registrados (hoy)","Seguridad", "num", False, "usuarios"),
+    # Sensibles (solo superadmin) — viven en Usuarios
+    "personal_total":       ("Personal registrado",      "Sistema",   "num", True,  "usuarios"),
+    "acciones_auditoria":   ("Acciones auditadas (mes)", "Sistema",   "num", True,  "usuarios"),
+    # ── Pestaña PROGRAMAS — pendiente (banco de programas). Sin KPIs aún. ──
+}
+
+# Orden por defecto cuando no hay config guardada.
+KPI_DEFAULT_ACTIVOS = [
+    "equipos_total", "equipos_en_uso", "ocupacion_pct", "sesiones_activas",
+    "atendidos_hoy", "atendidos_mes", "bans_activos", "sospechas_pend",
+]
+
+
+async def _kpis_calcular(db: AsyncSession) -> dict:
+    """Calcula TODOS los KPIs del catálogo. Devuelve {clave: valor}."""
+    from sqlalchemy import func as _f, case as _case
+    hoy = date.today()
+    ini_dia = datetime(hoy.year, hoy.month, hoy.day)
+    ini_semana = ini_dia - timedelta(days=hoy.weekday())
+    ini_mes = datetime(hoy.year, hoy.month, 1)
+    v: dict = {}
+
+    async def _scalar(q):
+        return (await db.execute(q)).scalar() or 0
+
+    # Equipos
+    v["equipos_total"]      = await _scalar(select(_f.count(Terminal.id)))
+    v["equipos_online"]     = await _scalar(select(_f.count(Terminal.id)).where(Terminal.estado.in_(["activo", "bloqueado"])))
+    v["equipos_en_uso"]     = await _scalar(select(_f.count(Terminal.id)).where(Terminal.estado == "activo"))
+    v["equipos_bloqueados"] = await _scalar(select(_f.count(Terminal.id)).where(Terminal.estado == "bloqueado"))
+    tot = v["equipos_total"] or 0
+    v["ocupacion_pct"]      = round((v["equipos_en_uso"] / tot) * 100) if tot else 0
+
+    # Alumnos / sesiones
+    v["alumnos_total"]   = await _scalar(select(_f.count(AlumnoMaestro.dni)))
+    v["sesiones_activas"] = await _scalar(select(_f.count(Sesion.id)).where(Sesion.estado == "activa"))
+    v["atendidos_hoy"]   = await _scalar(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_dia))
+    v["atendidos_semana"] = await _scalar(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_semana))
+    v["atendidos_mes"]   = await _scalar(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_mes))
+    v["sesiones_hoy"]    = await _scalar(select(_f.count(Sesion.id)).where(Sesion.hora_entrada >= ini_dia))
+    # Duración promedio de sesiones cerradas hoy (en minutos). TIMESTAMPDIFF con
+    # text() crudo: pasar la unidad MINUTE como argumento de func no es portable.
+    from sqlalchemy import text as _text
+    dur = (await db.execute(
+        _text("SELECT AVG(TIMESTAMPDIFF(MINUTE, hora_entrada, hora_salida)) "
+              "FROM sesiones WHERE hora_entrada >= :ini AND hora_salida IS NOT NULL"),
+        {"ini": ini_dia}
+    )).scalar()
+    v["duracion_prom_hoy"] = round(float(dur)) if dur else 0
+
+    # Seguridad / disciplina
+    v["bans_activos"]  = await _scalar(select(_f.count(Ban.id)).where((Ban.fecha_fin == None) | (Ban.fecha_fin > datetime.now())))
+    v["bans_mes"]      = await _scalar(select(_f.count(Ban.id)).where(Ban.fecha_ini >= ini_mes))
+    v["incidencias_leves"]  = await _scalar(select(_f.count(Incidencia.id)).where(Incidencia.tipo == "leve", Incidencia.activa == True))
+    v["incidencias_graves"] = await _scalar(select(_f.count(Incidencia.id)).where(Incidencia.tipo == "grave", Incidencia.activa == True))
+    v["sospechas_pend"]   = await _scalar(select(_f.count(Sospecha.id)).where(Sospecha.estado == "pendiente"))
+    v["eventos_sosp_hoy"] = await _scalar(select(_f.count(ActividadLog.id)).where(ActividadLog.nivel == "sospechoso", ActividadLog.fecha_hora >= ini_dia))
+    v["eventos_hoy"]      = await _scalar(select(_f.count(ActividadLog.id)).where(ActividadLog.fecha_hora >= ini_dia))
+
+    # Sensibles
+    v["personal_total"] = await _scalar(select(_f.count(PersonalUniversidad.dni)))
+    try:
+        v["acciones_auditoria"] = await _scalar(select(_f.count(Auditoria.id)).where(Auditoria.fecha_hora >= ini_mes))
+    except Exception:
+        v["acciones_auditoria"] = 0
+
+    return v
+
+
+async def _kpis_leer_config(db: AsyncSession) -> list:
+    """Lee la lista de claves activas (en orden) desde ajustes_sistema."""
+    from sqlalchemy import text as _text
+    res = await db.execute(_text("SELECT valor FROM ajustes_sistema WHERE clave='kpis_config'"))
+    row = res.fetchone()
+    if not row or not row[0]:
+        return list(KPI_DEFAULT_ACTIVOS)
+    try:
+        data = _kpi_json.loads(row[0])
+        if isinstance(data, list):
+            # Filtrar contra el catálogo vigente (descarta claves obsoletas)
+            return [k for k in data if k in KPI_CATALOGO]
+    except Exception:
+        pass
+    return list(KPI_DEFAULT_ACTIVOS)
+
+
+def _kpis_fmt(formato: str, valor) -> str:
+    if formato == "pct":
+        return f"{valor}%"
+    if formato == "dur":
+        m = int(valor or 0)
+        h, mm = divmod(m, 60)
+        return f"{h}h {mm}m" if h else f"{mm}m"
+    return str(valor)
+
+
+@router.get("/kpis")
+async def listar_kpis(
+    db: AsyncSession = Depends(get_db),
+    usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """Devuelve el catálogo completo + valores + config activa.
+    Los KPIs sensibles solo se incluyen para superadmin."""
+    es_super = usuario.rol == "superadmin"
+    valores = await _kpis_calcular(db)
+    activos = await _kpis_leer_config(db)
+
+    catalogo = []
+    for clave, (etiqueta, categoria, formato, solo_super, pestana) in KPI_CATALOGO.items():
+        if solo_super and not es_super:
+            continue
+        catalogo.append({
+            "clave": clave,
+            "etiqueta": etiqueta,
+            "categoria": categoria,
+            "formato": formato,
+            "solo_superadmin": solo_super,
+            "pestana": pestana,
+            "valor": valores.get(clave, 0),
+            "valor_fmt": _kpis_fmt(formato, valores.get(clave, 0)),
+        })
+
+    # Filtrar activos visibles para este rol
+    activos_visibles = [k for k in activos if k in KPI_CATALOGO and (es_super or not KPI_CATALOGO[k][3])]
+
+    return {
+        "catalogo": catalogo,
+        "activos": activos_visibles,
+        "puede_editar": es_super,
+    }
+
+
+class _KpisConfigReq(BaseModel):
+    activos: list
+
+
+@router.put("/kpis/config")
+async def guardar_kpis_config(
+    datos: _KpisConfigReq,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Guarda la config global de KPIs. Solo superadmin."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede personalizar los indicadores.")
+    from sqlalchemy import text as _text
+    # Validar: solo claves del catálogo, sin duplicados, preservando orden
+    vistos = set()
+    limpio = []
+    for k in datos.activos:
+        if k in KPI_CATALOGO and k not in vistos:
+            vistos.add(k)
+            limpio.append(k)
+    valor = _kpi_json.dumps(limpio)
+    await db.execute(
+        _text("INSERT INTO ajustes_sistema (clave, valor) VALUES ('kpis_config', :v) ON DUPLICATE KEY UPDATE valor=:v"),
+        {"v": valor}
+    )
+    await registrar_auditoria(admin.username, "cambiar_config_kpis", rol=admin.rol,
+                              objetivo=f"{len(limpio)} indicadores", db=db)
+    await db.commit()
+    return {"activos": limpio}
+
+
+# ── Gráficos de indicadores (series para SVG en el frontend) ────────────
+def _kpi_rango_fechas(periodo: str, desde: str | None, hasta: str | None):
+    """Resuelve (ini, fin_exclusivo, etiqueta) según el período pedido.
+    periodo: 'semana' (últimos 7 días) | 'mes' (últimos 30) | 'rango' (desde/hasta).
+    Devuelve datetimes; fin es exclusivo (día siguiente a 00:00)."""
+    hoy = date.today()
+    if periodo == "rango":
+        try:
+            d_ini = datetime.strptime(desde, "%Y-%m-%d").date()
+            d_fin = datetime.strptime(hasta, "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="Fechas inválidas (use YYYY-MM-DD).")
+        if d_fin < d_ini:
+            raise HTTPException(status_code=422, detail="La fecha final no puede ser anterior a la inicial.")
+        # Tope defensivo: máximo 366 días para no generar series enormes
+        if (d_fin - d_ini).days > 366:
+            raise HTTPException(status_code=422, detail="El rango no puede superar un año.")
+        ini, fin = d_ini, d_fin
+    elif periodo == "mes":
+        ini, fin = hoy - timedelta(days=29), hoy
+    else:  # semana (default)
+        ini, fin = hoy - timedelta(days=6), hoy
+    dt_ini = datetime(ini.year, ini.month, ini.day)
+    dt_fin = datetime(fin.year, fin.month, fin.day) + timedelta(days=1)  # exclusivo
+    return dt_ini, dt_fin
+
+
+@router.get("/kpis/grafico/atenciones")
+async def grafico_atenciones(
+    periodo: str = "semana", desde: str | None = None, hasta: str | None = None,
+    db: AsyncSession = Depends(get_db), usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """Serie diaria: alumnos DISTINTOS atendidos por día en el período.
+    Rellena con 0 los días sin actividad para que el gráfico no tenga huecos."""
+    from sqlalchemy import func as _f
+    dt_ini, dt_fin = _kpi_rango_fechas(periodo, desde, hasta)
+    q = (
+        select(_f.date(Sesion.hora_entrada).label("dia"),
+               _f.count(_f.distinct(Sesion.dni_alumno)).label("n"))
+        .where(Sesion.hora_entrada >= dt_ini, Sesion.hora_entrada < dt_fin)
+        .group_by(_f.date(Sesion.hora_entrada))
+    )
+    filas = {str(r.dia): r.n for r in (await db.execute(q)).all()}
+    # Construir serie continua día a día
+    serie = []
+    cur = dt_ini.date()
+    fin = (dt_fin - timedelta(days=1)).date()
+    while cur <= fin:
+        clave = cur.isoformat()
+        serie.append({"fecha": clave, "valor": int(filas.get(clave, 0))})
+        cur += timedelta(days=1)
+    return {"periodo": periodo, "items": serie}
+
+
+@router.get("/kpis/grafico/facultades")
+async def grafico_facultades(
+    periodo: str = "semana", desde: str | None = None, hasta: str | None = None,
+    db: AsyncSession = Depends(get_db), usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """Uso por facultad en el período: nº de sesiones agrupadas por la facultad
+    del alumno. Devuelve las facultades con uso, ordenadas de mayor a menor."""
+    from sqlalchemy import func as _f
+    dt_ini, dt_fin = _kpi_rango_fechas(periodo, desde, hasta)
+    q = (
+        select(Facultad.nombre.label("fac"), _f.count(Sesion.id).label("n"))
+        .select_from(Sesion)
+        .join(AlumnoMaestro, AlumnoMaestro.dni == Sesion.dni_alumno)
+        .join(Escuela, Escuela.id == AlumnoMaestro.id_escuela)
+        .join(Facultad, Facultad.id == Escuela.id_facultad)
+        .where(Sesion.hora_entrada >= dt_ini, Sesion.hora_entrada < dt_fin)
+        .group_by(Facultad.nombre)
+        .order_by(_f.count(Sesion.id).desc())
+    )
+    filas = (await db.execute(q)).all()
+    return {"periodo": periodo, "items": [{"facultad": r.fac, "valor": int(r.n)} for r in filas]}
+
+
+# Ruido del sistema operativo: procesos que se ejecutan SOLOS (no los "usa" el
+# alumno). Se excluyen del Top de programas para que el ranking refleje uso real.
+# En minúsculas; el match es case-insensitive.
+_PROC_RUIDO_SISTEMA = {
+    "sc.exe", "rundll32.exe", "mpcmdrun.exe", "mpsigstub.exe", "wmiadap.exe",
+    "provtool.exe", "wuauclt.exe", "wuaucltcore.exe", "dismhost.exe", "defrag.exe",
+    "storedesktopextension.exe", "hxtsr.exe", "onedrivelauncher.exe", "onedrivesetup.exe",
+    "conhost.exe", "dllhost.exe", "svchost.exe", "taskhostw.exe", "sihost.exe",
+    "ctfmon.exe", "searchhost.exe", "searchindexer.exe", "runtimebroker.exe",
+    "backgroundtaskhost.exe", "smartscreen.exe", "securityhealthservice.exe",
+    "securityhealthsystray.exe", "wermgr.exe", "compattelrunner.exe", "mousocoreworker.exe",
+    "usocoreworker.exe", "trustedinstaller.exe", "tiworker.exe", "audiodg.exe",
+    "fontdrvhost.exe", "lsass.exe", "services.exe", "spoolsv.exe", "wininit.exe",
+    "winlogon.exe", "csrss.exe", "smss.exe", "explorer.exe", "startmenuexperiencehost.exe",
+    "shellexperiencehost.exe", "systemsettings.exe", "applicationframehost.exe",
+    "identity_helper.exe", "wmiprvse.exe", "msmpeng.exe", "nissrv.exe",
+}
+
+
+@router.get("/kpis/grafico/programas")
+async def grafico_programas(
+    periodo: str = "semana", desde: str | None = None, hasta: str | None = None,
+    limite: int = 10,
+    db: AsyncSession = Depends(get_db), usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """Top de programas más usados por los estudiantes en el período.
+    - Métrica: cantidad de ALUMNOS DISTINTOS que abrieron cada programa
+      (no las veces que se abrió) → 'el que más se usa por sesión/alumno'.
+    - Excluye el ruido del sistema operativo (_PROC_RUIDO_SISTEMA).
+    - Usa el nombre legible (descripcion sin el '(...exe)' final) cuando existe."""
+    from sqlalchemy import func as _f
+    dt_ini, dt_fin = _kpi_rango_fechas(periodo, desde, hasta)
+    limite = min(max(limite, 1), 20)
+
+    # Agrupar por proceso_exe contando DNIs distintos. Solo eventos con .exe.
+    q = (
+        select(
+            ActividadLog.proceso_exe.label("exe"),
+            _f.count(_f.distinct(ActividadLog.dni_alumno)).label("alumnos"),
+            _f.max(ActividadLog.descripcion).label("desc"),
+        )
+        .where(
+            ActividadLog.fecha_hora >= dt_ini, ActividadLog.fecha_hora < dt_fin,
+            ActividadLog.proceso_exe.isnot(None), ActividadLog.proceso_exe != "",
+        )
+        .group_by(ActividadLog.proceso_exe)
+        .order_by(_f.count(_f.distinct(ActividadLog.dni_alumno)).desc())
+    )
+    filas = (await db.execute(q)).all()
+
+    items = []
+    for r in filas:
+        exe = (r.exe or "").strip()
+        if exe.lower() in _PROC_RUIDO_SISTEMA:
+            continue  # ruido del SO
+        # Nombre legible: la descripcion suele ser "Abrió: Microsoft Edge (msedge.exe)"
+        nombre = exe
+        if r.desc:
+            d = r.desc
+            for pref in ("Abrió: ", "Herramienta del sistema: "):
+                if d.startswith(pref):
+                    d = d[len(pref):]
+            # Quitar el "(....exe)" final si está
+            corte = d.rfind(" (")
+            if corte > 0:
+                d = d[:corte]
+            nombre = d.strip() or exe
+        items.append({"programa": nombre, "exe": exe, "valor": int(r.alumnos)})
+        if len(items) >= limite:
+            break
+
+    return {"periodo": periodo, "items": items}
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  EGRESADOS / DOCENTES / AUTORIDAD  (Base de Datos del panel)
+#  Mismo patrón CRUD + importar/exportar que personal_universitario.
+#  Solo superadmin. Upsert por DNI en la importación.
+# ════════════════════════════════════════════════════════════════════════
+
+class _EgresadoReq(BaseModel):
+    dni: str
+    nombre: str
+    codigo: str | None = None
+    escuela: str | None = None
+    anio_egreso: str | None = None
+
+class _DocenteReq(BaseModel):
+    dni: str
+    nombre: str
+    facultad: str | None = None
+    escuela: str | None = None
+    correo: str | None = None
+    telefono: str | None = None
+
+class _AutoridadReq(BaseModel):
+    dni: str
+    nombre: str
+    cargo: str | None = None
+    correo: str | None = None
+    telefono: str | None = None
+
+
+def _exige_super(admin: Usuario):
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede gestionar esta sección")
+
+
+def _val_dni_nombre(dni: str, nombre: str):
+    if not dni.isdigit() or len(dni) != 8:
+        raise HTTPException(status_code=422, detail="El DNI debe tener exactamente 8 dígitos")
+    if not nombre.strip():
+        raise HTTPException(status_code=422, detail="El nombre es obligatorio")
+
+
+# ── EGRESADOS ───────────────────────────────────────────────────────────
+@router.get("/admin/egresados")
+async def listar_egresados(
+    db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual),
+    search: str | None = None, limit: int = 50, offset: int = 0,
+):
+    _exige_super(admin)
+    from sqlalchemy import or_, func
+    q = select(Egresado)
+    if search:
+        like = f"%{search}%"
+        q = q.where(or_(Egresado.dni.ilike(like), Egresado.nombre.ilike(like),
+                        Egresado.codigo.ilike(like), Egresado.escuela.ilike(like)))
+    limit = min(max(limit, 1), 200)
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
+    rows = (await db.execute(q.order_by(Egresado.nombre).offset(offset).limit(limit))).scalars().all()
+    return {"total": total, "items": [
+        {"dni": e.dni, "nombre": e.nombre, "codigo": e.codigo or "", "escuela": e.escuela or "",
+         "anio_egreso": e.anio_egreso or ""} for e in rows]}
+
+@router.post("/admin/egresados/nuevo", status_code=201)
+async def crear_egresado(datos: _EgresadoReq, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin); _val_dni_nombre(datos.dni, datos.nombre)
+    if (await db.execute(select(Egresado).where(Egresado.dni == datos.dni))).scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Ya existe un egresado con DNI {datos.dni}")
+    db.add(Egresado(dni=datos.dni, nombre=datos.nombre.strip(),
+                    codigo=(datos.codigo or "").strip() or None,
+                    escuela=(datos.escuela or "").strip() or None,
+                    anio_egreso=(datos.anio_egreso or "").strip() or None))
+    await registrar_auditoria(admin.username, "crear_egresado", rol=admin.rol, objetivo=f"DNI {datos.dni}", detalle=datos.nombre.strip(), db=db)
+    await db.commit()
+    return {"mensaje": f"Egresado '{datos.nombre.strip()}' registrado correctamente"}
+
+@router.put("/admin/egresados/{dni}")
+async def actualizar_egresado(dni: str, datos: _EgresadoReq, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    e = (await db.execute(select(Egresado).where(Egresado.dni == dni))).scalar_one_or_none()
+    if not e: raise HTTPException(status_code=404, detail="Egresado no encontrado")
+    e.nombre = datos.nombre.strip(); e.codigo = (datos.codigo or "").strip() or None
+    e.escuela = (datos.escuela or "").strip() or None; e.anio_egreso = (datos.anio_egreso or "").strip() or None
+    await registrar_auditoria(admin.username, "editar_egresado", rol=admin.rol, objetivo=f"DNI {dni}", db=db)
+    await db.commit()
+    return {"mensaje": f"Egresado {dni} actualizado correctamente"}
+
+@router.delete("/admin/egresados/{dni}")
+async def eliminar_egresado(dni: str, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    e = (await db.execute(select(Egresado).where(Egresado.dni == dni))).scalar_one_or_none()
+    if not e: raise HTTPException(status_code=404, detail="Egresado no encontrado")
+    nom = e.nombre; await db.delete(e)
+    await registrar_auditoria(admin.username, "eliminar_egresado", rol=admin.rol, objetivo=f"DNI {dni}", detalle=nom, db=db)
+    await db.commit()
+    return {"mensaje": f"Egresado {dni} eliminado correctamente"}
+
+@router.post("/admin/egresados/importar")
+async def importar_egresados(archivo: UploadFile, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    import io, openpyxl
+    contenido = await _leer_upload_limitado(archivo)
+    try:
+        ws = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True).active
+    except Exception:
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
+    hdrs = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    def col(*opts):
+        for o in opts:
+            if o in hdrs: return hdrs.index(o)
+        return None
+    i_dni = col("dni"); i_nom = col("nombre completo", "nombre", "apellidos y nombres")
+    i_cod = col("código univ.", "codigo univ.", "código", "codigo"); i_esc = col("escuela")
+    i_anio = col("año egreso", "anio egreso", "año de egreso", "año");
+    if i_dni is None: raise HTTPException(status_code=400, detail="Columna 'DNI' no encontrada")
+    def cell(f, idx): return str(f[idx]).strip() if idx is not None and idx < len(f) and f[idx] is not None else ""
+    ins = act = err = 0
+    for fila in ws.iter_rows(min_row=2, values_only=True):
+        if all(v is None for v in fila): continue
+        dni = cell(fila, i_dni).replace(" ", "").replace("-", "")
+        if not dni.isdigit() or len(dni) != 8: err += 1; continue
+        nom = cell(fila, i_nom)
+        if not nom: err += 1; continue
+        ex = (await db.execute(select(Egresado).where(Egresado.dni == dni))).scalar_one_or_none()
+        if ex:
+            ex.nombre = nom; ex.codigo = cell(fila, i_cod) or None; ex.escuela = cell(fila, i_esc) or None; ex.anio_egreso = cell(fila, i_anio) or None
+            act += 1
+        else:
+            db.add(Egresado(dni=dni, nombre=nom, codigo=cell(fila, i_cod) or None, escuela=cell(fila, i_esc) or None, anio_egreso=cell(fila, i_anio) or None)); ins += 1
+        if (ins + act) % 200 == 0: await db.flush()
+    await registrar_auditoria(admin.username, "importar_egresados", rol=admin.rol, objetivo="padrón de egresados", detalle=f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", db=db)
+    await db.commit()
+    return {"mensaje": f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", "insertados": ins, "actualizados": act, "errores": err}
+
+@router.get("/admin/egresados/exportar")
+async def exportar_egresados(db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    import io, openpyxl
+    from fastapi.responses import StreamingResponse
+    rows = (await db.execute(select(Egresado).order_by(Egresado.nombre))).scalars().all()
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Egresados"
+    ws.append(["DNI", "Nombre Completo", "Código Univ.", "Escuela", "Año Egreso"])
+    for e in rows: ws.append([e.dni, e.nombre, e.codigo or "", e.escuela or "", e.anio_egreso or ""])
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=egresados.xlsx", "Access-Control-Expose-Headers": "Content-Disposition"})
+
+
+# ── DOCENTES ────────────────────────────────────────────────────────────
+@router.get("/admin/docentes")
+async def listar_docentes(
+    db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual),
+    search: str | None = None, limit: int = 50, offset: int = 0,
+):
+    _exige_super(admin)
+    from sqlalchemy import or_, func
+    q = select(Docente)
+    if search:
+        like = f"%{search}%"
+        q = q.where(or_(Docente.dni.ilike(like), Docente.nombre.ilike(like),
+                        Docente.facultad.ilike(like), Docente.correo.ilike(like)))
+    limit = min(max(limit, 1), 200)
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
+    rows = (await db.execute(q.order_by(Docente.nombre).offset(offset).limit(limit))).scalars().all()
+    return {"total": total, "items": [
+        {"dni": d.dni, "nombre": d.nombre, "facultad": d.facultad or "", "escuela": d.escuela or "",
+         "correo": d.correo or "", "telefono": d.telefono or ""} for d in rows]}
+
+@router.post("/admin/docentes/nuevo", status_code=201)
+async def crear_docente(datos: _DocenteReq, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin); _val_dni_nombre(datos.dni, datos.nombre)
+    if (await db.execute(select(Docente).where(Docente.dni == datos.dni))).scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Ya existe un docente con DNI {datos.dni}")
+    db.add(Docente(dni=datos.dni, nombre=datos.nombre.strip(),
+                   facultad=(datos.facultad or "").strip() or None, escuela=(datos.escuela or "").strip() or None,
+                   correo=(datos.correo or "").strip() or None, telefono=(datos.telefono or "").strip() or None))
+    await registrar_auditoria(admin.username, "crear_docente", rol=admin.rol, objetivo=f"DNI {datos.dni}", detalle=datos.nombre.strip(), db=db)
+    await db.commit()
+    return {"mensaje": f"Docente '{datos.nombre.strip()}' registrado correctamente"}
+
+@router.put("/admin/docentes/{dni}")
+async def actualizar_docente(dni: str, datos: _DocenteReq, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    d = (await db.execute(select(Docente).where(Docente.dni == dni))).scalar_one_or_none()
+    if not d: raise HTTPException(status_code=404, detail="Docente no encontrado")
+    d.nombre = datos.nombre.strip(); d.facultad = (datos.facultad or "").strip() or None
+    d.escuela = (datos.escuela or "").strip() or None; d.correo = (datos.correo or "").strip() or None
+    d.telefono = (datos.telefono or "").strip() or None
+    await registrar_auditoria(admin.username, "editar_docente", rol=admin.rol, objetivo=f"DNI {dni}", db=db)
+    await db.commit()
+    return {"mensaje": f"Docente {dni} actualizado correctamente"}
+
+@router.delete("/admin/docentes/{dni}")
+async def eliminar_docente(dni: str, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    d = (await db.execute(select(Docente).where(Docente.dni == dni))).scalar_one_or_none()
+    if not d: raise HTTPException(status_code=404, detail="Docente no encontrado")
+    nom = d.nombre; await db.delete(d)
+    await registrar_auditoria(admin.username, "eliminar_docente", rol=admin.rol, objetivo=f"DNI {dni}", detalle=nom, db=db)
+    await db.commit()
+    return {"mensaje": f"Docente {dni} eliminado correctamente"}
+
+@router.post("/admin/docentes/importar")
+async def importar_docentes(archivo: UploadFile, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    import io, openpyxl
+    contenido = await _leer_upload_limitado(archivo)
+    try:
+        ws = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True).active
+    except Exception:
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
+    hdrs = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    def col(*opts):
+        for o in opts:
+            if o in hdrs: return hdrs.index(o)
+        return None
+    i_dni = col("dni"); i_nom = col("nombre completo", "nombre", "apellidos y nombres")
+    i_fac = col("facultad"); i_esc = col("escuela"); i_cor = col("correo", "email"); i_tel = col("teléfono", "telefono", "celular")
+    if i_dni is None: raise HTTPException(status_code=400, detail="Columna 'DNI' no encontrada")
+    def cell(f, idx): return str(f[idx]).strip() if idx is not None and idx < len(f) and f[idx] is not None else ""
+    ins = act = err = 0
+    for fila in ws.iter_rows(min_row=2, values_only=True):
+        if all(v is None for v in fila): continue
+        dni = cell(fila, i_dni).replace(" ", "").replace("-", "")
+        if not dni.isdigit() or len(dni) != 8: err += 1; continue
+        nom = cell(fila, i_nom)
+        if not nom: err += 1; continue
+        ex = (await db.execute(select(Docente).where(Docente.dni == dni))).scalar_one_or_none()
+        if ex:
+            ex.nombre = nom; ex.facultad = cell(fila, i_fac) or None; ex.escuela = cell(fila, i_esc) or None
+            ex.correo = cell(fila, i_cor) or None; ex.telefono = cell(fila, i_tel) or None; act += 1
+        else:
+            db.add(Docente(dni=dni, nombre=nom, facultad=cell(fila, i_fac) or None, escuela=cell(fila, i_esc) or None,
+                           correo=cell(fila, i_cor) or None, telefono=cell(fila, i_tel) or None)); ins += 1
+        if (ins + act) % 200 == 0: await db.flush()
+    await registrar_auditoria(admin.username, "importar_docentes", rol=admin.rol, objetivo="padrón de docentes", detalle=f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", db=db)
+    await db.commit()
+    return {"mensaje": f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", "insertados": ins, "actualizados": act, "errores": err}
+
+@router.get("/admin/docentes/exportar")
+async def exportar_docentes(db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    import io, openpyxl
+    from fastapi.responses import StreamingResponse
+    rows = (await db.execute(select(Docente).order_by(Docente.nombre))).scalars().all()
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Docentes"
+    ws.append(["DNI", "Nombre Completo", "Facultad", "Escuela", "Correo", "Teléfono"])
+    for d in rows: ws.append([d.dni, d.nombre, d.facultad or "", d.escuela or "", d.correo or "", d.telefono or ""])
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=docentes.xlsx", "Access-Control-Expose-Headers": "Content-Disposition"})
+
+
+# ── AUTORIDAD ───────────────────────────────────────────────────────────
+@router.get("/admin/autoridades")
+async def listar_autoridades(
+    db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual),
+    search: str | None = None, limit: int = 50, offset: int = 0,
+):
+    _exige_super(admin)
+    from sqlalchemy import or_, func
+    q = select(Autoridad)
+    if search:
+        like = f"%{search}%"
+        q = q.where(or_(Autoridad.dni.ilike(like), Autoridad.nombre.ilike(like),
+                        Autoridad.cargo.ilike(like), Autoridad.correo.ilike(like)))
+    limit = min(max(limit, 1), 200)
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
+    rows = (await db.execute(q.order_by(Autoridad.nombre).offset(offset).limit(limit))).scalars().all()
+    return {"total": total, "items": [
+        {"dni": a.dni, "nombre": a.nombre, "cargo": a.cargo or "",
+         "correo": a.correo or "", "telefono": a.telefono or ""} for a in rows]}
+
+@router.post("/admin/autoridades/nuevo", status_code=201)
+async def crear_autoridad(datos: _AutoridadReq, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin); _val_dni_nombre(datos.dni, datos.nombre)
+    if (await db.execute(select(Autoridad).where(Autoridad.dni == datos.dni))).scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Ya existe una autoridad con DNI {datos.dni}")
+    db.add(Autoridad(dni=datos.dni, nombre=datos.nombre.strip(),
+                     cargo=(datos.cargo or "").strip() or None,
+                     correo=(datos.correo or "").strip() or None, telefono=(datos.telefono or "").strip() or None))
+    await registrar_auditoria(admin.username, "crear_autoridad", rol=admin.rol, objetivo=f"DNI {datos.dni}", detalle=datos.nombre.strip(), db=db)
+    await db.commit()
+    return {"mensaje": f"Autoridad '{datos.nombre.strip()}' registrada correctamente"}
+
+@router.put("/admin/autoridades/{dni}")
+async def actualizar_autoridad(dni: str, datos: _AutoridadReq, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    a = (await db.execute(select(Autoridad).where(Autoridad.dni == dni))).scalar_one_or_none()
+    if not a: raise HTTPException(status_code=404, detail="Autoridad no encontrada")
+    a.nombre = datos.nombre.strip(); a.cargo = (datos.cargo or "").strip() or None
+    a.correo = (datos.correo or "").strip() or None; a.telefono = (datos.telefono or "").strip() or None
+    await registrar_auditoria(admin.username, "editar_autoridad", rol=admin.rol, objetivo=f"DNI {dni}", db=db)
+    await db.commit()
+    return {"mensaje": f"Autoridad {dni} actualizada correctamente"}
+
+@router.delete("/admin/autoridades/{dni}")
+async def eliminar_autoridad(dni: str, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    a = (await db.execute(select(Autoridad).where(Autoridad.dni == dni))).scalar_one_or_none()
+    if not a: raise HTTPException(status_code=404, detail="Autoridad no encontrada")
+    nom = a.nombre; await db.delete(a)
+    await registrar_auditoria(admin.username, "eliminar_autoridad", rol=admin.rol, objetivo=f"DNI {dni}", detalle=nom, db=db)
+    await db.commit()
+    return {"mensaje": f"Autoridad {dni} eliminada correctamente"}
+
+@router.post("/admin/autoridades/importar")
+async def importar_autoridades(archivo: UploadFile, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    import io, openpyxl
+    contenido = await _leer_upload_limitado(archivo)
+    try:
+        ws = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True).active
+    except Exception:
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
+    hdrs = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    def col(*opts):
+        for o in opts:
+            if o in hdrs: return hdrs.index(o)
+        return None
+    i_dni = col("dni"); i_nom = col("nombre completo", "nombre", "apellidos y nombres")
+    i_car = col("cargo", "puesto"); i_cor = col("correo", "email"); i_tel = col("teléfono", "telefono", "celular")
+    if i_dni is None: raise HTTPException(status_code=400, detail="Columna 'DNI' no encontrada")
+    def cell(f, idx): return str(f[idx]).strip() if idx is not None and idx < len(f) and f[idx] is not None else ""
+    ins = act = err = 0
+    for fila in ws.iter_rows(min_row=2, values_only=True):
+        if all(v is None for v in fila): continue
+        dni = cell(fila, i_dni).replace(" ", "").replace("-", "")
+        if not dni.isdigit() or len(dni) != 8: err += 1; continue
+        nom = cell(fila, i_nom)
+        if not nom: err += 1; continue
+        ex = (await db.execute(select(Autoridad).where(Autoridad.dni == dni))).scalar_one_or_none()
+        if ex:
+            ex.nombre = nom; ex.cargo = cell(fila, i_car) or None; ex.correo = cell(fila, i_cor) or None; ex.telefono = cell(fila, i_tel) or None; act += 1
+        else:
+            db.add(Autoridad(dni=dni, nombre=nom, cargo=cell(fila, i_car) or None, correo=cell(fila, i_cor) or None, telefono=cell(fila, i_tel) or None)); ins += 1
+        if (ins + act) % 200 == 0: await db.flush()
+    await registrar_auditoria(admin.username, "importar_autoridades", rol=admin.rol, objetivo="padrón de autoridades", detalle=f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", db=db)
+    await db.commit()
+    return {"mensaje": f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", "insertados": ins, "actualizados": act, "errores": err}
+
+@router.get("/admin/autoridades/exportar")
+async def exportar_autoridades(db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
+    _exige_super(admin)
+    import io, openpyxl
+    from fastapi.responses import StreamingResponse
+    rows = (await db.execute(select(Autoridad).order_by(Autoridad.nombre))).scalars().all()
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Autoridades"
+    ws.append(["DNI", "Nombre Completo", "Cargo", "Correo", "Teléfono"])
+    for a in rows: ws.append([a.dni, a.nombre, a.cargo or "", a.correo or "", a.telefono or ""])
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=autoridades.xlsx", "Access-Control-Expose-Headers": "Content-Disposition"})
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  APARIENCIA DEL PANEL (logo + textos del login) — config global
+#  Antes vivía en localStorage del navegador (solo se veía en la PC que lo
+#  subió). Ahora se guarda en ajustes_sistema y la ve cualquier PC.
+#  GET es PÚBLICO (la pantalla de login lo necesita antes de autenticarse).
+#  PUT es solo-superadmin.
+# ════════════════════════════════════════════════════════════════════════
+
+_APARIENCIA_CLAVES = {
+    "logo":      "app_logo",
+    "titulo":    "app_titulo",
+    "subtitulo": "app_subtitulo",
+    "footer":    "app_footer",
+}
+
+# Carpeta donde se guardan los logos subidos (servida en /admin/static/uploads/).
+import os as _os_ap
+_UPLOADS_DIR = _os_ap.path.join(_os_ap.path.dirname(__file__), "..", "..", "admin", "static", "uploads")
+
+_EXT_POR_MIME = {
+    "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg",
+    "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg",
+    "image/x-icon": "ico", "image/vnd.microsoft.icon": "ico",
+}
+
+
+def _guardar_logo_archivo(data_url: str) -> str:
+    """Decodifica un data URL de imagen, lo guarda como archivo versionado en
+    admin/static/uploads/, borra el logo anterior, y devuelve la RUTA pública
+    (/admin/static/uploads/logo_<n>.<ext>) para guardar en la BD.
+
+    El nombre versionado (timestamp) evita el problema de caché del navegador:
+    al cambiar el logo cambia la URL, así que el navegador baja la nueva sin
+    quedarse con la vieja."""
+    import base64, re, time, glob
+    m = re.match(r"^data:([\w.+/-]+);base64,(.*)$", data_url, re.S)
+    if not m:
+        raise HTTPException(status_code=422, detail="Formato de imagen inválido (se esperaba data URL base64).")
+    mime, b64 = m.group(1).lower(), m.group(2)
+    ext = _EXT_POR_MIME.get(mime)
+    if not ext:
+        raise HTTPException(status_code=422, detail=f"Tipo de imagen no soportado: {mime}")
+    try:
+        binario = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=422, detail="No se pudo decodificar la imagen.")
+
+    _os_ap.makedirs(_UPLOADS_DIR, exist_ok=True)
+    # Borrar logos anteriores (logo_*.*) — política: conservar solo el último.
+    for viejo in glob.glob(_os_ap.path.join(_UPLOADS_DIR, "logo_*.*")):
+        try: _os_ap.remove(viejo)
+        except Exception: pass
+
+    nombre = f"logo_{int(time.time())}.{ext}"
+    with open(_os_ap.path.join(_UPLOADS_DIR, nombre), "wb") as f:
+        f.write(binario)
+    return f"/admin/static/uploads/{nombre}"
+
+
+def _borrar_logo_archivo():
+    """Borra cualquier logo subido (al limpiar/restablecer)."""
+    import glob
+    for viejo in glob.glob(_os_ap.path.join(_UPLOADS_DIR, "logo_*.*")):
+        try: _os_ap.remove(viejo)
+        except Exception: pass
+
+
+class _AparienciaReq(BaseModel):
+    logo: str | None = None       # data URL para setear; "" para borrar; None = no cambiar
+    titulo: str | None = None
+    subtitulo: str | None = None
+    footer: str | None = None
+
+
+@router.get("/config/apariencia")
+async def obtener_apariencia(db: AsyncSession = Depends(get_db)):
+    """Logo y textos del login. PÚBLICO: el login los muestra sin sesión.
+    'logo' es una RUTA a un archivo (/admin/static/uploads/...), no base64."""
+    from sqlalchemy import text as _text
+    res = await db.execute(_text(
+        "SELECT clave, valor FROM ajustes_sistema WHERE clave IN ('app_logo','app_titulo','app_subtitulo','app_footer')"
+    ))
+    vals = {row[0]: row[1] for row in res.fetchall()}
+    return {
+        "logo":      vals.get("app_logo", ""),
+        "titulo":    vals.get("app_titulo", ""),
+        "subtitulo": vals.get("app_subtitulo", ""),
+        "footer":    vals.get("app_footer", ""),
+    }
+
+
+@router.put("/config/apariencia")
+async def guardar_apariencia(
+    datos: _AparienciaReq,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Guarda logo y/o textos del login. Solo superadmin.
+    Cada campo: None = no tocar; "" = borrar (vuelve al default); texto = setear.
+    El LOGO se guarda como ARCHIVO en admin/static/uploads/ y en la BD solo va
+    la ruta (mantiene la base liviana y el navegador puede cachear la imagen)."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede cambiar la apariencia del panel.")
+    from sqlalchemy import text as _text
+    # Tope defensivo del data URL recibido (~6 MB de imagen).
+    if datos.logo and len(datos.logo) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="La imagen del logo es demasiado grande.")
+
+    tocados = []
+
+    # Logo: si viene un data URL → guardar archivo y persistir la ruta.
+    #       si viene "" → borrar archivo y limpiar la clave. None → no tocar.
+    if datos.logo is not None:
+        if datos.logo == "":
+            _borrar_logo_archivo()
+            await db.execute(_text("DELETE FROM ajustes_sistema WHERE clave='app_logo'"))
+        else:
+            ruta = _guardar_logo_archivo(datos.logo)
+            await db.execute(
+                _text("INSERT INTO ajustes_sistema (clave, valor) VALUES ('app_logo', :v) ON DUPLICATE KEY UPDATE valor=:v"),
+                {"v": ruta}
+            )
+        tocados.append("logo")
+
+    # Textos: van directos a la BD (livianos).
+    for campo in ("titulo", "subtitulo", "footer"):
+        valor = getattr(datos, campo)
+        if valor is None:
+            continue
+        await db.execute(
+            _text("INSERT INTO ajustes_sistema (clave, valor) VALUES (:k, :v) ON DUPLICATE KEY UPDATE valor=:v"),
+            {"k": _APARIENCIA_CLAVES[campo], "v": valor}
+        )
+        tocados.append(campo)
+
+    await registrar_auditoria(admin.username, "cambiar_apariencia", rol=admin.rol,
+                              objetivo="panel", detalle=", ".join(tocados) or "sin cambios", db=db)
+    await db.commit()
+    return {"mensaje": "Apariencia actualizada", "campos": tocados}
 

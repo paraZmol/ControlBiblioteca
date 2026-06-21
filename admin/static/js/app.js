@@ -2821,6 +2821,277 @@ function exportarPersonal() {
     _descargarArchivo(`${API_BASE}/admin/personal/exportar`, 'Exportando personal...', 'personal_universidad.xlsx');
 }
 
+// ── Egresados / Docentes / Autoridad (genérico parametrizado) ──────────
+const _GRUPO_CFG = {
+    egresados: {
+        singular: 'Egresado', icono: 'ph-graduation-cap', archivo: 'egresados.xlsx',
+        campos: [
+            { key: 'codigo',      label: 'Código Univ.', max: 30,  ph: 'ej: 2020-1234' },
+            { key: 'escuela',     label: 'Escuela',      max: 200, ph: 'ej: Ingeniería de Sistemas' },
+            { key: 'anio_egreso', label: 'Año de Egreso',max: 4,   ph: 'ej: 2024' },
+        ],
+        cols: r => `
+            <td><span class="cell-tag">${esc(r.codigo || '—')}</span></td>
+            <td style="font-size:12px;color:var(--t2)">${esc(r.escuela || '—')}</td>
+            <td style="font-size:12px;color:var(--t3)">${esc(r.anio_egreso || '—')}</td>`,
+    },
+    docentes: {
+        singular: 'Docente', icono: 'ph-chalkboard-teacher', archivo: 'docentes.xlsx',
+        campos: [
+            { key: 'facultad', label: 'Facultad', max: 200, ph: 'ej: Ciencias' },
+            { key: 'escuela',  label: 'Escuela',  max: 200, ph: 'ej: Ingeniería de Sistemas' },
+            { key: 'correo',   label: 'Correo',   max: 150, ph: 'usuario@unasam.edu.pe' },
+            { key: 'telefono', label: 'Teléfono', max: 20,  ph: 'ej: 943 000 000' },
+        ],
+        cols: r => `
+            <td style="font-size:12px;color:var(--t2)">${esc(r.facultad || '—')}</td>
+            <td style="font-size:12px;color:var(--t2)">${esc(r.escuela || '—')}</td>
+            <td style="font-size:12px;color:var(--t3)">${esc(r.correo || '—')}</td>
+            <td style="font-size:12px;color:var(--t3)">${esc(r.telefono || '—')}</td>`,
+    },
+    autoridades: {
+        singular: 'Autoridad', icono: 'ph-shield-star', archivo: 'autoridades.xlsx',
+        campos: [
+            { key: 'cargo',    label: 'Cargo',    max: 150, ph: 'ej: Decano, Director' },
+            { key: 'correo',   label: 'Correo',   max: 150, ph: 'usuario@unasam.edu.pe' },
+            { key: 'telefono', label: 'Teléfono', max: 20,  ph: 'ej: 943 000 000' },
+        ],
+        cols: r => `
+            <td><span class="cell-tag">${esc(r.cargo || '—')}</span></td>
+            <td style="font-size:12px;color:var(--t3)">${esc(r.correo || '—')}</td>
+            <td style="font-size:12px;color:var(--t3)">${esc(r.telefono || '—')}</td>`,
+    },
+};
+const _grupoEstado = {
+    egresados:   { limit: 50, offset: 0, search: '' },
+    docentes:    { limit: 50, offset: 0, search: '' },
+    autoridades: { limit: 50, offset: 0, search: '' },
+};
+
+async function cargarGrupo(grupo) {
+    const st = _grupoEstado[grupo];
+    const params = new URLSearchParams({ limit: st.limit, offset: st.offset });
+    if (st.search) params.set('search', st.search);
+    try {
+        const res = await fetch(`${API_BASE}/admin/${grupo}?${params}`, { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok) { addLog('error', `Error cargando ${grupo}: HTTP ${res.status}`); return; }
+        _renderGrupo(grupo, await res.json());
+    } catch (e) {
+        addLog('error', `Error de red al cargar ${grupo}: ${e.message}`);
+    }
+}
+
+function _cap(grupo) { return grupo.charAt(0).toUpperCase() + grupo.slice(1); }
+
+function _renderGrupo(grupo, data) {
+    const cfg   = _GRUPO_CFG[grupo];
+    const body  = document.getElementById(`${grupo}Body`);
+    const empty = document.getElementById(`sin${_cap(grupo)}`);
+    const total = document.getElementById(`${grupo}Total`);
+    const pag   = document.getElementById(`${grupo}Paginacion`);
+    if (!body) return;
+    if (total) total.textContent = `${data.total} registro(s)`;
+
+    if (!data.items.length) {
+        body.innerHTML = '';
+        if (empty) empty.style.display = '';
+        if (pag)   pag.innerHTML = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    body.innerHTML = data.items.map(r => {
+        const json = encodeURIComponent(JSON.stringify(r));
+        return `
+        <tr>
+            <td><code>${esc(r.dni)}</code></td>
+            <td>${esc(r.nombre)}</td>
+            ${cfg.cols(r)}
+            <td>
+                <div style="display:flex;gap:4px;align-items:center">
+                    <button title="Editar" class="tbl-btn tbl-btn-edit" onclick="abrirEditarGrupo('${grupo}','${json}')"><i class="ph ph-pencil-simple"></i></button>
+                    <button title="Eliminar" class="tbl-btn tbl-btn-delete" onclick="eliminarGrupo('${grupo}','${esc(r.dni)}','${esc(r.nombre)}')"><i class="ph ph-trash"></i></button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+
+    if (pag) {
+        const totalPages = Math.ceil(data.total / _grupoEstado[grupo].limit);
+        const curPage    = Math.floor(_grupoEstado[grupo].offset / _grupoEstado[grupo].limit);
+        pag.innerHTML = _renderPagHtml(curPage, totalPages, `irPaginaGrupo_${grupo}`);
+    }
+}
+
+// Handlers de paginación por grupo (el helper de paginación llama por nombre)
+function irPaginaGrupo_egresados(p)   { _grupoEstado.egresados.offset   = p * _grupoEstado.egresados.limit;   cargarGrupo('egresados'); }
+function irPaginaGrupo_docentes(p)    { _grupoEstado.docentes.offset    = p * _grupoEstado.docentes.limit;    cargarGrupo('docentes'); }
+function irPaginaGrupo_autoridades(p) { _grupoEstado.autoridades.offset = p * _grupoEstado.autoridades.limit; cargarGrupo('autoridades'); }
+
+let _grupoBuscarTimer = null;
+function buscarGrupo(grupo) {
+    const inp = document.getElementById(`${grupo}Buscar`);
+    clearTimeout(_grupoBuscarTimer);
+    _grupoBuscarTimer = setTimeout(() => {
+        _grupoEstado[grupo].search = (inp?.value || '').trim();
+        _grupoEstado[grupo].offset = 0;
+        cargarGrupo(grupo);
+    }, 250);
+}
+
+function _grupoCamposHtml(cfg, valores) {
+    valores = valores || {};
+    let html = `
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">DNI <span class="text-rose-500">*</span></label>
+        <input id="grp-dni" type="text" maxlength="8" ${valores.dni ? 'value="'+esc(valores.dni)+'" disabled' : ''} class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors ${valores.dni ? 'opacity-60' : ''}" placeholder="8 dígitos">
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nombre Completo <span class="text-rose-500">*</span></label>
+        <input id="grp-nombre" type="text" maxlength="200" value="${esc(valores.nombre || '')}" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="Apellidos y Nombres">`;
+    cfg.campos.forEach(c => {
+        html += `
+        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">${esc(c.label)}</label>
+        <input id="grp-${c.key}" type="text" maxlength="${c.max}" value="${esc(valores[c.key] || '')}" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-indigo-500 transition-colors" placeholder="${esc(c.ph)}">`;
+    });
+    return html;
+}
+
+function _grupoRecolectar(cfg) {
+    const obj = {
+        dni:    document.getElementById('grp-dni').value.trim(),
+        nombre: document.getElementById('grp-nombre').value.trim(),
+    };
+    cfg.campos.forEach(c => { obj[c.key] = document.getElementById('grp-' + c.key).value.trim() || null; });
+    return obj;
+}
+
+function abrirNuevoGrupo(grupo) {
+    const cfg = _GRUPO_CFG[grupo];
+    const modal = document.getElementById('modal-grupo');
+    document.getElementById('grupo-modal-titulo').innerHTML = `<i class="ph ${cfg.icono} text-indigo-500"></i> Nuevo ${cfg.singular}`;
+    document.getElementById('grupo-modal-sub').textContent = `Registra un nuevo registro en ${cfg.singular}.`;
+    document.getElementById('grupo-modal-campos').innerHTML = _grupoCamposHtml(cfg, null);
+    document.getElementById('grupo-modal-error').textContent = '';
+    document.getElementById('btn-grupo-guardar').textContent = 'Registrar';
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('grp-dni').focus(), 50);
+
+    _rebindBtn('btn-grupo-cancelar', () => { modal.style.display = 'none'; });
+    _rebindBtn('btn-grupo-guardar', async () => {
+        const errorEl = document.getElementById('grupo-modal-error');
+        const datos = _grupoRecolectar(cfg);
+        if (!/^\d{8}$/.test(datos.dni)) { errorEl.textContent = 'El DNI debe tener 8 dígitos numéricos.'; return; }
+        if (!datos.nombre) { errorEl.textContent = 'El nombre es obligatorio.'; return; }
+        errorEl.textContent = '';
+        try {
+            const res = await fetch(`${API_BASE}/admin/${grupo}/nuevo`, {
+                method: 'POST', headers: authHeaders(), body: JSON.stringify(datos)
+            });
+            const body = await res.json();
+            if (res.ok) {
+                modal.style.display = 'none';
+                mostrarNotificacion(body.mensaje, 'ok');
+                addLog('activity', `${cfg.singular} registrado: ${datos.nombre} (DNI ${datos.dni})`);
+                _grupoEstado[grupo].offset = 0;
+                cargarGrupo(grupo);
+            } else {
+                errorEl.textContent = body.detail || 'Error al registrar.';
+            }
+        } catch (e) { errorEl.textContent = 'Error de conexión.'; }
+    });
+}
+
+function abrirEditarGrupo(grupo, jsonEnc) {
+    const cfg = _GRUPO_CFG[grupo];
+    const r = JSON.parse(decodeURIComponent(jsonEnc));
+    const modal = document.getElementById('modal-grupo');
+    document.getElementById('grupo-modal-titulo').innerHTML = `<i class="ph ph-pencil text-amber-500"></i> Editar ${cfg.singular}`;
+    document.getElementById('grupo-modal-sub').textContent = `DNI: ${r.dni}`;
+    document.getElementById('grupo-modal-campos').innerHTML = _grupoCamposHtml(cfg, r);
+    document.getElementById('grupo-modal-error').textContent = '';
+    document.getElementById('btn-grupo-guardar').textContent = 'Guardar';
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('grp-nombre').focus(), 50);
+
+    _rebindBtn('btn-grupo-cancelar', () => { modal.style.display = 'none'; });
+    _rebindBtn('btn-grupo-guardar', async () => {
+        const errorEl = document.getElementById('grupo-modal-error');
+        const datos = _grupoRecolectar(cfg);
+        datos.dni = r.dni; // el DNI no se edita
+        if (!datos.nombre) { errorEl.textContent = 'El nombre es obligatorio.'; return; }
+        errorEl.textContent = '';
+        try {
+            const res = await fetch(`${API_BASE}/admin/${grupo}/${encodeURIComponent(r.dni)}`, {
+                method: 'PUT', headers: authHeaders(), body: JSON.stringify(datos)
+            });
+            const body = await res.json();
+            if (res.ok) {
+                modal.style.display = 'none';
+                mostrarNotificacion(body.mensaje, 'ok');
+                addLog('activity', `${cfg.singular} actualizado: DNI ${r.dni}`);
+                cargarGrupo(grupo);
+            } else {
+                errorEl.textContent = body.detail || 'Error al guardar';
+            }
+        } catch (e) { errorEl.textContent = 'Error de conexión.'; }
+    });
+}
+
+function eliminarGrupo(grupo, dni, nombre) {
+    const cfg = _GRUPO_CFG[grupo];
+    mostrarConfirmacion(
+        `¿Eliminar a <strong>${escapeHtml(nombre)}</strong> (DNI: ${escapeHtml(dni)}) de ${cfg.singular}?`,
+        async () => {
+            try {
+                const res  = await fetch(`${API_BASE}/admin/${grupo}/${encodeURIComponent(dni)}`, { method: 'DELETE', headers: authHeaders() });
+                const body = await res.json();
+                if (res.ok) {
+                    mostrarNotificacion(body.mensaje, 'ok');
+                    addLog('activity', `${cfg.singular} eliminado: DNI ${dni}`);
+                    cargarGrupo(grupo);
+                } else {
+                    mostrarNotificacion(body.detail || 'Error', 'error');
+                }
+            } catch (e) { mostrarNotificacion('Error de conexión', 'error'); }
+        },
+        { titulo: `Eliminar ${cfg.singular}`, textoConfirmar: 'Eliminar', critico: true }
+    );
+}
+
+async function importarGrupo(grupo, input) {
+    const cfg = _GRUPO_CFG[grupo];
+    const archivo = input.files[0];
+    if (!archivo) return;
+    input.value = '';
+    const resultado = document.getElementById(`${grupo}Resultado`);
+    if (resultado) { resultado.style.display = ''; resultado.className = 'maestro-resultado cargando'; resultado.textContent = 'Importando...'; }
+    mostrarNotificacion(`Importando ${grupo}...`, 'ok');
+    const form = new FormData();
+    form.append('archivo', archivo);
+    try {
+        const res  = await fetch(`${API_BASE}/admin/${grupo}/importar`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form });
+        const data = await res.json();
+        if (res.ok) {
+            const msg = `${data.insertados} nuevo(s)  |  ${data.actualizados} actualizado(s)${data.errores ? '  |  ' + data.errores + ' ignorado(s)' : ''}`;
+            if (resultado) { resultado.className = 'maestro-resultado ok'; resultado.innerHTML = msg; }
+            mostrarNotificacion('Importación completada', 'ok');
+            addLog('activity', `${cfg.singular}: ${data.mensaje}`);
+            _grupoEstado[grupo].offset = 0;
+            cargarGrupo(grupo);
+        } else {
+            const err = data.detail || 'Error en importación';
+            if (resultado) { resultado.className = 'maestro-resultado error'; resultado.textContent = err; }
+            mostrarNotificacion(err, 'error');
+        }
+    } catch (e) {
+        if (resultado) { resultado.className = 'maestro-resultado error'; resultado.textContent = 'Error de conexión'; }
+        mostrarNotificacion('Error de conexión', 'error');
+    }
+}
+
+function exportarGrupo(grupo) {
+    const cfg = _GRUPO_CFG[grupo];
+    _descargarArchivo(`${API_BASE}/admin/${grupo}/exportar`, `Exportando ${grupo}...`, cfg.archivo);
+}
+
 function levantarBan(banId, nombre) {
     mostrarConfirmacion(
         `¿Levantar el ban de <strong>${escapeHtml(nombre)}</strong>? El usuario podrá acceder de nuevo y sus incidencias activas quedarán reseteadas.`,
@@ -3379,6 +3650,29 @@ const _CFG_TITULO_DEFAULT    = 'Control Biblioteca';
 const _CFG_SUBTITULO_DEFAULT = 'UNASAM — PANEL DE ADMINISTRACIÓN';
 const _CFG_FOOTER_DEFAULT    = '© 2026 UNASAM — Dirección de Biblioteca Central';
 
+// Carga la apariencia desde el SERVIDOR (config global, la misma para todas
+// las PCs) y la cachea en localStorage como respaldo para cuando no haya red.
+// Es pública: funciona aún en la pantalla de login (sin sesión).
+async function _cargarAparienciaServidor() {
+    try {
+        const res = await fetch(`${API_BASE}/config/apariencia`, { cache: 'no-store' });
+        if (!res.ok) return false;
+        const d = await res.json();
+        // Guardar en localStorage solo lo que el servidor tenga definido;
+        // así _aplicarConfigApp (que lee de localStorage) refleja lo global.
+        if (d.logo)      localStorage.setItem(_CFG_LOGO_KEY, d.logo);      else localStorage.removeItem(_CFG_LOGO_KEY);
+        if (d.titulo)    localStorage.setItem(_CFG_TITULO_KEY, d.titulo);  else localStorage.removeItem(_CFG_TITULO_KEY);
+        if (d.subtitulo) localStorage.setItem(_CFG_SUBTITULO_KEY, d.subtitulo); else localStorage.removeItem(_CFG_SUBTITULO_KEY);
+        if (d.footer)    localStorage.setItem(_CFG_FOOTER_KEY, d.footer);  else localStorage.removeItem(_CFG_FOOTER_KEY);
+        _aplicarConfigApp();
+        _cargarCamposConfigApp();
+        return true;
+    } catch (e) {
+        // Sin red: se queda con lo cacheado en localStorage (degrada con dignidad).
+        return false;
+    }
+}
+
 function _aplicarConfigApp() {
     const logo      = localStorage.getItem(_CFG_LOGO_KEY);
     const titulo    = localStorage.getItem(_CFG_TITULO_KEY);
@@ -3453,13 +3747,33 @@ function previsualizarLogo(input) {
     reader.readAsDataURL(file);
 }
 
-function guardarLogo() {
+async function guardarLogo() {
     if (!_logoDataUrl) return;
-    localStorage.setItem(_CFG_LOGO_KEY, _logoDataUrl);
-    _aplicarConfigApp();
-    mostrarNotificacion('Logo aplicado correctamente', 'ok');
-    document.getElementById('btn-guardar-logo').style.display = 'none';
-    _logoDataUrl = null;
+    const btnEl = document.getElementById('btn-guardar-logo');
+    const errEl = document.getElementById('cfg-logo-error');
+    if (errEl) errEl.textContent = '';
+    if (btnEl) btnEl.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/config/apariencia`, {
+            method: 'PUT', headers: authHeaders(),
+            body: JSON.stringify({ logo: _logoDataUrl })
+        });
+        const body = await res.json();
+        if (!res.ok) {
+            if (errEl) errEl.textContent = body.detail || 'Error al guardar el logo.';
+            return;
+        }
+        // El servidor guardó el archivo y nos devuelve su RUTA. Releemos del
+        // servidor para obtenerla y cachearla (no guardamos el base64).
+        await _cargarAparienciaServidor();
+        mostrarNotificacion('Logo aplicado para todo el panel', 'ok');
+        if (btnEl) btnEl.style.display = 'none';
+        _logoDataUrl = null;
+    } catch (e) {
+        if (errEl) errEl.textContent = 'Error de conexión.';
+    } finally {
+        if (btnEl) btnEl.disabled = false;
+    }
 }
 
 function guardarTextosApp() {
@@ -3476,11 +3790,25 @@ function guardarTextosApp() {
     document.getElementById('cfg-login-subtitulo').value = subtitulo;
     document.getElementById('cfg-login-footer').value    = footer;
 
-    localStorage.setItem(_CFG_TITULO_KEY, titulo);
-    localStorage.setItem(_CFG_SUBTITULO_KEY, subtitulo);
-    localStorage.setItem(_CFG_FOOTER_KEY, footer);
-    _aplicarConfigApp();
-    mostrarNotificacion('Textos actualizados correctamente', 'ok');
+    // Guardar en el servidor (config global para todas las PCs)
+    (async () => {
+        try {
+            const res = await fetch(`${API_BASE}/config/apariencia`, {
+                method: 'PUT', headers: authHeaders(),
+                body: JSON.stringify({ titulo, subtitulo, footer })
+            });
+            const body = await res.json();
+            if (!res.ok) { errEl.textContent = body.detail || 'Error al guardar.'; return; }
+            // Cachear local para respaldo offline y aplicar
+            localStorage.setItem(_CFG_TITULO_KEY, titulo);
+            localStorage.setItem(_CFG_SUBTITULO_KEY, subtitulo);
+            localStorage.setItem(_CFG_FOOTER_KEY, footer);
+            _aplicarConfigApp();
+            mostrarNotificacion('Textos actualizados para todo el panel', 'ok');
+        } catch (e) {
+            errEl.textContent = 'Error de conexión.';
+        }
+    })();
 }
 
 async function descargarBackup() {
@@ -3770,6 +4098,17 @@ function _actRenderTabla(items) {
                </button>`
             : '';
 
+        // Botón "Clasificar": solo en eventos SOSPECHOSOS con proceso_exe, y
+        // solo superadmin. Abre el modal del banco para mandarlo a apps o ruido
+        // (retroactivo: corrige este y los eventos pasados de ese .exe).
+        const esSuper = _rolServidor === 'superadmin';
+        const btnClasificar = (isCrit && r.proceso_exe && esSuper)
+            ? `<button class="act-btn-clasificar" title="Clasificar este programa (banco de apps o de ruido)"
+                 onclick="bancoClasificarDesdeFlujo('${escapeHtml(r.proceso_exe)}', '${escapeHtml(r.descripcion || '')}')">
+                 <i class="ph ph-check-square"></i> Clasificar
+               </button>`
+            : '';
+
         return `<tr class="${rowCls}">
             <td class="act-cell-time">${hora}</td>
             <td class="act-cell-ico">
@@ -3785,6 +4124,7 @@ function _actRenderTabla(items) {
                 <div class="${descCls}">${escapeHtml(r.descripcion || '—')}</div>
                 ${detalle}
                 ${btnIgnorar}
+                ${btnClasificar}
             </td>
         </tr>`;
     }).join('');
@@ -3954,6 +4294,295 @@ async function _actActualizarBadge() {
         if (n > 0) { badge.textContent = n > 99 ? '99+' : n; badge.style.display = ''; }
         else badge.style.display = 'none';
     } catch(e) { /* silencioso */ }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BANCO DE APPS / BANCO DE RUIDO (sub-pestañas de Eventos)
+// ═══════════════════════════════════════════════════════════════════
+// Modelo de 3 estados: en banco_apps (app real), en banco_ruido (proceso
+// de fondo, oculto del Flujo) o en ninguno (sospechoso hasta clasificar).
+let _bancoVista = 'flujo';        // 'flujo' | 'banco-apps' | 'banco-ruido'
+let _bancoAppsCache  = [];        // para poblar el desplegable "Pertenece a"
+let _bancoPendientes = [];        // últimos pendientes cargados (para clasificar por índice)
+
+function actSetVista(v) {
+    _bancoVista = v;
+    document.querySelectorAll('.kpi-tab[data-actvista]').forEach(b => {
+        const activo = b.dataset.actvista === v;
+        b.classList.toggle('kpi-tab-activo', activo);
+        b.setAttribute('aria-selected', activo ? 'true' : 'false');
+    });
+    const paneles = {
+        'flujo':       'act-vista-flujo',
+        'banco-apps':  'act-vista-banco-apps',
+        'banco-ruido': 'act-vista-banco-ruido',
+    };
+    Object.entries(paneles).forEach(([k, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = (k === v) ? '' : 'none';
+    });
+    if (v === 'flujo')       cargarActividad();
+    if (v === 'banco-apps')  { bancoCargarPendientes(); bancoCargarApps(); }
+    if (v === 'banco-ruido') bancoCargarRuido();
+}
+
+// ── Pendientes por clasificar ──
+async function bancoCargarPendientes() {
+    const cont = document.getElementById('banco-pendientes-body');
+    const cnt  = document.getElementById('banco-pend-contador');
+    if (!cont) return;
+    const esSuper = _rolServidor === 'superadmin';
+    try {
+        const res = await fetch(`${API_BASE}/admin/banco/pendientes?limit=50`, { headers: authHeaders() });
+        if (!res.ok) { cont.innerHTML = '<p class="kpi-empty">No se pudo cargar.</p>'; return; }
+        const data = await res.json();
+        const items = data.items || [];
+        _bancoPendientes = items;   // clasificamos por índice (evita inyección por atributo)
+        if (cnt) cnt.textContent = data.total || 0;
+        if (!items.length) {
+            cont.innerHTML = '<p class="kpi-empty">Nada por clasificar. Todo lo visto ya está en un banco.</p>';
+            return;
+        }
+        cont.innerHTML = items.map((it, idx) => {
+            const sug = it.sugerencia_tipo === 'app'   ? '<span class="banco-sug banco-sug-app">Parece app</span>'
+                      : it.sugerencia_tipo === 'ruido' ? '<span class="banco-sug banco-sug-ruido">Parece ruido</span>'
+                      : '<span class="banco-sug banco-sug-desc">Desconocido</span>';
+            const desc = it.sugerencia_desc ? `<span class="banco-pend-desc">${esc(it.sugerencia_desc)}</span>` : '';
+            const acciones = esSuper ? `
+                <div class="banco-pend-acc">
+                    <button class="banco-mini-btn banco-mini-app" onclick="bancoClasificarRapido(${idx}, 'app')">Es programa</button>
+                    <button class="banco-mini-btn banco-mini-ruido" onclick="bancoClasificarRapido(${idx}, 'ruido')">Es ruido</button>
+                </div>` : '';
+            return `
+                <div class="banco-pend-row">
+                    <div class="banco-pend-main">
+                        <code class="banco-pend-exe">${esc(it.nombre_exe)}</code>
+                        ${sug}
+                        ${desc}
+                    </div>
+                    <div class="banco-pend-stat">
+                        <span title="Alumnos distintos que lo usaron"><i class="ph ph-users"></i> ${it.alumnos}</span>
+                        <span title="Veces visto"><i class="ph ph-eye"></i> ${it.veces}</span>
+                    </div>
+                    ${acciones}
+                </div>`;
+        }).join('');
+    } catch (e) {
+        cont.innerHTML = '<p class="kpi-empty">Error de conexión.</p>';
+    }
+}
+
+// Clasificación rápida desde un pendiente (por índice en _bancoPendientes).
+// Abre el modal pre-rellenado con la sugerencia del catálogo.
+function bancoClasificarRapido(idx, destino) {
+    const it = _bancoPendientes[idx];
+    if (!it) return;
+    if (destino === 'app') {
+        bancoAbrirModal('app', {
+            nombre_exe: it.nombre_exe,
+            nombre_amigable: it.sugerencia_nombre || '',
+            descripcion: it.sugerencia_desc || '',
+        });
+    } else {
+        bancoAbrirModal('ruido', {
+            nombre_exe: it.nombre_exe,
+            nombre_amigable: it.sugerencia_nombre || '',
+            descripcion: it.sugerencia_desc || '',
+            dueno_exe: it.sugerencia_dueno || '__sistema__',
+        });
+    }
+}
+
+// ── Tabla banco de apps ──
+async function bancoCargarApps() {
+    const tbody = document.getElementById('banco-apps-body');
+    if (!tbody) return;
+    const esSuper = _rolServidor === 'superadmin';
+    const q = document.getElementById('banco-apps-buscar')?.value.trim() || '';
+    try {
+        const url = `${API_BASE}/admin/banco-apps` + (q ? `?q=${encodeURIComponent(q)}` : '');
+        const res = await fetch(url, { headers: authHeaders() });
+        const data = await res.json();
+        const items = data.items || [];
+        _bancoAppsCache = items;   // para el desplegable de dueño
+        if (!items.length) {
+            tbody.innerHTML = `<tr><td colspan="5" class="act-empty-msg">Sin programas${q ? ' que coincidan' : ''}.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = items.map(a => `
+            <tr>
+                <td class="act-td">${esc(a.nombre_amigable)}</td>
+                <td class="act-td"><code class="proc-ign-exe">${esc(a.nombre_exe)}</code></td>
+                <td class="act-td">${esc(a.categoria || '—')}</td>
+                <td class="act-td act-td-desc">${esc(a.descripcion || '—')}</td>
+                <td class="act-td">${esSuper ? `<button class="tbl-btn tbl-btn-ban" title="Quitar del banco" onclick="bancoEliminar('app','${esc(a.nombre_exe)}')"><i class="ph ph-trash"></i></button>` : ''}</td>
+            </tr>`).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="5" class="act-empty-msg" style="color:var(--err)">Error al cargar</td></tr>';
+    }
+}
+
+// ── Tabla banco de ruido ──
+async function bancoCargarRuido() {
+    const tbody = document.getElementById('banco-ruido-body');
+    if (!tbody) return;
+    const esSuper = _rolServidor === 'superadmin';
+    const q = document.getElementById('banco-ruido-buscar')?.value.trim() || '';
+    try {
+        const url = `${API_BASE}/admin/banco-ruido` + (q ? `?q=${encodeURIComponent(q)}` : '');
+        const res = await fetch(url, { headers: authHeaders() });
+        const data = await res.json();
+        const items = data.items || [];
+        if (!items.length) {
+            tbody.innerHTML = `<tr><td colspan="5" class="act-empty-msg">Sin procesos${q ? ' que coincidan' : ''}.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = items.map(r => `
+            <tr>
+                <td class="act-td">${esc(r.nombre_amigable || '—')}</td>
+                <td class="act-td"><code class="proc-ign-exe">${esc(r.nombre_exe)}</code></td>
+                <td class="act-td">${esc(r.dueno_legible || '—')}</td>
+                <td class="act-td act-td-desc">${esc(r.descripcion || '—')}</td>
+                <td class="act-td">${esSuper ? `<button class="tbl-btn tbl-btn-ban" title="Quitar del banco de ruido" onclick="bancoEliminar('ruido','${esc(r.nombre_exe)}')"><i class="ph ph-trash"></i></button>` : ''}</td>
+            </tr>`).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="5" class="act-empty-msg" style="color:var(--err)">Error al cargar</td></tr>';
+    }
+}
+
+// ── Modal agregar/clasificar ──
+let _bancoModalDestino = 'app';     // 'app' | 'ruido'
+let _bancoModalDesdeFlujo = false;  // true si se abrió desde el Flujo (refresca el Flujo al guardar)
+let _bancoPreDueno = '__sistema__'; // dueño sugerido para reponer al alternar a 'ruido'
+
+function bancoAbrirNuevo(destino) {
+    _bancoModalDesdeFlujo = false;
+    bancoAbrirModal(destino, {});
+}
+
+// Aplica el modo (app/ruido) al modal ya abierto: título, qué campos se ven,
+// y rellena el desplegable de dueño en modo ruido.
+function _bancoAplicarDestino(destino) {
+    _bancoModalDestino = destino;
+    const esApp = destino === 'app';
+    document.getElementById('modal-banco-titulo').innerHTML = esApp
+        ? '<i class="ph ph-check-square"></i> Programa reconocido'
+        : '<i class="ph ph-wave-sine"></i> Proceso de ruido';
+    document.getElementById('banco-f-grupo-cat').style.display   = esApp ? '' : 'none';
+    document.getElementById('banco-f-grupo-dueno').style.display = esApp ? 'none' : '';
+    // Resaltar el botón activo del toggle (si está visible)
+    document.getElementById('banco-dest-app')?.classList.toggle('banco-dest-activo', esApp);
+    document.getElementById('banco-dest-ruido')?.classList.toggle('banco-dest-activo', !esApp);
+    if (!esApp) {
+        const sel = document.getElementById('banco-f-dueno');
+        const opciones = ['<option value="__sistema__">Windows / Sistema</option>']
+            .concat(_bancoAppsCache.map(a => `<option value="${esc(a.nombre_exe)}">${esc(a.nombre_amigable)} (${esc(a.nombre_exe)})</option>`));
+        sel.innerHTML = opciones.join('');
+        sel.value = _bancoPreDueno || '__sistema__';
+    }
+}
+
+// Cambia el destino desde el toggle del modal (clasificar desde el Flujo).
+function bancoSetDestino(destino) { _bancoAplicarDestino(destino); }
+
+function bancoAbrirModal(destino, pre) {
+    if (_rolServidor !== 'superadmin') return;
+    const modal = document.getElementById('modal-banco');
+    if (!modal) return;
+    _bancoPreDueno = pre.dueno_exe || '__sistema__';
+    // El selector de destino solo se muestra al clasificar desde el Flujo.
+    const grupoDest = document.getElementById('banco-f-grupo-destino');
+    if (grupoDest) grupoDest.style.display = _bancoModalDesdeFlujo ? '' : 'none';
+    // Rellenar campos comunes
+    document.getElementById('banco-f-exe').value    = pre.nombre_exe || '';
+    document.getElementById('banco-f-nombre').value = pre.nombre_amigable || '';
+    document.getElementById('banco-f-cat').value    = pre.categoria || '';
+    document.getElementById('banco-f-desc').value   = pre.descripcion || '';
+    _bancoAplicarDestino(destino);
+    modal.style.display = 'flex';
+}
+
+// Abre el modal de clasificación DESDE una fila sospechosa del Flujo.
+// Pre-rellena exe + nombre amigable parseado de la descripción, y muestra el
+// selector Programa/Ruido para que el superadmin decida.
+function bancoClasificarDesdeFlujo(exe, descripcion) {
+    if (_rolServidor !== 'superadmin') return;
+    _bancoModalDesdeFlujo = true;
+    // Parsear nombre amigable de descripciones tipo "Abrió: File Picker UI Host (PickerHost.exe)"
+    let nombre = '';
+    const m = (descripcion || '').match(/:\s*(.+?)\s*\(/);
+    if (m) nombre = m[1].trim();
+    // Por defecto sugerimos "ruido" (el caso más común de sospechas por banco).
+    bancoAbrirModal('ruido', { nombre_exe: exe, nombre_amigable: nombre });
+}
+
+function bancoCerrarModal() {
+    const modal = document.getElementById('modal-banco');
+    if (modal) modal.style.display = 'none';
+    _bancoModalDesdeFlujo = false;
+}
+
+async function bancoGuardarModal() {
+    const btn = document.getElementById('banco-btn-guardar');
+    const exe = document.getElementById('banco-f-exe').value.trim();
+    if (!exe) { mostrarNotificacion('Indica el ejecutable (.exe)', 'error'); return; }
+    const esApp = _bancoModalDestino === 'app';
+    // Usamos /clasificar siempre: da de alta en el banco Y corrige retroactivo.
+    const cuerpo = {
+        nombre_exe: exe,
+        destino: esApp ? 'app' : 'ruido',
+        nombre_amigable: document.getElementById('banco-f-nombre').value.trim() || null,
+        descripcion: document.getElementById('banco-f-desc').value.trim() || null,
+    };
+    if (esApp) cuerpo.categoria = document.getElementById('banco-f-cat').value.trim() || null;
+    else       cuerpo.dueno_exe = document.getElementById('banco-f-dueno').value;
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/admin/banco/clasificar`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify(cuerpo),
+        });
+        const data = await res.json();
+        if (!res.ok) { mostrarNotificacion(data.detail || 'Error al guardar', 'error'); return; }
+        const extra = data.eventos_corregidos
+            ? ` (${data.eventos_corregidos} evento(s) corregido(s))` : '';
+        mostrarNotificacion(`Guardado${extra}`, 'ok');
+        const desdeFlujo = _bancoModalDesdeFlujo;
+        _bancoModalDesdeFlujo = false;
+        bancoCerrarModal();
+        if (desdeFlujo) {
+            // Se clasificó desde el Flujo: refrescar la lista para que la fila
+            // (ya no sospechosa) desaparezca de la vista limpia.
+            cargarActividad();
+        } else {
+            bancoCargarPendientes();
+            if (esApp) bancoCargarApps(); else bancoCargarRuido();
+        }
+    } catch (e) {
+        mostrarNotificacion('Error de conexión', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function bancoEliminar(tipo, exe) {
+    if (_rolServidor !== 'superadmin') return;
+    const etiqueta = tipo === 'app' ? 'del banco de apps' : 'del banco de ruido';
+    if (!confirm(`¿Quitar "${exe}" ${etiqueta}? Volverá a aparecer como sospechoso.`)) return;
+    const ruta = tipo === 'app' ? 'banco-apps' : 'banco-ruido';
+    try {
+        const res = await fetch(`${API_BASE}/admin/${ruta}/${encodeURIComponent(exe)}`, {
+            method: 'DELETE', headers: authHeaders(),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { mostrarNotificacion(data.detail || 'No se pudo quitar', 'error'); return; }
+        mostrarNotificacion('Quitado del banco', 'ok');
+        bancoCargarPendientes();
+        if (tipo === 'app') bancoCargarApps(); else bancoCargarRuido();
+    } catch (e) {
+        mostrarNotificacion('Error de conexión', 'error');
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4332,10 +4961,308 @@ async function probarMensajeAhora() {
     } catch (e) { setS('Error de conexión.', 'text-red-500'); }
 }
 
+// ── Indicadores / KPIs ────────────────────────────────────────────────
+let _kpiCatalogo = [];          // catálogo completo recibido del servidor
+let _kpiActivos  = [];          // claves activas (en orden)
+let _kpiPuedeEditar = false;
+let _kpiPestana = 'equipos';    // pestaña activa: 'equipos' | 'usuarios' | 'programas'
+
+// Iconos por categoría (Phosphor) — decorativo, no funcional
+const _KPI_ICONOS = {
+    'Equipos':   'ph-desktop',
+    'Alumnos':   'ph-users',
+    'Seguridad': 'ph-shield-warning',
+    'Sistema':   'ph-gear-six',
+};
+
+// Pestaña de cada KPI según el catálogo (fallback 'usuarios' si el server es viejo)
+function _kpiPestanaDe(clave) {
+    const k = _kpiPorClave(clave);
+    return (k && k.pestana) || 'usuarios';
+}
+
+// Cambia la pestaña activa de Indicadores y reordena lo que se ve.
+function kpiSetPestana(p) {
+    _kpiPestana = p;
+    document.querySelectorAll('.kpi-tab[data-pestana]').forEach(b => {
+        const activo = b.dataset.pestana === p;
+        b.classList.toggle('kpi-tab-activo', activo);
+        b.setAttribute('aria-selected', activo ? 'true' : 'false');
+    });
+    // Programas aún no tiene KPIs ni gráfico: mostramos solo el aviso.
+    const esProgramas = (p === 'programas');
+    const zonaGraf = document.getElementById('kpi-graf-zona');
+    const aviso    = document.getElementById('kpi-programas-aviso');
+    const grid     = document.getElementById('kpi-grid');
+    if (zonaGraf) zonaGraf.style.display = esProgramas ? 'none' : '';
+    if (aviso)    aviso.style.display    = esProgramas ? '' : 'none';
+    if (grid)     grid.style.display     = esProgramas ? 'none' : '';
+    // Mostrar solo el gráfico que corresponde a esta pestaña.
+    document.querySelectorAll('.kpi-graf-card[data-graf-pestana]').forEach(c => {
+        c.style.display = (c.dataset.grafPestana === p) ? '' : 'none';
+    });
+    if (esProgramas) return;
+    _renderKpiGrid();
+    cargarGraficos();
+}
+
+async function cargarIndicadores() {
+    const grid = document.getElementById('kpi-grid');
+    try {
+        const res = await fetch(`${API_BASE}/kpis`, { headers: authHeaders() });
+        if (!res.ok) { if (grid) grid.innerHTML = '<p class="kpi-empty">No se pudieron cargar los indicadores.</p>'; return; }
+        const data = await res.json();
+        _kpiCatalogo    = data.catalogo || [];
+        _kpiActivos     = data.activos  || [];
+        _kpiPuedeEditar = !!data.puede_editar;
+        // Aplica la pestaña activa (también pinta grilla + gráfico correctos)
+        kpiSetPestana(_kpiPestana);
+    } catch (e) {
+        if (grid) grid.innerHTML = '<p class="kpi-empty">Error de conexión.</p>';
+    }
+}
+
+// ── Gráficos (SVG a mano, sin librería — funciona offline) ─────────────
+let _kpiPeriodo = 'semana';
+let _kpiRango = { desde: '', hasta: '' };
+
+function kpiSetPeriodo(p) {
+    _kpiPeriodo = p;
+    document.querySelectorAll('.kpi-periodo-btn[data-periodo]').forEach(b => {
+        b.classList.toggle('kpi-periodo-activo', b.dataset.periodo === p);
+    });
+    const campos = document.getElementById('kpi-rango-campos');
+    if (campos) campos.style.display = (p === 'rango') ? '' : 'none';
+    if (p !== 'rango') cargarGraficos();
+}
+
+function kpiAplicarRango() {
+    const d = document.getElementById('kpi-rango-desde')?.value;
+    const h = document.getElementById('kpi-rango-hasta')?.value;
+    if (!d || !h) { mostrarNotificacion('Elegí ambas fechas', 'error'); return; }
+    if (h < d)    { mostrarNotificacion('La fecha final no puede ser anterior a la inicial', 'error'); return; }
+    _kpiRango = { desde: d, hasta: h };
+    cargarGraficos();
+}
+
+function _kpiParams() {
+    const p = new URLSearchParams({ periodo: _kpiPeriodo });
+    if (_kpiPeriodo === 'rango') { p.set('desde', _kpiRango.desde); p.set('hasta', _kpiRango.hasta); }
+    return p.toString();
+}
+
+async function cargarGraficos() {
+    if (_kpiPeriodo === 'rango' && (!_kpiRango.desde || !_kpiRango.hasta)) return;
+    const params = _kpiParams();
+    // Solo se carga el gráfico de la pestaña activa (Programas no tiene gráfico aún).
+    if (_kpiPestana === 'equipos') {
+        // Uso por facultad
+        _kpiCargarUno(`${API_BASE}/kpis/grafico/facultades?${params}`, 'graf-facultades',
+            d => _svgBarras(d.items.map(i => ({ etiqueta: i.facultad, valor: i.valor, full: i.facultad })), 'Sesiones', true));
+    } else if (_kpiPestana === 'usuarios') {
+        // Atenciones por día
+        _kpiCargarUno(`${API_BASE}/kpis/grafico/atenciones?${params}`, 'graf-atenciones',
+            d => _svgBarras(d.items.map(i => ({ etiqueta: _kpiFechaCorta(i.fecha), valor: i.valor, full: i.fecha })), 'Atenciones'));
+    }
+}
+
+async function _kpiCargarUno(url, contId, render) {
+    const cont = document.getElementById(contId);
+    if (!cont) return;
+    try {
+        const res = await fetch(url, { headers: authHeaders() });
+        if (!res.ok) { cont.innerHTML = '<p class="kpi-empty">No disponible.</p>'; return; }
+        const data = await res.json();
+        if (!data.items || !data.items.length || data.items.every(i => i.valor === 0)) {
+            cont.innerHTML = '<p class="kpi-empty">Sin datos en este período.</p>';
+            return;
+        }
+        cont.innerHTML = render(data);
+    } catch (e) {
+        cont.innerHTML = '<p class="kpi-empty">Error de conexión.</p>';
+    }
+}
+
+function _kpiFechaCorta(iso) {
+    // "2026-06-17" -> "17/06"
+    const [a, m, d] = iso.split('-');
+    return `${d}/${m}`;
+}
+
+// Genera un gráfico de barras en SVG. items: [{etiqueta, valor, full}]
+// horizontal=true para barras horizontales (mejor con muchas etiquetas largas, ej. facultades)
+function _svgBarras(items, unidad, horizontal = false) {
+    const max = Math.max(...items.map(i => i.valor), 1);
+    if (horizontal) {
+        const filaH = 30, gap = 8, padL = 130, padR = 50, w = 560;
+        const h = items.length * (filaH + gap) + 10;
+        let bars = '';
+        items.forEach((it, idx) => {
+            const y = idx * (filaH + gap) + 5;
+            const bw = Math.round((it.valor / max) * (w - padL - padR));
+            bars += `
+                <text x="${padL - 8}" y="${y + filaH / 2}" text-anchor="end" dominant-baseline="middle"
+                      class="kpi-svg-lbl"><title>${esc(it.full)}</title>${esc(_kpiTrunc(it.etiqueta, 18))}</text>
+                <rect x="${padL}" y="${y}" width="${Math.max(bw, 2)}" height="${filaH}" rx="4" class="kpi-svg-bar"/>
+                <text x="${padL + Math.max(bw, 2) + 6}" y="${y + filaH / 2}" dominant-baseline="middle" class="kpi-svg-val">${it.valor}</text>`;
+        });
+        return `<svg viewBox="0 0 ${w} ${h}" class="kpi-svg" role="img" aria-label="Gráfico de barras: ${esc(unidad)}">${bars}</svg>`;
+    } else {
+        const w = 560, h = 220, padB = 34, padT = 14, padL = 28;
+        const n = items.length;
+        const bw = Math.max(6, Math.min(46, Math.floor((w - padL) / n) - 8));
+        const step = (w - padL) / n;
+        let bars = '';
+        items.forEach((it, idx) => {
+            const bh = Math.round((it.valor / max) * (h - padB - padT));
+            const x = padL + idx * step + (step - bw) / 2;
+            const y = h - padB - bh;
+            bars += `
+                <rect x="${x}" y="${y}" width="${bw}" height="${Math.max(bh, 1)}" rx="3" class="kpi-svg-bar">
+                    <title>${esc(it.full)}: ${it.valor}</title></rect>
+                ${it.valor > 0 ? `<text x="${x + bw / 2}" y="${y - 4}" text-anchor="middle" class="kpi-svg-val">${it.valor}</text>` : ''}
+                <text x="${x + bw / 2}" y="${h - padB + 14}" text-anchor="middle" class="kpi-svg-lbl-x">${esc(it.etiqueta)}</text>`;
+        });
+        return `<svg viewBox="0 0 ${w} ${h}" class="kpi-svg" role="img" aria-label="Gráfico de barras: ${esc(unidad)}">${bars}</svg>`;
+    }
+}
+
+function _kpiTrunc(s, n) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+function _kpiPorClave(clave) {
+    return _kpiCatalogo.find(k => k.clave === clave);
+}
+
+function _renderKpiGrid() {
+    const grid = document.getElementById('kpi-grid');
+    if (!grid) return;
+    // Solo los activos que pertenecen a la pestaña actual (conservando el orden).
+    const dePestana = _kpiActivos.filter(c => _kpiPorClave(c) && _kpiPestanaDe(c) === _kpiPestana);
+    if (!dePestana.length) {
+        grid.innerHTML = '<p class="kpi-empty">No hay indicadores activos en esta pestaña. ' +
+            (_kpiPuedeEditar ? 'Usa "Personalizar" para agregar.' : 'Pídele al superadmin que configure el tablero.') + '</p>';
+        return;
+    }
+    grid.innerHTML = dePestana.map(clave => {
+        const k = _kpiPorClave(clave);
+        if (!k) return '';
+        const icono = _KPI_ICONOS[k.categoria] || 'ph-chart-bar';
+        return `
+            <div class="kpi-card">
+                <div class="kpi-card-top">
+                    <span class="kpi-card-cat">${esc(k.categoria)}</span>
+                    <i class="ph ${icono} kpi-card-ico" aria-hidden="true"></i>
+                </div>
+                <div class="kpi-card-val">${esc(k.valor_fmt)}</div>
+                <div class="kpi-card-lbl">${esc(k.etiqueta)}</div>
+            </div>`;
+    }).join('');
+}
+
+// ── Editor (solo superadmin) ──
+// Pestañas que se muestran en el editor (Programas se omite hasta que tenga KPIs).
+const _KPI_PESTANAS = [
+    { clave: 'equipos',  nombre: 'Equipos',  icono: 'ph-desktop' },
+    { clave: 'usuarios', nombre: 'Usuarios', icono: 'ph-users' },
+];
+
+function kpiAbrirEditor() {
+    if (!_kpiPuedeEditar) return;
+    const cont = document.getElementById('kpi-editor-lista');
+    if (!cont) return;
+
+    // Un grupo por pestaña. Dentro de cada grupo: primero los activos (en su
+    // orden guardado), luego los inactivos. El drag-drop solo mueve dentro del grupo.
+    cont.innerHTML = _KPI_PESTANAS.map(pest => {
+        const delGrupo  = _kpiCatalogo.filter(k => (k.pestana || 'usuarios') === pest.clave).map(k => k.clave);
+        if (!delGrupo.length) return '';
+        const activos   = _kpiActivos.filter(c => delGrupo.includes(c));
+        const inactivos = delGrupo.filter(c => !activos.includes(c));
+        const orden     = [...activos, ...inactivos];
+        const filas = orden.map(clave => {
+            const k = _kpiPorClave(clave);
+            if (!k) return '';
+            const activo = _kpiActivos.includes(clave);
+            return `
+                <div class="kpi-edit-row" draggable="true" data-clave="${esc(clave)}">
+                    <i class="ph ph-dots-six-vertical kpi-edit-drag" aria-hidden="true"></i>
+                    <label class="kpi-edit-check">
+                        <input type="checkbox" ${activo ? 'checked' : ''} aria-label="Mostrar ${esc(k.etiqueta)}">
+                        <span class="kpi-edit-txt">
+                            <span class="kpi-edit-nombre">${esc(k.etiqueta)}</span>
+                            <span class="kpi-edit-cat">${esc(k.categoria)}</span>
+                        </span>
+                    </label>
+                </div>`;
+        }).join('');
+        return `
+            <div class="kpi-edit-grupo">
+                <h4 class="kpi-edit-grupo-titulo"><i class="ph ${pest.icono}" aria-hidden="true"></i> ${esc(pest.nombre)}</h4>
+                <div class="kpi-edit-grupo-lista" data-pestana="${esc(pest.clave)}">${filas}</div>
+            </div>`;
+    }).join('');
+
+    // El drag-drop se activa por cada grupo de forma independiente.
+    cont.querySelectorAll('.kpi-edit-grupo-lista').forEach(g => _kpiActivarDragDrop(g));
+    const modal = document.getElementById('modal-kpi');
+    if (modal) modal.style.display = 'flex';
+}
+
+function kpiCerrarEditor() {
+    const modal = document.getElementById('modal-kpi');
+    if (modal) modal.style.display = 'none';
+}
+
+function _kpiActivarDragDrop(cont) {
+    let arrastrado = null;
+    cont.querySelectorAll('.kpi-edit-row').forEach(row => {
+        row.addEventListener('dragstart', () => { arrastrado = row; row.classList.add('kpi-edit-dragging'); });
+        row.addEventListener('dragend',   () => { arrastrado = null; row.classList.remove('kpi-edit-dragging'); });
+        row.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (!arrastrado || arrastrado === row) return;
+            const rect = row.getBoundingClientRect();
+            const despues = (e.clientY - rect.top) > rect.height / 2;
+            cont.insertBefore(arrastrado, despues ? row.nextSibling : row);
+        });
+    });
+}
+
+async function kpiGuardarConfig() {
+    const cont = document.getElementById('kpi-editor-lista');
+    const btn  = document.getElementById('kpi-btn-guardar');
+    if (!cont) return;
+    // Recolectar en el orden actual del DOM, solo los marcados
+    const nuevos = [];
+    cont.querySelectorAll('.kpi-edit-row').forEach(row => {
+        const chk = row.querySelector('input[type=checkbox]');
+        if (chk && chk.checked) nuevos.push(row.dataset.clave);
+    });
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/kpis/config`, {
+            method: 'PUT',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ activos: nuevos }),
+        });
+        const data = await res.json();
+        if (!res.ok) { mostrarNotificacion(data.detail || 'Error al guardar', 'error'); return; }
+        _kpiActivos = data.activos || nuevos;
+        _renderKpiGrid();
+        kpiCerrarEditor();
+        mostrarNotificacion('Indicadores actualizados', 'ok');
+    } catch (e) {
+        mostrarNotificacion('Error de conexión', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 // Al cargar la página: aplicar logo/textos personalizados a la pantalla de login,
 // rellenar los campos de Configuración, y restaurar la sesión si hay token (F5).
 document.addEventListener('DOMContentLoaded', () => {
-    _aplicarConfigApp();
+    _aplicarConfigApp();          // 1) pinta de inmediato lo cacheado (sin parpadeo)
     _cargarCamposConfigApp();
+    _cargarAparienciaServidor();  // 2) refresca desde el servidor (config global)
     _restaurarSesion();
 });
