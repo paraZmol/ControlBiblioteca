@@ -70,6 +70,29 @@ FLUJO_ALUMNO.txt.
      J-1. Para qué sirve el atajo de mantenimiento
      J-2. Cómo usarlo (dos métodos)
      J-3. Configurar el PIN y la tecla desde el panel
+
+  K. Indicadores / KPIs del panel  [NUEVO]
+     K-1. Ver los indicadores
+     K-2. Personalizar el tablero (solo superadmin)
+     K-3. Qué indicadores hay y de dónde salen
+     K-4. Quién ve qué (roles)
+
+  L. Base de Datos: Estudiantes, Egresados, Docentes, Autoridad  [NUEVO]
+     L-1. Las cuatro pestañas y sus columnas
+     L-2. Registrar un usuario (Nuevo)
+     L-3. Editar o eliminar un registro
+     L-4. Importar / Exportar Excel
+     L-5. Quién puede acceder (roles)
+
+  M. Banco de programas y banco de ruido (Eventos)  [NUEVO]
+     M-1. Para qué sirve (el problema que resuelve)
+     M-2. Los tres estados de un programa
+     M-3. Clasificar un pendiente (Es programa / Es ruido)
+     M-4. Agregar o quitar manualmente del banco
+     M-5. El banco de ruido y "Pertenece a"
+     M-6. Qué cambia en el Flujo de Actividad
+     M-7. Quién puede acceder (roles)
+     M-8. Vulnerabilidades y límites conocidos
   ............................................
 
   MEJORAS PENDIENTES (detectadas al documentar)
@@ -1028,6 +1051,382 @@ FLUJO_ALUMNO.txt.
        kiosco y verificar que adopta el nuevo PIN.
 
 
+............................................................................
+  K. INDICADORES / KPIs DEL PANEL  [NUEVO]
+............................................................................
+
+  Sección del panel admin que muestra métricas del sistema (equipos,
+  alumnos, seguridad) calculadas en vivo desde la base de datos. Es una
+  vista nueva en el menú lateral, llamada "Indicadores".
+
+  El tablero es ÚNICO para todo el panel (no por usuario): lo que se
+  muestra y en qué orden lo decide el superadmin, y todos lo ven igual.
+
+
+  K-1. VER LOS INDICADORES
+  ─────────────────────────────
+  Quién puede hacerlo: admin y superadmin.
+
+  Pasos:
+    1. En el menú lateral, clic en "Indicadores".
+    2. Aparecen las tarjetas KPI activas, cada una con: categoría,
+       valor grande, y la etiqueta de lo que mide.
+    3. Botón "Refrescar" para recalcular los valores al instante.
+
+  Respuesta esperada:
+    - Los valores se calculan en el momento desde la base de datos
+      (no son históricos congelados).
+    - Formatos: número entero, porcentaje (ej. ocupación), o duración
+      (ej. "1h 25m" para promedios de tiempo).
+
+  NOTA: los valores reflejan el estado al momento de abrir la vista o de
+  tocar "Refrescar". No se actualizan solos segundo a segundo.
+
+
+  K-2. PERSONALIZAR EL TABLERO (SOLO SUPERADMIN)
+  ──────────────────────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN. El admin solo ve el resultado;
+  no le aparece el botón "Personalizar".
+
+  Pasos:
+    1. Ir a "Indicadores".
+    2. Clic en "Personalizar" (arriba a la derecha; solo visible para
+       superadmin).
+    3. Se abre una lista con TODOS los indicadores disponibles:
+       - Marcar/desmarcar la casilla = mostrar/ocultar ese KPI.
+       - Arrastrar una fila (icono de puntos) = reordenar.
+    4. Clic en "Guardar".
+
+  Respuesta esperada:
+    - El tablero se actualiza con los KPIs marcados, en el orden elegido.
+    - La configuración queda guardada para TODO el panel (todos los
+      usuarios la verán al recargar).
+    - La acción queda registrada en Auditoría
+      (acción "cambiar_config_kpis").
+
+  Si un admin intenta guardar (por API directa):
+    - El servidor responde 403 (solo superadmin puede modificar).
+
+  PARA PROBARLO:
+    1. Como superadmin, abrir "Personalizar", activar 2-3 KPIs nuevos,
+       reordenar y Guardar.
+    2. Recargar la página (F5): el tablero conserva la configuración.
+    3. Entrar como admin: ve el mismo tablero, pero sin el botón
+       "Personalizar".
+
+
+  K-3. QUÉ INDICADORES HAY Y DE DÓNDE SALEN
+  ─────────────────────────────────────────────
+  Todos se calculan desde las tablas existentes (sin datos nuevos):
+
+  EQUIPOS (tabla terminales / sesiones):
+    - Equipos totales / en línea / en uso / bloqueados
+    - Ocupación de la sala (en uso ÷ total, en %)
+
+  ALUMNOS (sesiones / alumnos_maestro):
+    - Alumnos registrados
+    - Sesiones activas ahora
+    - Atendidos hoy / esta semana / este mes (alumnos distintos)
+    - Sesiones de hoy
+    - Duración promedio de sesión (hoy)
+
+  SEGURIDAD / DISCIPLINA (bans / incidencias / sospechas / actividad):
+    - Bans activos / del mes
+    - Incidencias leves / graves (activas)
+    - Sospechas pendientes
+    - Eventos sospechosos hoy / eventos registrados hoy
+
+  SISTEMA (solo superadmin):
+    - Personal registrado
+    - Acciones auditadas del mes
+
+
+  K-4. QUIÉN VE QUÉ (ROLES)
+  ─────────────────────────────
+  - admin: ve todos los indicadores EXCEPTO los de la categoría
+    "Sistema" (Personal registrado, Acciones auditadas). No puede
+    personalizar.
+  - superadmin: ve todos, incluidos los sensibles, y es el único que
+    puede personalizar el tablero.
+
+  Los KPIs sensibles se ocultan del lado del servidor: aunque estén en
+  la configuración activa, al admin simplemente no se le envían.
+
+
+............................................................................
+  L. BASE DE DATOS: ESTUDIANTES, EGRESADOS, DOCENTES, AUTORIDAD  [NUEVO]
+............................................................................
+
+  La pestaña "Base de Datos" del panel se divide en cuatro sub-pestañas,
+  una por cada tipo de persona. Cada una es una tabla independiente con
+  sus propias columnas, su buscador y sus botones de Nuevo / Exportar /
+  Importar.
+
+  IMPORTANTE: son cuatro tablas SEPARADAS en la base de datos. Un DNI en
+  Estudiantes no se mezcla con uno en Docentes; cada grupo se gestiona por
+  su cuenta. (La antigua pestaña "Personal Universitario" fue retirada de
+  la interfaz.)
+
+
+  L-1. LAS CUATRO PESTAÑAS Y SUS COLUMNAS
+  ────────────────────────────────────────────
+  - Estudiantes  → DNI, Nombre, Código Univ., Facultad, Escuela
+    (es el "maestro" de alumnos que usan las terminales; ver B-1).
+  - Egresados    → DNI, Nombre, Código Univ., Escuela, Año de Egreso
+  - Docentes     → DNI, Nombre, Facultad, Escuela, Correo, Teléfono
+  - Autoridad    → DNI, Nombre, Cargo, Correo, Teléfono
+
+  En todas, la última columna es "Acciones" (editar / eliminar).
+
+  NOTA: solo Estudiantes está conectado al uso de las terminales (login
+  del kiosco). Egresados, Docentes y Autoridad son padrones de registro
+  y consulta; no habilitan acceso a las PCs.
+
+
+  L-2. REGISTRAR UN USUARIO (NUEVO)
+  ────────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN (en Egresados/Docentes/Autoridad).
+  (Para Estudiantes ver B-1; admite admin y superadmin.)
+
+  Pasos:
+    1. Ir a Base de Datos y elegir la sub-pestaña (Egresados / Docentes /
+       Autoridad).
+    2. Clic en "Nuevo".
+    3. Completar el formulario. Campos obligatorios: DNI (8 dígitos) y
+       Nombre. El resto son opcionales según el grupo (código, escuela,
+       cargo, correo, etc.).
+    4. Guardar.
+
+  Respuesta esperada:
+    - El registro aparece en la tabla del grupo.
+    - Si el DNI ya existe en ESE grupo, el servidor lo rechaza con un
+      mensaje ("Ya existe…"). El DNI es único dentro de cada grupo.
+
+
+  L-3. EDITAR O ELIMINAR UN REGISTRO
+  ──────────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN.
+
+  Editar:
+    1. En la fila del registro, clic en el botón de lápiz (Editar).
+    2. Se abre el formulario con los datos cargados. El DNI NO se puede
+       cambiar (es la clave del registro); el resto sí.
+    3. Guardar.
+
+  Eliminar:
+    1. Clic en el botón de papelera (Eliminar) en la fila.
+    2. Confirmar en el diálogo.
+    3. El registro se borra de ese grupo. Es irreversible.
+
+  NOTA: eliminar un egresado/docente/autoridad NO afecta a Estudiantes ni
+  al historial de sesiones; son tablas independientes.
+
+
+  L-4. IMPORTAR / EXPORTAR EXCEL
+  ─────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN.
+
+  Exportar:
+    1. En la sub-pestaña, clic en "Exportar Excel".
+    2. Se descarga un .xlsx con todos los registros de ese grupo y sus
+       columnas (egresados.xlsx, docentes.xlsx, autoridades.xlsx).
+
+  Importar (carga masiva):
+    1. Clic en "Importar Excel" y seleccionar el archivo.
+    2. El archivo debe tener una fila de encabezados. El sistema reconoce
+       las columnas por su nombre (ej: "DNI", "Nombre Completo", "Correo",
+       "Cargo", "Año Egreso", etc.). La forma más segura es usar como
+       plantilla el mismo archivo que genera "Exportar".
+    3. El servidor procesa fila por fila:
+       - Upsert por DNI: si el DNI ya existe en ese grupo, ACTUALIZA sus
+         datos; si no existe, lo INSERTA.
+       - Filas con DNI inválido (no 8 dígitos) o sin nombre se IGNORAN.
+    4. Al terminar muestra: cuántos nuevos, cuántos actualizados y cuántos
+       ignorados.
+
+  PARA PROBARLO:
+    1. Exportar un grupo (aunque esté vacío) para obtener la plantilla.
+    2. Llenar 2-3 filas, guardar el Excel.
+    3. Importar y verificar el resumen "X nuevo(s), Y actualizado(s)".
+    4. Volver a importar el mismo archivo: ahora deben salir como
+       "actualizado(s)", no como nuevos (confirma el upsert por DNI).
+
+
+  L-5. QUIÉN PUEDE ACCEDER (ROLES)
+  ────────────────────────────────────
+  - Estudiantes: admin y superadmin (gestión completa; ver B-1).
+  - Egresados / Docentes / Autoridad: SOLO SUPERADMIN. Si un admin intenta
+    acceder a estos endpoints, el servidor responde 403.
+
+  Todas las acciones (crear, editar, eliminar, importar) quedan
+  registradas en Auditoría con el usuario que las realizó.
+
+
+............................................................................
+  M. BANCO DE PROGRAMAS Y BANCO DE RUIDO (EVENTOS)  [NUEVO]
+............................................................................
+
+  Dentro de la pestaña "Eventos" (Actividad) hay tres sub-pestañas:
+    - Flujo        → el registro de actividad de siempre.
+    - Banco de apps → lista blanca de programas reconocidos.
+    - Banco de ruido → procesos de fondo que no son actividad del alumno.
+
+
+  M-1. PARA QUÉ SIRVE (EL PROBLEMA QUE RESUELVE)
+  ─────────────────────────────────────────────────
+  El cliente del kiosco registra TODO lo que se ejecuta en la PC, no solo
+  lo que abre la persona. Windows, por su cuenta, lanza cientos de procesos
+  internos (svchost, DeviceCensus, Windows Update, antivirus, etc.). Sin
+  filtro, esos procesos ahogarían la pantalla y harían inútil cualquier
+  intento de ver "qué usan realmente los estudiantes".
+
+  El banco invierte la lógica a una LISTA BLANCA (fail-closed):
+    "Lo que NO está reconocido se marca como SOSPECHOSO hasta que el
+     superadmin lo clasifique."
+
+  Así, en lugar de perseguir una lista negra interminable, el superadmin
+  va construyendo un catálogo de lo aceptable, y el sistema resalta
+  automáticamente lo que no conoce.
+
+
+  M-2. LOS TRES ESTADOS DE UN PROGRAMA
+  ────────────────────────────────────────
+  Cada ejecutable (.exe) visto en actividad cae en uno de tres estados:
+
+    1. EN EL BANCO DE APPS  → es una app real del alumno (Word, Chrome,
+       AutoCAD…). Se registra como evento NORMAL.
+    2. EN EL BANCO DE RUIDO → es un proceso de fondo (actualizadores,
+       servicios de Windows…). Se registra NORMAL pero se OCULTA del Flujo.
+    3. EN NINGUNO           → SOSPECHOSO. Genera una entrada de sospecha y
+       aparece resaltado, hasta que el superadmin lo clasifique.
+
+  IMPORTANTE — herramientas peligrosas: cmd, powershell, regedit, psexec,
+  etc. NUNCA se ponen en ningún banco a propósito. El cliente ya las marca
+  como sospechosas y el banco NO rebaja esa marca. Aunque alguien las
+  agregara por error, el sistema respeta la sospecha del cliente.
+
+  El banco viene PRE-CARGADO de fábrica con ~50 apps comunes y ~150
+  procesos de ruido de Windows ya identificados (con su descripción),
+  para que el panel arranque casi limpio. El superadmin puede ajustar
+  todo a mano.
+
+
+  M-3. CLASIFICAR UN PENDIENTE (ES PROGRAMA / ES RUIDO)
+  ─────────────────────────────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN.
+
+  En "Banco de apps", arriba hay una zona "Pendientes por clasificar":
+  todo .exe visto en actividad que aún no está en ningún banco, ordenado
+  por cuántos alumnos distintos lo usaron. Cada pendiente trae una
+  SUGERENCIA del sistema ("Parece app" / "Parece ruido" / "Desconocido")
+  y, si lo reconoce, su nombre y descripción.
+
+  Pasos:
+    1. Revisar el pendiente. Ver cuántos alumnos lo usaron (icono de
+       personas) y cuántas veces (icono de ojo).
+    2. Clic en "Es programa" (lo manda al banco de apps) o "Es ruido"
+       (lo manda al banco de ruido).
+    3. Se abre el formulario pre-rellenado con la sugerencia. Confirmar
+       nombre/categoría (apps) o el dueño (ruido) y Guardar.
+
+  EFECTO RETROACTIVO (importante): al clasificar, el sistema CORRIGE el
+  pasado. Todos los eventos viejos de ese .exe que estaban como
+  sospechosos pasan a normal, y sus sospechas pendientes se cierran
+  (se marcan "descartadas" con tu usuario). El historial queda coherente
+  con el banco actual. Al guardar, el mensaje indica cuántos eventos se
+  corrigieron.
+
+
+  M-4. AGREGAR O QUITAR MANUALMENTE DEL BANCO
+  ───────────────────────────────────────────────
+  Quién puede hacerlo: SOLO SUPERADMIN.
+
+  Agregar sin esperar a que aparezca como pendiente:
+    1. En "Banco de apps" o "Banco de ruido", clic en "Agregar programa" /
+       "Agregar ruido".
+    2. Escribir el ejecutable (ej. winword.exe), su nombre y descripción.
+    3. Guardar (también es retroactivo).
+
+  Quitar:
+    1. En la tabla del banco, clic en la papelera de la fila.
+    2. Confirmar. ATENCIÓN: al quitarlo, ese programa VOLVERÁ a aparecer
+       como sospechoso la próxima vez que alguien lo ejecute (vuelve al
+       estado 3).
+
+
+  M-5. EL BANCO DE RUIDO Y "PERTENECE A"
+  ──────────────────────────────────────────
+  El ruido no es anónimo: cada proceso de ruido tiene un DUEÑO, que indica
+  de qué viene. Puede ser:
+    - "Windows / Sistema"  → ruido del propio sistema operativo
+      (svchost, Windows Update, antivirus…).
+    - Un programa del banco → ej. GoogleUpdate.exe pertenece a Google
+      Chrome; los procesos de Office pertenecen a Word.
+
+  La columna "Pertenece a" de la tabla muestra ese dueño en lenguaje
+  claro. Al clasificar algo como ruido, se elige el dueño de un
+  desplegable (Windows/Sistema o cualquier app ya en el banco).
+
+
+  M-6. QUÉ CAMBIA EN EL FLUJO DE ACTIVIDAD
+  ─────────────────────────────────────────────
+  - El Flujo (vista limpia) OCULTA tanto los "procesos ignorados" (E-4)
+    como todo lo que esté en el banco de ruido. Solo verás apps reales y
+    sospechas.
+  - Los eventos sospechosos SIEMPRE se ven, aunque su .exe esté listado
+    (para no esconder algo que el cliente marcó como peligroso).
+  - El botón "Ver ignorados / Viendo todo" sigue funcionando: al
+    investigar, muestra absolutamente todo, ruido incluido.
+
+
+  M-7. QUIÉN PUEDE ACCEDER (ROLES)
+  ────────────────────────────────────
+  - VER los bancos y los pendientes: admin y superadmin.
+  - CLASIFICAR, agregar o quitar: SOLO SUPERADMIN. Si un admin intenta
+    editar, el servidor responde 403 (fail-closed). Los botones de edición
+    ni siquiera se le muestran.
+  - Toda clasificación/alta/baja queda registrada en Auditoría.
+
+
+  M-8. VULNERABILIDADES Y LÍMITES CONOCIDOS
+  ───────────────────────────────────────────────
+  Detectados durante la implementación; conviene tenerlos presentes:
+
+    1. EJECUTABLES VERSIONADOS EN EL NOMBRE. Algunos procesos incluyen su
+       versión en el nombre (ej. am_delta_patch_1.451.249.0.exe,
+       microsoftedge_x64_149.0.4022.69_….exe). Cada versión es un nombre
+       distinto, así que no se pueden listar de antemano y volverán a
+       caer como pendientes/sospechosos cada vez que cambie la versión.
+       Es ruido real, pero de bajo volumen. Mejora futura: reconocer por
+       prefijo/patrón, no por nombre exacto.
+
+    2. LA DECISIÓN ES POR NOMBRE DE .EXE, NO POR FIRMA. Si alguien
+       renombra una herramienta peligrosa con el nombre de una app del
+       banco (ej. renombrar cmd.exe a "winword.exe"), pasaría como
+       reconocida. Mitigación actual: la marca de "sospechoso" del cliente
+       (herramientas peligrosas) se respeta SIEMPRE y el banco no la
+       rebaja; pero un binario arbitrario renombrado sí podría colarse.
+       Mejora futura: validar ruta/firma del ejecutable.
+
+    3. EL CIERRE RETROACTIVO DE SOSPECHAS ES POR TEXTO. Al clasificar, las
+       sospechas viejas se cierran buscando el nombre del .exe dentro del
+       detalle de la sospecha. Es robusto en la práctica (el detalle
+       incluye el ejecutable), pero si una sospecha fue creada con otro
+       texto, podría no cerrarse automáticamente. Los eventos de actividad
+       sí se corrigen siempre (esos sí guardan proceso_exe exacto).
+
+    4. PRE-CARGA SOLO SI EL BANCO ESTÁ VACÍO. El sembrado de fábrica corre
+       una única vez (cuando las tablas están vacías). Si en el futuro se
+       amplía el catálogo de fábrica, los servidores ya inicializados NO
+       reciben las nuevas entradas automáticamente; habría que re-sembrar
+       o agregarlas a mano.
+
+    5. CACHÉ EN MEMORIA. Para no consultar la BD en cada evento, los bancos
+       se cachean en memoria y se refrescan al editar desde el panel. Si se
+       modifican las tablas DIRECTAMENTE en MySQL (sin pasar por el panel),
+       hay que reiniciar el servidor para que tome los cambios.
+
+
 ───────────────────────────────────────────────────────────────────
   MEJORAS PENDIENTES (detectadas al documentar)
 ───────────────────────────────────────────────────────────────────
@@ -1044,8 +1443,9 @@ FLUJO_ALUMNO.txt.
     - E-2: Aprobación/descarte de sospechas por lotes.
     - E-3: Cuando se crea una incidencia grave, mostrar la opción de
       banear directamente en el formulario (no solo arriba).
-    - E-4: Permitir al superadmin reclasificar un evento de "sospechoso"
-      a "normal" para casos como Word ejecutando procesos en segundo plano.
+    - E-4: [RESUELTO por la sección M] El superadmin ya puede reclasificar
+      un programa de "sospechoso" a "normal" desde el Banco de apps / Banco
+      de ruido, con corrección retroactiva de los eventos pasados.
 
   BAJA PRIORIDAD:
     - D-3: Mejorar el aspecto visual del PDF exportado.

@@ -52,6 +52,26 @@ def obtener_ip_local():
 
 _IP_LOCAL = obtener_ip_local()
 
+# ── Bancos de programas / ruido (caché en memoria) ─────────────────────
+# Se consultan en CADA evento de actividad, así que se cachean para no pegarle
+# a MySQL en el camino caliente. Refrescar con _refrescar_bancos() al editar.
+# Sets de nombre_exe en minúscula.
+_BANCO_APPS_SET: set = set()
+_BANCO_RUIDO_SET: set = set()
+
+async def _refrescar_bancos(db):
+    """Recarga en memoria los sets de banco_apps y banco_ruido."""
+    from sqlalchemy import text
+    global _BANCO_APPS_SET, _BANCO_RUIDO_SET
+    try:
+        ra = await db.execute(text("SELECT nombre_exe FROM banco_apps"))
+        _BANCO_APPS_SET = {r[0].lower() for r in ra.fetchall() if r[0]}
+        rr = await db.execute(text("SELECT nombre_exe FROM banco_ruido"))
+        _BANCO_RUIDO_SET = {r[0].lower() for r in rr.fetchall() if r[0]}
+        logger.info(f"[BANCO] Caché: {len(_BANCO_APPS_SET)} apps, {len(_BANCO_RUIDO_SET)} ruido.")
+    except Exception as e:
+        logger.error(f"[BANCO] No se pudo refrescar la caché: {e}")
+
 # ── API SGA UNASAM ───────────────────────────────────────────────────
 _SGA_BASE = os.getenv("SGA_API_URL", "https://sga.unasam.edu.pe/integracion/api/biblioteca/matriculados")
 _SGA_TIMEOUT = float(os.getenv("SGA_TIMEOUT_SECONDS", "6"))
@@ -320,6 +340,51 @@ async def _migrar_columnas():
             try:
                 await db.execute(text("ALTER TABLE configuracion_kiosco ADD COLUMN mensaje_duracion_seg INT DEFAULT 60"))
             except Exception: pass
+            # ajustes_sistema.valor: guarda config de KPIs (JSON) y el LOGO del panel
+            # como data URL base64 (puede pesar >1 MB). TEXT (64 KB) no alcanza para el
+            # logo → usar MEDIUMTEXT (16 MB). Idempotente.
+            try:
+                await db.execute(text("ALTER TABLE ajustes_sistema MODIFY COLUMN valor MEDIUMTEXT NOT NULL"))
+            except Exception: pass
+            # Tablas de Egresados / Docentes / Autoridad (Base de Datos del panel)
+            try:
+                await db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS egresados (
+                        dni VARCHAR(8) PRIMARY KEY,
+                        nombre VARCHAR(200) NOT NULL,
+                        codigo VARCHAR(30) NULL,
+                        escuela VARCHAR(200) NULL,
+                        anio_egreso VARCHAR(4) NULL,
+                        activo BOOLEAN DEFAULT TRUE,
+                        INDEX idx_egresado_codigo (codigo)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """))
+            except Exception: pass
+            try:
+                await db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS docentes (
+                        dni VARCHAR(8) PRIMARY KEY,
+                        nombre VARCHAR(200) NOT NULL,
+                        facultad VARCHAR(200) NULL,
+                        escuela VARCHAR(200) NULL,
+                        correo VARCHAR(150) NULL,
+                        telefono VARCHAR(20) NULL,
+                        activo BOOLEAN DEFAULT TRUE
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """))
+            except Exception: pass
+            try:
+                await db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS autoridades (
+                        dni VARCHAR(8) PRIMARY KEY,
+                        nombre VARCHAR(200) NOT NULL,
+                        cargo VARCHAR(150) NULL,
+                        correo VARCHAR(150) NULL,
+                        telefono VARCHAR(20) NULL,
+                        activo BOOLEAN DEFAULT TRUE
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """))
+            except Exception: pass
             # Tabla mensajes_programados
             try:
                 await db.execute(text("""
@@ -368,9 +433,68 @@ async def _migrar_columnas():
                     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
                 """))
             except Exception: pass
+            # Banco de programas (lista blanca de apps reconocidas)
+            try:
+                await db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS banco_apps (
+                        nombre_exe VARCHAR(150) NOT NULL PRIMARY KEY,
+                        nombre_amigable VARCHAR(200) NOT NULL,
+                        categoria VARCHAR(60) NULL,
+                        descripcion VARCHAR(300) NULL,
+                        aprobado_por VARCHAR(100) NULL,
+                        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """))
+            except Exception: pass
+            # Banco de ruido (procesos de fondo; cada uno con su dueño)
+            try:
+                await db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS banco_ruido (
+                        nombre_exe VARCHAR(150) NOT NULL PRIMARY KEY,
+                        nombre_amigable VARCHAR(200) NULL,
+                        descripcion VARCHAR(300) NULL,
+                        dueno_exe VARCHAR(150) NULL,
+                        aprobado_por VARCHAR(100) NULL,
+                        fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_ruido_dueno (dueno_exe)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """))
+            except Exception: pass
             await db.commit()
+            # Pre-carga (seed) de ambos bancos — solo si están vacíos, para no
+            # pisar lo que el superadmin haya editado a mano.
+            await _seed_bancos(db)
     except Exception as e:
         logger.error(f"Error en migraciones: {e}")
+
+
+async def _seed_bancos(db):
+    """Pre-carga generosa de banco_apps y banco_ruido desde el catálogo conocido.
+    Idempotente: solo inserta si la tabla está vacía."""
+    from sqlalchemy import text
+    from core.catalogo_apps import APPS_CONOCIDAS, RUIDO_CONOCIDO
+    try:
+        n_apps = (await db.execute(text("SELECT COUNT(*) FROM banco_apps"))).scalar() or 0
+        if n_apps == 0:
+            for exe, (nom, cat, desc) in APPS_CONOCIDAS.items():
+                await db.execute(text(
+                    "INSERT INTO banco_apps (nombre_exe, nombre_amigable, categoria, descripcion, aprobado_por, fecha) "
+                    "VALUES (:e, :n, :c, :d, NULL, NOW())"),
+                    {"e": exe.lower(), "n": nom, "c": cat, "d": desc})
+            logger.info(f"[BANCO] Pre-cargadas {len(APPS_CONOCIDAS)} apps reconocidas.")
+        n_ruido = (await db.execute(text("SELECT COUNT(*) FROM banco_ruido"))).scalar() or 0
+        if n_ruido == 0:
+            for exe, (nom, desc, dueno) in RUIDO_CONOCIDO.items():
+                await db.execute(text(
+                    "INSERT INTO banco_ruido (nombre_exe, nombre_amigable, descripcion, dueno_exe, aprobado_por, fecha) "
+                    "VALUES (:e, :n, :d, :du, NULL, NOW())"),
+                    {"e": exe.lower(), "n": nom, "d": desc, "du": (dueno or None)})
+            logger.info(f"[BANCO] Pre-cargados {len(RUIDO_CONOCIDO)} procesos de ruido.")
+        await db.commit()
+    except Exception as e:
+        logger.error(f"[BANCO] Error en pre-carga: {e}")
+    # Cargar la caché en memoria con lo que haya quedado (seed o ediciones).
+    await _refrescar_bancos(db)
 
 
 async def _limpiar_sesiones_fantasma():
@@ -1269,6 +1393,23 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     # ignorados solo se OCULTAN al consultar la vista normal.
                     # Así, al investigar una sospecha, el admin ve el contexto
                     # completo del alumno sin haber perdido nada.
+
+                    # ── Reevaluación por BANCO (fail-closed) ──────────────
+                    # Regla: un programa que NO está ni en el banco de apps ni
+                    # en el de ruido se marca SOSPECHOSO hasta que el superadmin
+                    # lo clasifique. Solo aplica a eventos de proceso con .exe.
+                    #   · Si el cliente ya dijo "sospechoso" (herramienta
+                    #     peligrosa: cmd, powershell…) se RESPETA siempre; el
+                    #     banco nunca rebaja una sospecha del cliente.
+                    #   · En banco_apps   -> normal.
+                    #   · En banco_ruido  -> normal (la vista normal lo oculta).
+                    #   · En ninguno      -> sospechoso.
+                    if tipo_ev == "proceso" and proceso_exe and nivel != "sospechoso":
+                        _exe = proceso_exe.lower()
+                        if _exe in _BANCO_APPS_SET or _exe in _BANCO_RUIDO_SET:
+                            nivel = "normal"
+                        else:
+                            nivel = "sospechoso"
 
                     log = ActividadLog(
                         id_terminal     = t.id,

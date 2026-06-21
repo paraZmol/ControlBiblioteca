@@ -220,6 +220,49 @@ class PersonalUniversidad(Base):
     def __repr__(self): return f"<PersonalUniversidad {self.dni}: {self.nombre}>"
 
 
+class Egresado(Base):
+    __tablename__ = "egresados"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    dni:        Mapped[str] = mapped_column(String(8),   primary_key=True)
+    nombre:     Mapped[str] = mapped_column(String(200), nullable=False)
+    codigo:     Mapped[str] = mapped_column(String(30),  nullable=True, index=True)
+    escuela:    Mapped[str] = mapped_column(String(200), nullable=True)
+    anio_egreso: Mapped[str] = mapped_column(String(4),  nullable=True)   # "2024"
+    activo:     Mapped[bool] = mapped_column(Boolean, default=True)
+
+    def __repr__(self): return f"<Egresado {self.dni}: {self.nombre}>"
+
+
+class Docente(Base):
+    __tablename__ = "docentes"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    dni:        Mapped[str] = mapped_column(String(8),   primary_key=True)
+    nombre:     Mapped[str] = mapped_column(String(200), nullable=False)
+    facultad:   Mapped[str] = mapped_column(String(200), nullable=True)
+    escuela:    Mapped[str] = mapped_column(String(200), nullable=True)
+    correo:     Mapped[str] = mapped_column(String(150), nullable=True)
+    telefono:   Mapped[str] = mapped_column(String(20),  nullable=True)
+    activo:     Mapped[bool] = mapped_column(Boolean, default=True)
+
+    def __repr__(self): return f"<Docente {self.dni}: {self.nombre}>"
+
+
+class Autoridad(Base):
+    __tablename__ = "autoridades"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    dni:        Mapped[str] = mapped_column(String(8),   primary_key=True)
+    nombre:     Mapped[str] = mapped_column(String(200), nullable=False)
+    cargo:      Mapped[str] = mapped_column(String(150), nullable=True)
+    correo:     Mapped[str] = mapped_column(String(150), nullable=True)
+    telefono:   Mapped[str] = mapped_column(String(20),  nullable=True)
+    activo:     Mapped[bool] = mapped_column(Boolean, default=True)
+
+    def __repr__(self): return f"<Autoridad {self.dni}: {self.nombre}>"
+
+
 class Sospecha(Base):
     __tablename__ = "sospechas"
     __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
@@ -274,6 +317,46 @@ class ProcesoIgnorado(Base):
     fecha:        Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     def __repr__(self): return f"<ProcesoIgnorado {self.nombre_exe}>"
+
+
+class BancoApp(Base):
+    """Banco de programas RECONOCIDOS (lista blanca).
+
+    Un ejecutable que figura aquí es una app legítima que el alumno usa
+    (Word, Chrome, AutoCAD…). Lo que NO está ni aquí ni en el banco de ruido
+    se marca como SOSPECHOSO hasta que el superadmin lo clasifique.
+    Las herramientas peligrosas (cmd, powershell…) se dejan FUERA a propósito."""
+    __tablename__ = "banco_apps"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    nombre_exe:      Mapped[str] = mapped_column(String(150), primary_key=True)   # ej. "winword.exe" (lowercase)
+    nombre_amigable: Mapped[str] = mapped_column(String(200), nullable=False)     # ej. "Microsoft Word"
+    categoria:       Mapped[str] = mapped_column(String(60),  nullable=True)      # Ofimática | Navegador | Diseño | …
+    descripcion:     Mapped[str] = mapped_column(String(300), nullable=True)      # qué es, en legible
+    aprobado_por:    Mapped[str] = mapped_column(String(100), nullable=True)      # username; NULL = pre-cargado
+    fecha:           Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    def __repr__(self): return f"<BancoApp {self.nombre_exe}>"
+
+
+class BancoRuido(Base):
+    """Banco de RUIDO: procesos de fondo que no son actividad del alumno.
+
+    Cada ruido pertenece a un dueño: o un programa del banco_apps
+    (ej. GoogleUpdate.exe -> chrome.exe) o al sistema operativo
+    (dueno_exe = "__sistema__"). El ruido se OCULTA de la vista normal de
+    actividad (como procesos_ignorados) y nunca cuenta como uso real."""
+    __tablename__ = "banco_ruido"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    nombre_exe:      Mapped[str] = mapped_column(String(150), primary_key=True)   # ej. "googleupdate.exe" (lowercase)
+    nombre_amigable: Mapped[str] = mapped_column(String(200), nullable=True)      # ej. "Actualizador de Google"
+    descripcion:     Mapped[str] = mapped_column(String(300), nullable=True)      # ej. "ruido de Chrome: actualizaciones"
+    dueno_exe:       Mapped[str] = mapped_column(String(150), nullable=True)      # nombre_exe en banco_apps, o "__sistema__"
+    aprobado_por:    Mapped[str] = mapped_column(String(100), nullable=True)      # username; NULL = pre-cargado
+    fecha:           Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    def __repr__(self): return f"<BancoRuido {self.nombre_exe} dueno={self.dueno_exe}>"
 
 
 class ConfiguracionKiosco(Base):
