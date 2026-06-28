@@ -22,6 +22,22 @@ namespace ControlBiblioteca.Client.Services
         private CancellationTokenSource   _cts = new();
         private bool _activo = false;
 
+        // Log diagnóstico a archivo (junto al exe), para depurar en campo la
+        // captura de aperturas/cierres/reaperturas sin necesidad de un debugger.
+        private static readonly string _logDiagPath = Path.Combine(
+            AppContext.BaseDirectory, "actividad_diag.log");
+        private static readonly object _logLock = new();
+        private static void LogDiag(string msg)
+        {
+            try
+            {
+                lock (_logLock)
+                    File.AppendAllText(_logDiagPath,
+                        $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} | {msg}{Environment.NewLine}");
+            }
+            catch { /* el log nunca debe romper el monitoreo */ }
+        }
+
         // Intervalo de sondeo de procesos. Usamos polling en vez de
         // Win32_ProcessStartTrace porque esa clase WMI exige privilegios de
         // administrador, y el cliente corre como asInvoker (usuario normal).
@@ -161,6 +177,10 @@ namespace ControlBiblioteca.Client.Services
                 {
                     var procesosActuales = Process.GetProcesses();
                     var nuevosPids = new HashSet<int>(procesosActuales.Length);
+                    // Nombres de exe con AL MENOS una instancia viva en esta vuelta.
+                    // Sirve para purgar de _appsReportadas las apps que el alumno
+                    // cerró, y así poder volver a registrarlas si las reabre.
+                    var nombresVivos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                     foreach (var p in procesosActuales)
                     {
@@ -175,11 +195,24 @@ namespace ControlBiblioteca.Client.Services
                         finally { p.Dispose(); }
 
                         nuevosPids.Add(pid);
+                        nombresVivos.Add(nombre);
 
                         // Solo procesar los que NO estaban en el sondeo anterior.
                         if (_pidsVistos.Contains(pid)) continue;
 
                         EvaluarProceso(nombre, pid);
+                    }
+
+                    // Purga: una app reportada que ya no tiene NINGÚN proceso vivo
+                    // fue cerrada. La quitamos del registro para que, si el alumno
+                    // la reabre, vuelva a contar como una apertura nueva. Esto
+                    // distingue "Chrome abrió 5 subprocesos de una" (un solo evento
+                    // mientras siga vivo) de "abrió y cerró Excel 5 veces".
+                    var cerradas = _appsReportadas.Where(n => !nombresVivos.Contains(n)).ToList();
+                    foreach (var cerrada in cerradas)
+                    {
+                        _appsReportadas.Remove(cerrada);
+                        LogDiag($"PURGA (cerrada, ya re-registrable): {cerrada}");
                     }
 
                     _pidsVistos = nuevosPids;
@@ -216,11 +249,17 @@ namespace ControlBiblioteca.Client.Services
             }
 
             // 3. Cualquier otro programa de usuario → nivel normal.
-            //    Dedup por sesión: una app abierta = un evento, sin importar
-            //    cuántos subprocesos lance (Chrome, Word, etc.).
-            if (!_appsReportadas.Add(nombre)) return;
+            //    Dedup por instancia viva: una app abierta = un evento mientras
+            //    siga corriendo. Al cerrarse se purga (ver LoopProcesosAsync) y
+            //    reabrirla vuelve a contar.
+            if (!_appsReportadas.Add(nombre))
+            {
+                LogDiag($"YA REPORTADA (sigue viva, no re-registra): {nombre} pid={pid}");
+                return;
+            }
 
             string amigable = NombreAmigable(pid, nombre);
+            LogDiag($"REGISTRA apertura: {nombre} ({amigable}) pid={pid}");
             _ = EnviarEventoAsync(
                 "proceso",
                 $"Abrió: {amigable}",

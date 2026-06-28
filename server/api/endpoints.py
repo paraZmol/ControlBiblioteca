@@ -3439,6 +3439,89 @@ async def grafico_programas(
     return {"periodo": periodo, "items": items}
 
 
+@router.get("/kpis/programas-ranking")
+async def programas_ranking(
+    periodo: str = "semana", desde: str | None = None, hasta: str | None = None,
+    limite: int = 15,
+    db: AsyncSession = Depends(get_db), usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """Ranking de programas que el alumno ABRE de forma manual, como herramienta
+    de decisión (¿qué conviene licenciar / asegurar?).
+
+    A diferencia de /kpis/grafico/programas (que excluye una lista fija de ruido
+    del SO), este cruza con los BANCOS reales que gestiona el superadmin:
+      - EXCLUYE el banco de ruido y los procesos ignorados (no son uso real).
+      - INCLUYE las apps reconocidas Y los exe aún SIN CLASIFICAR — a propósito:
+        un programa popular todavía sin clasificar (p. ej. uno pirateado) es justo
+        lo que el encargado necesita ver para decidir comprar licencia o instalar
+        una versión segura.
+    Cada fila trae su `estado` ('app' | 'sin_clasificar') y, si es app, el nombre
+    amigable y la categoría del banco. Métrica doble: alumnos distintos (orden) y
+    veces totales (dato secundario)."""
+    from sqlalchemy import func as _func
+    dt_ini, dt_fin = _kpi_rango_fechas(periodo, desde, hasta)
+    limite = min(max(limite, 1), 50)
+
+    q = (
+        select(
+            _func.lower(ActividadLog.proceso_exe).label("exe"),
+            _func.count(_func.distinct(ActividadLog.dni_alumno)).label("alumnos"),
+            _func.count(ActividadLog.id).label("veces"),
+            _func.max(ActividadLog.fecha_hora).label("ultima"),
+        )
+        .where(
+            ActividadLog.tipo == "proceso",
+            ActividadLog.proceso_exe.isnot(None), ActividadLog.proceso_exe != "",
+            ActividadLog.fecha_hora >= dt_ini, ActividadLog.fecha_hora < dt_fin,
+        )
+        .group_by(_func.lower(ActividadLog.proceso_exe))
+        .order_by(_func.count(_func.distinct(ActividadLog.dni_alumno)).desc())
+    )
+    rows = (await db.execute(q)).all()
+
+    # Bancos: apps (con metadatos legibles) y exclusiones (ruido + ignorados).
+    apps = {
+        r.nombre_exe: r for r in
+        (await db.execute(select(BancoApp))).scalars().all()
+    }
+    ruido    = {x[0] for x in (await db.execute(select(BancoRuido.nombre_exe))).all()}
+    ignorados = {
+        (x[0] or "").lower()
+        for x in (await db.execute(select(ProcesoIgnorado.nombre_exe))).all()
+    }
+
+    items = []
+    for r in rows:
+        exe = (r.exe or "").strip()
+        if not exe or exe in ruido or exe in ignorados:
+            continue  # ruido o explícitamente ignorado: no es uso real
+        app = apps.get(exe)
+        if app:
+            items.append({
+                "exe":      exe,
+                "estado":   "app",
+                "nombre":   app.nombre_amigable or exe,
+                "categoria": app.categoria,
+                "alumnos":  int(r.alumnos or 0),
+                "veces":    int(r.veces or 0),
+                "ultima":   r.ultima,
+            })
+        else:
+            items.append({
+                "exe":      exe,
+                "estado":   "sin_clasificar",
+                "nombre":   exe,
+                "categoria": None,
+                "alumnos":  int(r.alumnos or 0),
+                "veces":    int(r.veces or 0),
+                "ultima":   r.ultima,
+            })
+        if len(items) >= limite:
+            break
+
+    return {"periodo": periodo, "items": items}
+
+
 # ════════════════════════════════════════════════════════════════════════
 #  EGRESADOS / DOCENTES / AUTORIDAD  (Base de Datos del panel)
 #  Mismo patrón CRUD + importar/exportar que personal_universitario.

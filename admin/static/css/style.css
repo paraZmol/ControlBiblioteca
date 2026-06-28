@@ -18,6 +18,7 @@ button { font-family: inherit; cursor: pointer; }
     --r:    13px;
     --r-sm:  8px;
     --r-xs:  6px;
+    --r-lg: 20px;   /* radio grande para tarjetas estilo dashboard (antes hardcodeado) */
     --font: 'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif;
     --mono: 'JetBrains Mono', 'Consolas', monospace;
 
@@ -44,6 +45,14 @@ button { font-family: inherit; cursor: pointer; }
     --ok:      oklch(0.72 0.17 145);
     --ok-dim:  oklch(0.72 0.17 145 / 0.12);
     --ok-bdr:  oklch(0.72 0.17 145 / 0.28);
+
+    /* Hero "Monitor Local" — degradado verde DECORATIVO (mismo hue 145 que --ok).
+       Es fondo, no estado: los puntos/badges de las PCs conservan su semantica.
+       --hero-fg/-fg2 son textos legibles sobre ese fondo (contraste AA). */
+    --hero-grad: linear-gradient(135deg, oklch(0.30 0.10 145) 0%, oklch(0.20 0.07 150) 55%, oklch(0.16 0.04 155) 100%);
+    --hero-fg:   oklch(0.97 0.02 145);
+    --hero-fg2:  oklch(0.86 0.06 145);
+    --hero-bdr:  oklch(0.45 0.12 145 / 0.45);
     --err:     oklch(0.60 0.22 20);
     --err-dim: oklch(0.60 0.22 20 / 0.12);
     --err-bdr: oklch(0.60 0.22 20 / 0.28);
@@ -101,6 +110,11 @@ html:not(.dark) {
     --ok:     oklch(0.55 0.17 145);
     --ok-dim: oklch(0.55 0.17 145 / 0.10);
     --ok-bdr: oklch(0.55 0.17 145 / 0.25);
+    /* Hero verde — en claro va mas vivo, con texto blanco (legible sobre verde medio). */
+    --hero-grad: linear-gradient(135deg, oklch(0.58 0.15 145) 0%, oklch(0.50 0.15 150) 55%, oklch(0.44 0.13 155) 100%);
+    --hero-fg:   #ffffff;
+    --hero-fg2:  oklch(0.94 0.04 145);
+    --hero-bdr:  oklch(0.50 0.15 145 / 0.40);
     --err:     oklch(0.50 0.22 20);
     --err-dim: oklch(0.50 0.22 20 / 0.10);
     --err-bdr: oklch(0.50 0.22 20 / 0.25);
@@ -291,6 +305,9 @@ html.dark .app-window {
 
 /* Sidebar shell */
 .sidebar {
+    /* Azul institucional UNASAM (navy) — local al sidebar, no toca el acento global */
+    --unasam:     oklch(0.42 0.13 250);   /* ~#004B8D navy */
+    --unasam-hov: oklch(0.36 0.13 250);
     width: 240px;
     min-width: 240px;
     height: 100%;
@@ -311,6 +328,7 @@ html.dark .sidebar {
 
 /* Logo area */
 .sidebar-logo-area {
+    position: relative;
     height: 68px;
     display: flex; align-items: center;
     padding: 0 20px;
@@ -320,10 +338,10 @@ html.dark .sidebar {
 .sidebar-logo-badge {
     width: 38px; height: 38px; flex-shrink: 0;
     border-radius: 12px;
-    background: linear-gradient(135deg, oklch(0.62 0.22 260), oklch(0.55 0.22 285));
+    background: linear-gradient(135deg, var(--unasam), oklch(0.50 0.15 255));
     display: flex; align-items: center; justify-content: center;
     color: #fff; font-size: 18px; font-weight: 900;
-    box-shadow: 0 4px 14px oklch(0.62 0.22 260 / 0.35);
+    box-shadow: 0 4px 14px oklch(0.42 0.13 250 / 0.40);
 }
 .sidebar-logo-text h1 {
     font-size: 13px; font-weight: 800; color: var(--t1);
@@ -352,28 +370,144 @@ html.dark .sidebar {
 }
 .nav-item i { font-size: 17px; flex-shrink: 0; }
 .nav-item span:first-of-type { flex: 1; }
+/* Hover: indigo translucido + texto indigo (distinto del activo azul) */
 .nav-item:hover {
-    background: var(--sur2);
-    color: var(--t1);
+    background: var(--a-dim);
+    color: var(--a);
 }
+.nav-item:hover i { color: var(--a); }
+/* No aplicar el hover indigo sobre el item ya activo (que es azul) */
+.nav-item-active:hover {
+    background: var(--unasam);
+    color: #fff;
+}
+.nav-item-active:hover i { color: #fff; }
+
+/* Activo: azul navy UNASAM, texto e icono blancos */
 .nav-item-active {
-    background: var(--sur);
-    color: var(--a) !important;
-    border-color: var(--bdr);
+    background: var(--unasam);
+    color: #fff;
+    border-color: transparent;
     font-weight: 600;
-    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    box-shadow: 0 4px 14px oklch(0.42 0.13 250 / 0.35);
 }
+.nav-item-active i { color: #fff; }
 .nav-item-active::before {
     content: '';
     position: absolute; left: 0; top: 0; bottom: 0;
     width: 3px; border-radius: 0 3px 3px 0;
-    background: var(--a);
+    background: #fff; opacity: .6;
 }
 .nav-badge {
     font-size: 10px; font-weight: 700;
     background: var(--err); color: #fff;
     border-radius: 20px; padding: 1px 6px;
     min-width: 18px; text-align: center; line-height: 16px;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   SIDEBAR DRAWER izquierdo — franja de iconos en el flujo; al hacer clic
+   en el boton se EXPANDE superpuesto (como el drawer de actividad).
+   ════════════════════════════════════════════════════════════════ */
+@media (min-width: 769px) {
+    /* Sidebar SIEMPRE fijo (flota). Franja de 76px de iconos a la IZQUIERDA;
+       al expandir crece a 260px (animando el ancho, suave). Como ya es fixed
+       desde el inicio, no hay salto de position. El contenido reserva 76px. */
+    .sidebar {
+        position: fixed; left: 0; top: 0; bottom: 0; z-index: 47;
+        width: 76px; min-width: 76px;
+        background: var(--sur); border-right: 1px solid var(--bdr);
+        backdrop-filter: none;
+        overflow: hidden;
+        transition: width .26s cubic-bezier(.4,0,.2,1), min-width .26s cubic-bezier(.4,0,.2,1), box-shadow .26s ease;
+    }
+    html.dark .sidebar { background: var(--sur); border-right-color: var(--bdr); backdrop-filter: none; }
+    .app-main-area { margin-left: 76px; }
+
+    /* En franja: el nav SIN padding lateral; cada item centra su icono.
+       El texto colapsa a 0 para no empujar. */
+    .sidebar .sidebar-nav { padding: 12px 0; }
+    .sidebar .nav-item { justify-content: center; padding: 11px 0; white-space: nowrap; gap: 0; }
+    .sidebar .nav-item i { font-size: 21px; flex-shrink: 0; }
+    .sidebar .nav-item span:not(.nav-badge) {
+        width: 0; opacity: 0; overflow: hidden; flex: none;
+        transition: opacity .15s ease;
+    }
+    .sidebar .sidebar-logo-text { width: 0; opacity: 0; overflow: hidden; white-space: nowrap; transition: opacity .15s ease; }
+    .sidebar .sidebar-logo-area { padding: 0; justify-content: center; }
+    /* Footer en franja: ocultar detalles que no caben */
+    .sidebar .sidebar-ws-row, .sidebar .zoom-bar-sidebar,
+    .sidebar .sidebar-user-info, .sidebar .sidebar-user-row > div:last-child {
+        opacity: 0; transition: opacity .15s ease;
+    }
+    /* Badge en franja: el NUMERO en una pildora pequeña, flotando en la esquina
+       superior derecha del icono, para indicar cuantas cosas hay que revisar. */
+    .sidebar .nav-badge {
+        position: absolute; top: 4px; right: 14px;
+        min-width: 16px; height: 16px; box-sizing: border-box;
+        padding: 0 4px; border-radius: 8px;
+        font-size: 9.5px; font-weight: 700; line-height: 12px;
+        opacity: 1; overflow: visible; width: auto;
+        border: 2px solid var(--sur);   /* anillo para despegarlo del icono */
+    }
+
+    /* EXPANDIDO: crece a 260px y aparecen los textos */
+    .sidebar.expanded {
+        width: 260px; min-width: 260px;
+        overflow-y: auto; overflow-x: hidden;
+        box-shadow: 12px 0 40px rgba(0,0,0,.35);
+    }
+    .sidebar.expanded .sidebar-nav { padding: 12px 10px; }
+    /* Solo el span del TEXTO toma flex:1; el badge NO (si no, se estira). */
+    .sidebar.expanded .nav-item span:not(.nav-badge) { width: auto; opacity: 1; flex: 1; }
+    .sidebar.expanded .sidebar-logo-text { width: auto; opacity: 1; }
+    .sidebar.expanded .sidebar-ws-row,
+    .sidebar.expanded .zoom-bar-sidebar,
+    .sidebar.expanded .sidebar-user-info,
+    .sidebar.expanded .sidebar-user-row > div:last-child { opacity: 1; }
+    .sidebar.expanded .nav-item { justify-content: flex-start; padding: 10px 12px; gap: 11px; }
+    .sidebar.expanded .nav-item i { font-size: 17px; }
+    .sidebar.expanded .sidebar-logo-area { justify-content: flex-start; }
+    .sidebar.expanded .nav-badge {
+        position: static; flex: none; margin-left: auto;
+        width: auto; opacity: 1; overflow: visible;
+        min-width: 16px; height: 16px; box-sizing: border-box;
+        padding: 0 4px; font-size: 9.5px; line-height: 16px; border-radius: 8px;
+        border: none;   /* sin anillo cuando esta expandido (queda dentro de la fila) */
+    }
+    .sidebar.expanded .sidebar-logo-area { padding: 0 20px; }
+    .sidebar.expanded .sidebar-logo-badge { width: 38px; border-radius: 12px; background: linear-gradient(135deg, var(--unasam), oklch(0.50 0.15 255)); color: #fff; }
+
+    /* Overlay INVISIBLE: no oscurece, solo captura el clic-afuera para cerrar. */
+    body.sidebar-open .sidebar-menu-overlay { visibility: visible; }
+}
+/* Overlay del menu: TRANSPARENTE (no oscurece). Solo capta el clic-afuera
+   para cerrar el menu. El menu se desliza encima sin atenuar el fondo. */
+.sidebar-menu-overlay {
+    position: fixed; inset: 0; z-index: 46;
+    background: transparent;
+    visibility: hidden;
+}
+
+/* Boton hamburguesa/expandir dentro del sidebar */
+.sidebar-collapse-btn {
+    margin-left: auto; flex-shrink: 0;
+    width: 30px; height: 30px; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid transparent;
+    color: var(--t2); cursor: pointer; font-size: 18px;
+    transition: background .15s, color .15s;
+}
+.sidebar-collapse-btn:hover { background: var(--a-dim); color: var(--a); }
+/* Cerrado (franja): el boton hamburguesa se centra en los 76px de la franja
+   (que estan a la izquierda) y reemplaza al logo. */
+@media (min-width: 769px) {
+    .sidebar:not(.expanded) .sidebar-collapse-btn {
+        position: absolute; top: 18px; left: 23px; right: auto; transform: none; margin: 0;
+    }
+    .sidebar:not(.expanded) .sidebar-logo-badge { display: none; }
+    /* En expandido el boton queda a la derecha del header (junto al logo) */
+    .sidebar.expanded .sidebar-collapse-btn { position: static; margin-left: auto; }
 }
 
 /* Footer */
@@ -529,41 +663,30 @@ html.dark .sidebar {
 }
 
 .terminal-card {
-    background: rgba(255,255,255,0.85);
-    border: 1px solid rgba(0,0,0,0.08);
-    border-radius: 20px;
-    padding: 16px;
+    /* Mismo look glass que las tarjetas KPI: se despega del fondo. */
+    background: var(--glass-bg, var(--sur));
+    border: 1px solid var(--glass-bdr, var(--bdr));
+    border-top: 2px solid var(--t3);   /* franja superior de color por estado (mockup) */
+    border-radius: var(--r-lg);
+    padding: 18px;
     display: flex; flex-direction: column; gap: 12px;
     transition: border-color .25s, transform .25s, box-shadow .25s, background .25s;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04);
+    box-shadow: var(--glass-sha, var(--sha));
+    backdrop-filter: blur(20px);
     position: relative;
 }
-html.dark .terminal-card {
-    background: rgba(39,39,42,0.70);
-    border-color: rgba(255,255,255,0.07);
-    box-shadow: 0 2px 10px rgba(0,0,0,0.30), 0 0 0 1px rgba(255,255,255,0.04);
-}
 .terminal-card:hover {
-    border-color: var(--a-bdr);
-    transform: translateY(-3px);
-    box-shadow: 0 12px 32px var(--a-dim), 0 2px 8px rgba(0,0,0,.12);
+    transform: translateY(-4px);
+    box-shadow: 0 16px 40px var(--a-dim), 0 4px 12px rgba(0,0,0,.18);
 }
 
-/* State variants — solo opacidad en offline, sin border de color */
-.terminal-card.offline  { opacity: .55; }
-
-/* Acento de estado a la izquierda — estado legible "de un vistazo".
-   Solo presentacion; la tarjeta ya recibe la clase activo/bloqueado/offline. */
-.terminal-card.activo::before,
-.terminal-card.bloqueado::before {
-    content: '';
-    position: absolute;
-    left: 0; top: 16px; bottom: 16px;
-    width: 3px; border-radius: 0 3px 3px 0;
-    pointer-events: none;
-}
-.terminal-card.activo::before    { background: var(--ok); }
-.terminal-card.bloqueado::before { background: var(--wrn); }
+/* State variants — franja SUPERIOR de color por estado (look del mockup).
+   verde=en uso, dorado=bloqueada, gris=offline. El verde aqui SI es semantico. */
+.terminal-card.activo     { border-top-color: var(--ok); }
+.terminal-card.bloqueado  { border-top-color: var(--wrn); }
+.terminal-card.offline    { border-top-color: var(--t3); opacity: .6; }
+.terminal-card.activo:hover    { box-shadow: 0 16px 40px var(--ok-dim), 0 4px 12px rgba(0,0,0,.18); }
+.terminal-card.bloqueado:hover { box-shadow: 0 16px 40px var(--wrn-dim), 0 4px 12px rgba(0,0,0,.18); }
 
 /* Header row: dot + name/ip left, badge right */
 .tc-header {
@@ -605,21 +728,29 @@ html.dark .terminal-card {
     min-height: 36px;
     display: flex; align-items: center;
 }
+/* "Well" del usuario: hundido respecto a la tarjeta, como el mockup */
 .tc-alumno-pill {
     width: 100%;
-    display: flex; align-items: center; justify-content: space-between;
-    background: var(--a-dim);
-    border: 1px solid var(--a-bdr);
-    border-radius: 10px;
-    padding: 6px 10px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    border: 1px solid var(--bdr);
+    border-radius: 14px;
+    padding: 10px 12px;
 }
 .tc-alumno-name {
-    font-size: 12px; font-weight: 600; color: var(--a);
+    font-size: 12px; font-weight: 700; color: var(--t1);
+    text-align: center;
+    max-width: 100%;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .tc-alumno-empty {
-    font-size: 12px; color: var(--t3); font-style: italic;
-    padding: 0 2px;
+    width: 100%;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 48px;
+    background: rgba(127,127,127,0.04);
+    border: 1px dashed var(--bdr);
+    border-radius: 14px;
+    font-size: 11px; color: var(--t3); font-style: italic;
 }
 
 /* Action buttons row */
@@ -640,20 +771,16 @@ html.dark .terminal-card {
 .btn-card-desbloquear:hover,
 .btn-card-apagar:hover { transform: translateY(-1px); }
 
-/* Bloquear: rose suave */
+/* Bloquear: ambar/amarillo (accion intermedia) */
 .btn-card-bloquear {
-    background: #ffe4e6;
-    border-color: #fecdd3;
-    color: #e11d48;
-}
-html.dark .btn-card-bloquear {
-    background: oklch(0.22 0.06 20 / 0.45);
-    border-color: oklch(0.35 0.08 20 / 0.5);
-    color: oklch(0.75 0.18 20);
+    background: var(--wrn-dim);
+    border-color: var(--wrn-bdr);
+    color: var(--wrn);
 }
 .btn-card-bloquear:hover {
-    background: #fecdd3;
-    border-color: #fda4af;
+    background: var(--wrn);
+    border-color: var(--wrn);
+    color: #fff;
 }
 
 /* Desbloquear: emerald suave */
@@ -672,20 +799,16 @@ html.dark .btn-card-desbloquear {
     border-color: #86efac;
 }
 
-/* Apagar: zinc neutro */
+/* Apagar: rojo (accion mas destructiva) */
 .btn-card-apagar {
-    background: #f4f4f5;
-    border-color: #e4e4e7;
-    color: #52525b;
-}
-html.dark .btn-card-apagar {
-    background: rgba(39,39,42,0.6);
-    border-color: rgba(255,255,255,0.10);
-    color: #a1a1aa;
+    background: var(--err-dim);
+    border-color: var(--err-bdr);
+    color: var(--err);
 }
 .btn-card-apagar:hover {
-    background: #e4e4e7;
-    color: #18181b;
+    background: var(--err);
+    border-color: var(--err);
+    color: #fff;
 }
 
 /* Eliminar terminal fantasma — solo superadmin, solo en tarjetas offline */
@@ -1222,61 +1345,203 @@ html:not(.dark) .console-header { color: var(--t1); }
     padding: 3px 9px; border-radius: 20px;
 }
 
-/* ── Top-level bento layout ── */
-.mon-bento-view { display: flex; flex-direction: column; gap: 16px; }
+/* ── Top-level layout dashboard (KPIs arriba + 2 columnas abajo) ── */
+.mon-bento-view { display: flex; flex-direction: column; gap: 24px; }
 
-.mon-bento-top {
+/* Fila superior: 4 tarjetas KPI (hero + sesiones + incidencias + comandos) */
+.mon-kpi-row {
     display: grid;
-    grid-template-columns: 1fr 260px 240px;
-    gap: 16px;
-    align-items: stretch;   /* las 3 tarjetas de arriba quedan a la misma altura */
+    grid-template-columns: 1.4fr 1fr 1fr 1.3fr;
+    gap: 20px;
+    align-items: stretch;
     min-width: 0;
 }
-.mon-bento-top > * { min-width: 0; }
+.mon-kpi-row > * { min-width: 0; }
 
-@media (max-width: 1100px) {
-    .mon-bento-top { grid-template-columns: 1fr 1fr; }
-    /* Reacomodar en vez de ocultar: el hero ocupa el ancho completo y
-       Alertas + Eventos bajan a la fila siguiente (lado a lado). Nada desaparece. */
-    .mon-hero-card { grid-column: 1 / -1; min-height: 0; }
-    /* Hero a todo el ancho: compactar la altura (sin el alto fijo ni el
-       space-between que lo estiraban) y dejar los 3 KPIs en fila horizontal,
-       que envuelve si no entran. */
-    .mon-hero-left  { justify-content: flex-start; gap: 14px; }
-    .mon-hero-stats { flex-direction: row; flex-wrap: wrap; row-gap: 14px; }
+/* Fila inferior: mapa de PCs (ancho) + actividad en vivo (lateral) */
+/* El mapa de terminales ahora ocupa todo el ancho (la actividad es un drawer) */
+.mon-split { display: block; }
+.mon-split-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+
+/* Encabezado de sección estilo Kombai: barra de color + título */
+.mon-section-hdr {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
-@media (max-width: 700px) {
-    .mon-bento-top { grid-template-columns: 1fr; }
-    /* Una sola columna: hero, Alertas y Eventos quedan apilados, ninguno se oculta. */
+.mon-section-hdr .mon-section-ttl {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 18px; font-weight: 800; color: var(--t1); letter-spacing: -.01em;
+}
+.mon-section-bar { width: 5px; height: 26px; border-radius: 999px; display: inline-block; }
+.mon-section-bar-a  { background: var(--a); }
+.mon-section-bar-ok { background: var(--ok); }
+
+.mon-live-count {
+    font-size: 11px; font-weight: 700; color: var(--t2);
+    background: var(--sur2); border: 1px solid var(--bdr);
+    border-radius: 999px; padding: 1px 8px;
 }
 
-/* ── Hero card ── */
+/* ════════════════════════════════════════════════════════════════
+   DRAWER lateral derecho "Actividad en vivo" (se superpone al hacer clic)
+   ════════════════════════════════════════════════════════════════ */
+/* Pestaña vertical pegada al borde derecho (visible cuando el drawer cierra) */
+.mon-live-tab {
+    position: fixed; top: 50%; right: 0; transform: translateY(-50%);
+    z-index: 45;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 14px 8px; border: none; cursor: pointer;
+    background: var(--ok); color: #fff;
+    border-radius: 12px 0 0 12px;
+    box-shadow: -4px 0 16px rgba(0,0,0,.25);
+    transition: opacity .2s, transform .2s;
+}
+.mon-live-tab i { font-size: 18px; }
+.mon-live-tab-txt {
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font-size: 12px; font-weight: 700; letter-spacing: .04em;
+}
+.mon-live-tab .mon-live-count { background: rgba(255,255,255,.22); color: #fff; border-color: transparent; }
+.mon-live-tab:hover { padding-right: 12px; }
+
+/* Overlay que oscurece el fondo cuando el drawer esta abierto */
+/* Overlay del drawer de actividad: TRANSPARENTE (no oscurece), solo capta
+   el clic-afuera para cerrar. Consistente con el menu lateral. */
+.mon-live-overlay {
+    position: fixed; inset: 0; z-index: 46;
+    background: transparent;
+    visibility: hidden;
+}
+
+/* El cajon en si: fijo a la derecha, fondo OPACO, deslizante */
+.mon-live-drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 47;
+    width: 380px; max-width: 88vw;
+    background: var(--sur); border-left: 1px solid var(--bdr);
+    box-shadow: -12px 0 40px rgba(0,0,0,.35);
+    display: flex; flex-direction: column;
+    transform: translateX(100%);              /* oculto a la derecha */
+    transition: transform .28s cubic-bezier(.4,0,.2,1);
+}
+.mon-live-drawer-hdr {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 18px 18px 14px; border-bottom: 1px solid var(--bdr);
+}
+.mon-live-drawer-actions { display: flex; align-items: center; gap: 8px; }
+.mon-live-close {
+    width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+    background: var(--sur2); border: 1px solid var(--bdr); color: var(--t2);
+    display: inline-flex; align-items: center; justify-content: center; font-size: 16px;
+    transition: background .15s, color .15s;
+}
+.mon-live-close:hover { background: var(--err-dim); color: var(--err); border-color: var(--err-bdr); }
+.mon-live-drawer .mon-live-card {
+    flex: 1; min-height: 0; padding: 8px;
+    background: transparent; border: none; box-shadow: none;
+    display: flex; flex-direction: column;
+}
+
+/* ── ABIERTO ── */
+.mon-live-drawer.open { transform: translateX(0); }
+body.mon-live-open .mon-live-overlay { visibility: visible; }
+/* Cuando esta abierto, la pestaña se esconde */
+body.mon-live-open .mon-live-tab { opacity: 0; pointer-events: none; transform: translateY(-50%) translateX(20px); }
+
+@media (max-width: 1200px) {
+    /* 2x2: hero + sesiones arriba, incidencias + comandos abajo */
+    .mon-kpi-row { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 760px) {
+    /* Movil: 2 columnas. Fila 1 = Monitor Local + Comandos Globales (reordenados
+       con order, ya que en el HTML Comandos va cuarto). Fila 2 = Sesiones +
+       Incidencias compactos lado a lado. */
+    .mon-kpi-row {
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        align-items: stretch;
+    }
+    .mon-kpi-row > .mon-hero-card { order: 1; }
+    .mon-kpi-row > .mon-cmd-card  { order: 2; }
+    .mon-kpi-row > .mon-kpi-card:nth-of-type(2) { order: 3; } /* Sesiones */
+    .mon-kpi-row > .mon-kpi-card:nth-of-type(3) { order: 4; } /* Incidencias */
+    /* KPIs compactos a media columna: menos padding y alto, numero mas chico */
+    .mon-kpi-row > .mon-kpi-card:not(.mon-cmd-card) {
+        padding: 16px; min-height: 120px;
+    }
+    .mon-kpi-row > .mon-kpi-card:not(.mon-cmd-card) .mon-kpi-num { font-size: 34px; }
+    /* En la fila compartida, el Hero ya no necesita ser tan alto */
+    .mon-kpi-row > .mon-hero-card { min-height: 0; }
+    /* Comandos Globales: solo icono (texto queda en aria-label/title) para que
+       quepan a media columna sin partirse */
+    .mon-cmd-btns .mon-cmd-txt { display: none; }
+    .mon-cmd-btn { gap: 0; padding: 12px; }
+    .mon-cmd-btn i { font-size: 18px; }
+    /* Mapa de terminales: 2 columnas en pantallas chicas */
+    .terminales-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 12px;
+    }
+    /* Botones de PC: solo icono (el texto se oculta pero queda en aria-label/title)
+       para que no se partan en dos lineas y descuadren la tarjeta */
+    .tc-acciones .btn-card-txt { display: none; }
+    .btn-card-bloquear,
+    .btn-card-desbloquear,
+    .btn-card-apagar,
+    .btn-card-eliminar-terminal {
+        gap: 0; padding: 10px;
+    }
+    .btn-card-bloquear i,
+    .btn-card-desbloquear i,
+    .btn-card-apagar i,
+    .btn-card-eliminar-terminal i {
+        font-size: 18px;
+    }
+}
+
+/* ── Hero card (degradado verde decorativo, look dashboard) ── */
 .mon-hero-card {
     position: relative; overflow: hidden;
     padding: 28px 28px 24px;
     min-height: 200px;
+    background: var(--hero-grad);
+    border-radius: var(--r-lg);
+    border: 1px solid var(--hero-bdr);
+    color: var(--hero-fg);
 }
+/* Glow claro arriba-derecha para dar profundidad al degradado */
 .mon-hero-glow {
-    position: absolute; top: -40px; right: -40px;
-    width: 220px; height: 220px;
-    background: var(--a-dim);
+    position: absolute; top: -60px; right: -50px;
+    width: 240px; height: 240px;
+    background: oklch(0.85 0.16 145 / 0.22);
     border-radius: 50%; filter: blur(60px);
     pointer-events: none;
 }
+/* Textos del hero sobre el verde: tokens de primer plano legibles */
+.mon-hero-card .mon-hero-eyebrow { color: var(--hero-fg2); }
+.mon-hero-card .mon-hero-kpi-lbl { color: var(--hero-fg2); }
+.mon-hero-card .mon-hero-kpi-val { color: var(--hero-fg); }
+.mon-hero-card .mon-hero-kpi-total,
+.mon-hero-card .mon-hero-kpi-note { color: var(--hero-fg2); opacity: .85; }
+.mon-hero-card .mon-hero-kpi-mini { color: var(--hero-fg2); }
+.mon-hero-card .mon-hero-ico { color: var(--hero-fg); opacity: .85; }
+/* Ping "en vivo": en blanco para verse sobre el fondo verde */
+.mon-hero-card .mon-live-ping-inner,
+.mon-hero-card .mon-live-ping-dot { background: var(--hero-fg); }
 .mon-hero-body {
-    display: flex; justify-content: space-between;
-    align-items: stretch; gap: 16px; height: 100%;
+    display: flex; height: 100%;
     position: relative; z-index: 1;
 }
 .mon-hero-left {
     display: flex; flex-direction: column;
-    justify-content: flex-start; gap: 22px;   /* titulo arriba; los KPIs ocupan y se centran en lo que queda */
+    justify-content: space-between; gap: 18px;
     flex: 1;
 }
-.mon-hero-title {
-    font-size: 28px; font-weight: 800; color: var(--t1);
-    letter-spacing: -.02em; line-height: 1.1;
+/* Eyebrow superior: "Monitor Local" + icono a la derecha */
+.mon-hero-top { display: flex; align-items: flex-start; justify-content: space-between; }
+.mon-hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 10.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
 }
+.mon-hero-ico { font-size: 22px; }
 .mon-hero-sub {
     display: flex; align-items: center; gap: 7px;
     font-size: 12px; color: var(--t2); margin-top: 4px;
@@ -1299,63 +1564,103 @@ html:not(.dark) .console-header { color: var(--t1); }
     75%, 100% { transform: scale(2); opacity: 0; }
 }
 
+/* Stats del hero: numero grande "terminales en linea" + label + pie */
 .mon-hero-stats {
-    display: flex; gap: 28px; flex-wrap: wrap;
+    display: flex; flex-direction: column; gap: 4px;
     align-items: flex-start;
-    align-content: center;            /* centra verticalmente la fila de KPIs en el alto disponible */
-    justify-content: space-between;   /* extremos pegados a los bordes: el ultimo KPI llega a la derecha */
-    width: 100%;
-    flex: 1;                          /* toma el alto que queda debajo del titulo */
-}
-/* Cada KPI toma su ancho natural; space-between los reparte de borde a borde. */
-.mon-hero-kpi { flex: 0 0 auto; }
-.mon-hero-kpi-lbl {
-    font-size: 11px; font-weight: 700; color: var(--t3);
-    text-transform: uppercase; letter-spacing: .08em;
-    white-space: nowrap;
 }
 .mon-hero-kpi-val {
-    font-size: 30px; font-weight: 800; color: var(--t1);
-    letter-spacing: -.03em; line-height: 1.1; margin-top: 3px;
-    display: flex; align-items: baseline; gap: 2px;
+    font-size: 46px; font-weight: 800; letter-spacing: -.03em; line-height: 1;
+    display: flex; align-items: baseline; gap: 4px;
 }
-.mon-hero-kpi-total {
-    font-size: 14px; font-weight: 500; color: var(--t3);
+.mon-hero-kpi-total { font-size: 18px; font-weight: 600; }
+.mon-hero-kpi-lbl { font-size: 12px; font-weight: 600; margin-top: 4px; }
+.mon-hero-kpi-note { font-size: 10px; font-weight: 400; margin-left: 4px; white-space: nowrap; }
+.mon-hero-foot { font-size: 11.5px; font-weight: 500; margin-top: 8px; color: var(--hero-fg2); }
+.mon-hero-foot span { font-weight: 800; color: var(--hero-fg); }
+
+/* ── Tarjetas KPI superiores (glass, look dashboard) ──
+   Fondo translucido mas claro que el lienzo + borde visible + sombra marcada,
+   para que la tarjeta se DESPEGUE del fondo (problema: --sur sobre --bg casi
+   no contrastaba). Variables locales: no tocan los tokens globales. */
+.mon-kpi-row, .mon-split {
+    --glass-bg:  rgba(255,255,255,0.66);
+    --glass-bdr: rgba(0,0,0,0.10);
+    --glass-sha: 0 8px 24px rgba(0,0,0,.08), 0 1px 0 rgba(255,255,255,.6) inset;
 }
-.mon-hero-kpi-note {
-    font-size: 10px; font-weight: 400; color: var(--t3);
-    letter-spacing: 0; margin-left: 4px;
-    white-space: nowrap;
+html.dark .mon-kpi-row, html.dark .mon-split {
+    --glass-bg:  rgba(34,34,40,0.72);
+    --glass-bdr: rgba(255,255,255,0.10);
+    --glass-sha: 0 10px 30px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.05) inset;
 }
-/* Fase 2 — jerarquia: el primer KPI ("Equipos Online") es el dato primario que
-   el operador mira de un vistazo. Solo enfasis visual: los 3 KPIs siguen en el
-   mismo lugar y con la misma data; ninguno se quita ni se achica. */
-.mon-hero-stats .mon-hero-kpi:first-child .mon-hero-kpi-val {
-    font-size: 44px;
-    color: var(--ok);
+.mon-kpi-card {
+    display: flex; flex-direction: column; gap: 14px;
+    padding: 22px; border-radius: var(--r-lg);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-bdr);
+    box-shadow: var(--glass-sha);
+    backdrop-filter: blur(20px);
 }
-.mon-hero-right {
-    position: absolute; top: 28px; right: 28px; z-index: 2;
-    display: flex; align-items: flex-start; justify-content: flex-end;
+.mon-kpi-card-top { display: flex; align-items: flex-start; justify-content: space-between; }
+.mon-kpi-icowrap {
+    width: 40px; height: 40px; border-radius: 14px;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 20px;
+}
+.mon-kpi-icowrap-rose { background: var(--err-dim); color: var(--err); border: 1px solid var(--err-bdr); }
+.mon-kpi-icowrap-a    { background: var(--a-dim);   color: var(--a);   border: 1px solid var(--a-bdr); }
+.mon-kpi-ttl { font-size: 13px; }
+.mon-kpi-eyebrow {
+    font-size: 11px; font-weight: 700; color: var(--t3);
+    text-transform: uppercase; letter-spacing: .1em;
 }
 
-.mon-btn-block-all {
-    display: inline-flex; align-items: center; gap: 7px;
-    background: var(--t1); color: var(--bg); border: none;
-    border-radius: 12px; padding: 10px 18px;
-    font: 600 13px/1 var(--font); cursor: pointer; letter-spacing: .01em;
-    box-shadow: 0 4px 14px oklch(0.15 0.02 260 / 0.30);
-    transition: opacity .12s, transform .12s;
-    flex-shrink: 0;
+/* KPI numerico (Sesiones, Incidencias): icono arriba, numero+label abajo. */
+.mon-kpi-card { justify-content: flex-start; min-height: 150px; gap: 0; }
+.mon-kpi-card-top { margin-bottom: auto; }
+.mon-kpi-num {
+    font-size: 42px; font-weight: 800; line-height: 1;
+    letter-spacing: -.03em; color: var(--t1);
 }
-.mon-btn-block-all:hover { opacity: .85; transform: translateY(-1px); }
-.mon-btn-block-all:active { transform: translateY(0); }
+.mon-kpi-name { font-size: 12.5px; font-weight: 600; color: var(--t2); margin-top: 4px; }
+/* Badge "Critico" arriba-derecha */
+.mon-kpi-tag {
+    font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+    background: var(--err); color: #fff;
+    padding: 4px 9px; border-radius: 6px;
+}
 
-/* ── Alertas card ── */
-.mon-alerts-card {
-    background: oklch(0.97 0.01 20 / 1);
-    border-color: oklch(0.88 0.04 20);
+/* Tarjeta de Comandos Globales */
+.mon-cmd-card { justify-content: space-between; gap: 16px; }
+.mon-cmd-btns { display: flex; flex-direction: column; gap: 10px; }
+.mon-cmd-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; padding: 11px 14px; border-radius: var(--r-sm);
+    font: 700 12.5px var(--font); cursor: pointer; transition: all .15s; letter-spacing: .01em;
 }
+.mon-cmd-btn-sec { background: var(--sur3); color: var(--t1); border: 1px solid var(--bdr); }
+.mon-cmd-btn-sec:hover { border-color: var(--err-bdr); color: var(--err); }
+.mon-cmd-btn-pri { background: var(--a); color: #fff; border: 1px solid var(--a); }
+.mon-cmd-btn-pri:hover { opacity: .9; transform: translateY(-1px); }
+
+/* ── Card de Actividad en vivo (columna lateral alta) ── */
+.mon-live-card {
+    /* Sin tarjeta que englobe: timeline limpia (estilo "shipping details") */
+    flex: 1; min-height: 0; overflow: hidden;
+    display: flex; flex-direction: column;
+    background: transparent; border: none; box-shadow: none; padding: 0;
+}
+.mon-live-card .mon-events-timeline {
+    /* Timeline: linea vertical continua a la izquierda, sin tarjetas */
+    margin-left: 6px; padding: 6px 4px 6px 22px;
+    border-left: 2px solid var(--bdr);
+    overflow-y: auto; gap: 22px;
+    flex: 1; min-height: 0;
+}
+
+/* ── Alertas mini-lista (dentro de la tarjeta KPI) ── */
+.mon-alerts-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; min-height: 0; }
+/* La tarjeta de alertas aprovecha todo el alto de la fila KPI */
+.mon-alerts-kpi { gap: 12px; }
 .dark .mon-alerts-card {
     background: oklch(0.12 0.03 20 / 0.4);
     border-color: oklch(0.25 0.05 20 / 0.4);
@@ -1401,33 +1706,90 @@ html:not(.dark) .console-header { color: var(--t1); }
 /* ── Eventos card ── */
 .mon-events-card {}
 .mon-events-timeline {
-    display: flex; flex-direction: column; gap: 14px;
-    padding: 12px 20px 16px 28px;
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 12px 16px 16px 28px;
     border-left: 2px solid var(--bdr);
     margin-left: 20px;
     flex: 1;
     overflow-y: auto;
 }
+/* Evento = entrada de timeline (punto sobre la linea vertical) */
 .mon-event-item {
     position: relative;
+    padding: 9px 10px;
+    border-radius: var(--r-sm);
+    transition: background .14s;
 }
+.mon-event-item:hover { background: var(--sur2); }
+/* Punto del evento, montado sobre la linea vertical de la lista */
 .mon-event-item::before {
     content: '';
-    position: absolute; left: -22px; top: 5px;
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--bdr2);
+    position: absolute; left: -25px; top: 14px;
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--a);
+    box-shadow: 0 0 0 3px var(--sur);   /* recorta la linea detras del punto */
 }
 .mon-event-item.critical::before {
     background: var(--err);
-    box-shadow: 0 0 0 3px var(--err-dim);
+    box-shadow: 0 0 0 3px var(--sur), 0 0 0 5px var(--err-dim);
 }
-.mon-event-time {
-    font-size: 10.5px; color: var(--t3); font-family: var(--mono);
-    margin-bottom: 1px;
+
+/* Linea 1: quien + flag de sospecha */
+.mon-event-head {
+    display: flex; align-items: center; gap: 7px;
+    margin-bottom: 2px;
 }
+.mon-event-quien {
+    font-size: 12.5px; font-weight: 700; color: var(--t1);
+    line-height: 1.2;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mon-event-quien-anon { color: var(--t3); font-weight: 600; font-style: italic; }
+.mon-event-flag {
+    flex-shrink: 0;
+    font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--err);
+    background: var(--err-dim); border: 1px solid var(--err-bdr);
+    border-radius: 999px; padding: 2px 7px;
+}
+
+/* Linea 2: descripcion legible + exe crudo opcional */
 .mon-event-desc {
-    font-size: 12.5px; color: var(--t1); font-weight: 500;
+    font-size: 12px; color: var(--t2); font-weight: 500;
+    line-height: 1.35;
 }
+.mon-event-exe {
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--t3); background: var(--sur3);
+    padding: 1px 5px; border-radius: var(--r-xs);
+    white-space: nowrap;
+}
+
+/* Linea 3: meta (hora + terminal) */
+.mon-event-meta {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 4px;
+    font-size: 10.5px; color: var(--t3);
+}
+.mon-event-time { font-family: var(--mono); }
+.mon-event-term { display: inline-flex; align-items: center; gap: 3px; }
+.mon-event-term i { font-size: 12px; }
+
+/* Evento critico: nombre y descripcion en rojo para reforzar la alerta. */
+.mon-event-item.critical .mon-event-quien,
+.mon-event-item.critical .mon-event-desc { color: var(--err); }
+.mon-event-item.critical .mon-event-desc { font-weight: 600; }
+
+/* Fila final "Ver toda la actividad de hoy" */
+.mon-event-vermas {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    width: 100%; margin-top: 4px; padding: 11px;
+    background: var(--a-dim); border: 1px dashed var(--a-bdr); border-radius: var(--r-sm);
+    color: var(--a); font: 600 12.5px var(--font); cursor: pointer;
+    transition: background .15s;
+}
+.mon-event-vermas:hover { background: var(--a); color: #fff; border-style: solid; border-color: var(--a); }
+.mon-event-vermas i { font-size: 15px; }
 
 /* ── Grid de PCs card ── */
 .mon-grid-card {}
@@ -1812,14 +2174,14 @@ html.dark .hc-row--active { background: oklch(0.25 0.04 200 / 0.25); }
    NAV ACTIVE STATE (sidebar nav-item)
 ══════════════════════════════════════════════ */
 .nav-item-active {
-    background: var(--sur) !important;
-    color: var(--a) !important;
-    border-color: var(--bdr) !important;
+    background: var(--unasam) !important;
+    color: #fff !important;
+    border-color: transparent !important;
 }
 html:not(.dark) .nav-item-active {
-    background: var(--sur) !important;
-    color: oklch(0.45 0.22 260) !important;
-    border-color: var(--bdr) !important;
+    background: var(--unasam) !important;
+    color: #fff !important;
+    border-color: transparent !important;
 }
 
 /* ══════════════════════════════════════════════
@@ -2400,6 +2762,86 @@ html.dark .act-row-crit:hover { background: oklch(0.16 0.03 20 / 0.45); }
 .kpi-proximamente h3 { font-size: 16px; font-weight: 700; color: var(--t1); }
 .kpi-proximamente p { font-size: 13px; color: var(--t3); max-width: 440px; line-height: 1.5; }
 
+/* ── Pestaña Programas: ranking de los más usados ── */
+.kpi-programas-zona {
+    background: var(--sur); border: 1px solid var(--bdr); border-radius: var(--r);
+    padding: 18px 20px;
+}
+.kpi-programas-hdr { margin-bottom: 14px; }
+.kpi-programas-titulo {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 15px; font-weight: 700; color: var(--t1);
+}
+.kpi-programas-titulo i { color: var(--a); }
+.kpi-programas-sub {
+    font-size: 12px; color: var(--t3); line-height: 1.5; margin-top: 4px;
+}
+.kpi-programas-lista { display: flex; flex-direction: column; gap: 8px; }
+
+/* Fila del ranking */
+.prog-row {
+    display: grid;
+    grid-template-columns: 28px 1fr auto auto;
+    align-items: center; gap: 14px;
+    padding: 10px 12px;
+    background: var(--sur2); border: 1px solid var(--bdr);
+    border-radius: var(--r-sm);
+    transition: border-color .15s, background .15s;
+}
+.prog-row:hover { border-color: var(--bdr2); }
+.prog-row-pend { border-left: 3px solid var(--wrn); }
+.prog-rank {
+    font-family: var(--mono); font-size: 13px; font-weight: 700;
+    color: var(--t3); text-align: center;
+}
+.prog-info { min-width: 0; }
+.prog-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.prog-nombre {
+    font-size: 13px; font-weight: 600; color: var(--t1);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.prog-badge {
+    flex-shrink: 0;
+    font-size: 9.5px; font-weight: 700; letter-spacing: .03em;
+    padding: 2px 8px; border-radius: 999px;
+    text-transform: uppercase;
+}
+.prog-badge-pend { color: var(--wrn); background: var(--wrn-dim); border: 1px solid var(--wrn-bdr); }
+.prog-badge-cat  { color: var(--a);   background: var(--a-dim);   border: 1px solid var(--a-bdr); }
+/* Barra de proporción (alumnos distintos) */
+.prog-bar-wrap {
+    height: 6px; border-radius: 999px;
+    background: var(--sur3); overflow: hidden;
+}
+.prog-bar {
+    height: 100%; border-radius: 999px;
+    background: var(--a);
+    min-width: 4px;
+}
+.prog-row-pend .prog-bar { background: var(--wrn); }
+.prog-metricas {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+    white-space: nowrap;
+}
+.prog-alumnos { font-size: 13px; color: var(--t1); }
+.prog-alumnos strong { font-weight: 800; }
+.prog-veces { font-size: 10.5px; color: var(--t3); font-family: var(--mono); }
+.prog-clasificar {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 7px 12px; border-radius: var(--r-sm);
+    font: 600 11.5px var(--font); cursor: pointer;
+    color: var(--wrn); background: var(--wrn-dim);
+    border: 1px solid var(--wrn-bdr);
+    transition: all .15s;
+}
+.prog-clasificar:hover { background: var(--wrn); border-color: var(--wrn); color: #fff; }
+
+@media (max-width: 640px) {
+    .prog-row { grid-template-columns: 22px 1fr; row-gap: 8px; }
+    .prog-metricas { grid-column: 2; align-items: flex-start; flex-direction: row; gap: 10px; }
+    .prog-clasificar { grid-column: 2; justify-self: start; }
+}
+
 /* Modal editor */
 .kpi-modal-content { max-width: 520px; }
 .kpi-editor-lista {
@@ -2441,12 +2883,32 @@ html.dark .act-row-crit:hover { background: oklch(0.16 0.03 20 / 0.45); }
     .kpi-view { padding: 18px 16px; }
     .kpi-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
     .kpi-card-val { font-size: 28px; }
+    .kpi-graf-card { padding: 14px; }
+
+    /* Barras horizontales en pantallas chicas: la columna de etiqueta se encoge
+       para que la barra no quede diminuta; tipografías un poco menores. */
+    .kpi-bar-row {
+        grid-template-columns: minmax(52px, 84px) 1fr auto;
+        gap: 8px;
+    }
+    .kpi-bar-rlbl { font-size: 11px; }
+    .kpi-bar-rtrack { height: 22px; }
+    .kpi-bar-rval { font-size: 12px; min-width: 18px; }
+
+    /* Barras verticales en pantallas chicas: menos alto y gap, etiquetas chicas. */
+    .kpi-bars-v { height: 200px; gap: 6px; }
+    .kpi-bars-v-rot { height: 240px; }
+    .kpi-bar-cval { font-size: 10px; }
+    .kpi-bar-clbl { font-size: 10px; }
 }
 
 /* ── Gráficos ───────────────────────────────────────────────────── */
 .kpi-graf-hdr {
     display: flex; align-items: center; justify-content: space-between;
-    flex-wrap: wrap; gap: 12px; margin: 30px 0 16px;
+    flex-wrap: wrap; gap: 12px; margin: 30px auto 16px;
+    /* Mismo ancho tope que la grilla; centrado para que en pantallas anchas el
+       conjunto gráfico + período quede al centro y no pegado a la izquierda. */
+    max-width: 1100px;
 }
 .kpi-graf-titulo { font-size: 16px; font-weight: 700; color: var(--t1); }
 .kpi-periodo {
@@ -2471,6 +2933,9 @@ html.dark .act-row-crit:hover { background: oklch(0.16 0.03 20 / 0.45); }
 
 .kpi-graf-grid {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px;
+    /* Tope de ancho + centrado: en monitores anchos el gráfico no se estira sin
+       fin y el bloque queda al centro (alineado con su header de período). */
+    max-width: 1100px; margin-inline: auto;
 }
 .kpi-graf-card {
     background: var(--sur); border: 1px solid var(--bdr);
@@ -2481,10 +2946,87 @@ html.dark .act-row-crit:hover { background: oklch(0.16 0.03 20 / 0.45); }
     display: flex; align-items: center; gap: 7px; margin-bottom: 14px;
 }
 .kpi-graf-card-titulo i { color: var(--a); font-size: 16px; }
+/* Gráfico de barras con HTML+CSS (flexbox). Ancho FLUIDO sale del layout; el
+   texto es DOM real, así que nunca se deforma. La ALTURA depende del tipo:
+   - Verticales: altura fija (el eje Y es el valor; las barras crecen, no se
+     multiplican). Nº de barras acotado (días del período).
+   - Horizontales: altura AUTOMÁTICA según el nº de filas (cada categoría es una
+     fila de alto constante). Así con 3 o con 15 facultades se ve igual de
+     legible, sin comprimir ni hacer scroll. */
 .kpi-graf-canvas { width: 100%; min-height: 120px; }
-.kpi-svg { width: 100%; height: auto; display: block; }
-.kpi-svg-bar { fill: var(--a); transition: fill .15s; }
-.kpi-svg-bar:hover { fill: var(--a-hov, var(--a)); opacity: .85; }
-.kpi-svg-val   { fill: var(--t2); font: 600 11px var(--font); }
-.kpi-svg-lbl   { fill: var(--t2); font: 500 12px var(--font); }
-.kpi-svg-lbl-x { fill: var(--t3); font: 500 10px var(--font); }
+.kpi-bars { width: 100%; }
+
+/* ── Barras VERTICALES (altura fija) ── */
+.kpi-bars-v {
+    height: 260px;
+    display: flex; align-items: flex-end; justify-content: space-around;
+    gap: 10px; padding-top: 6px;
+}
+.kpi-bar-col {
+    flex: 1 1 0; min-width: 0; max-width: 90px;
+    height: 100%;
+    display: flex; flex-direction: column; align-items: center;
+}
+.kpi-bar-cval {
+    font: 600 11px var(--font); color: var(--t2);
+    margin-bottom: 4px; height: 14px;
+}
+/* El track ocupa el alto restante; el relleno crece desde abajo (% del track) */
+.kpi-bar-ctrack {
+    flex: 1; width: 100%;
+    display: flex; align-items: flex-end; justify-content: center;
+    min-height: 0;
+}
+.kpi-bar-cfill {
+    width: 100%; max-width: 64px;
+    background: var(--a); border-radius: 5px 5px 0 0;
+    transition: height .35s ease, background .15s;
+    min-height: 2px;
+}
+.kpi-bar-col:hover .kpi-bar-cfill { background: var(--a-hov, var(--a)); opacity: .88; }
+.kpi-bar-clbl {
+    font: 500 11px var(--font); color: var(--t3);
+    margin-top: 8px; text-align: center;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+/* Etiquetas largas/muchas: inclinadas para que no se encimen y se lean completas.
+   La columna reserva alto extra abajo y la barra deja de tomar todo el alto. */
+.kpi-bars-v-rot { height: 300px; padding-bottom: 44px; }
+.kpi-bars-v-rot .kpi-bar-clbl {
+    transform: rotate(-40deg); transform-origin: top right;
+    white-space: nowrap; overflow: visible; text-overflow: clip;
+    max-width: none; margin-top: 10px;
+    align-self: flex-end;
+}
+
+/* ── Barras HORIZONTALES (altura automática: crece con el nº de filas) ── */
+.kpi-bars-h {
+    display: flex; flex-direction: column;
+    gap: 10px; padding: 4px 0;
+}
+.kpi-bar-row {
+    display: grid;
+    grid-template-columns: minmax(80px, 160px) 1fr auto;
+    align-items: center; gap: 12px;
+}
+.kpi-bar-rlbl {
+    font: 500 12px var(--font); color: var(--t2);
+    text-align: right;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kpi-bar-rtrack {
+    height: 28px; border-radius: 6px;
+    background: var(--sur3);
+    overflow: hidden;
+}
+.kpi-bar-rfill {
+    height: 100%; border-radius: 6px;
+    background: var(--a);
+    transition: width .35s ease, background .15s;
+    min-width: 2px;
+}
+.kpi-bar-row:hover .kpi-bar-rfill { background: var(--a-hov, var(--a)); opacity: .88; }
+.kpi-bar-rval {
+    font: 700 13px var(--font); color: var(--t1);
+    min-width: 24px;
+}
