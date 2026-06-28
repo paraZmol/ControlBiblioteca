@@ -140,6 +140,29 @@ function toggleTema() {
 
 }
 
+// ── Menú: franja de iconos que se EXPANDE superpuesto al hacer clic ──
+// (en escritorio). Tooltips nativos en cada icono cuando está en franja.
+function _aplicarTooltipsMenu() {
+    document.querySelectorAll('#sidebar .nav-item').forEach(item => {
+        const txt = item.querySelector('span')?.textContent?.trim() || '';
+        if (txt) item.title = txt;
+    });
+}
+
+function toggleMenuExpandido() {
+    const sb = document.getElementById('sidebar');
+    if (!sb) return;
+    const abierto = sb.classList.toggle('expanded');
+    document.body.classList.toggle('sidebar-open', abierto);
+}
+
+function cerrarMenuExpandido() {
+    const sb = document.getElementById('sidebar');
+    if (!sb) return;
+    sb.classList.remove('expanded');
+    document.body.classList.remove('sidebar-open');
+}
+
 
 
 (function _initTema() {
@@ -815,6 +838,10 @@ async function cargarDashboard() {
             document.getElementById('terminalesActivas').textContent = s.terminales_activas;
 
             document.getElementById('sesionesActivas').textContent  = s.sesiones_activas;
+
+            // Tarjeta KPI de sesiones (Monitoreo, layout dashboard)
+            const sesKpi = document.getElementById('sesionesActivasKpi');
+            if (sesKpi) sesKpi.textContent = s.sesiones_activas;
 
             document.getElementById('totalAlumnos').textContent     = s.total_alumnos;
 
@@ -1586,12 +1613,12 @@ function renderTerminales(terminales, sesiones = []) {
         } else if (!online) {
 
             const btnEliminar = _rolServidor === 'superadmin'
-                ? `<button class="btn-card-eliminar-terminal" onclick="eliminarTerminalFantasma(${t.id}, '${pcNombre}')"><i class="ph ph-trash"></i> Eliminar</button>`
+                ? `<button class="btn-card-eliminar-terminal" aria-label="Eliminar terminal" title="Eliminar terminal" onclick="eliminarTerminalFantasma(${t.id}, '${pcNombre}')"><i class="ph ph-trash"></i> <span class="btn-card-txt">Eliminar</span></button>`
                 : '';
 
             botonesPrimarios = `
 
-                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> Apagar PC</button>
+                <button class="btn-card-apagar" aria-label="Apagar PC" title="Apagar PC" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> <span class="btn-card-txt">Apagar PC</span></button>
                 ${btnEliminar}
 
             `;
@@ -1600,9 +1627,9 @@ function renderTerminales(terminales, sesiones = []) {
 
             botonesPrimarios = `
 
-                <button class="btn-card-desbloquear" onclick="mostrarModalDesbloqueo('${esc(t.ip)}', '${pcNombre}')"><i class="ph ph-lock-open"></i> Desbloquear</button>
+                <button class="btn-card-desbloquear" aria-label="Desbloquear" title="Desbloquear" onclick="mostrarModalDesbloqueo('${esc(t.ip)}', '${pcNombre}')"><i class="ph ph-lock-open"></i> <span class="btn-card-txt">Desbloquear</span></button>
 
-                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> Apagar PC</button>
+                <button class="btn-card-apagar" aria-label="Apagar PC" title="Apagar PC" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> <span class="btn-card-txt">Apagar PC</span></button>
 
             `;
 
@@ -1610,9 +1637,9 @@ function renderTerminales(terminales, sesiones = []) {
 
             botonesPrimarios = `
 
-                <button class="btn-card-bloquear" onclick="bloquearTerminal('${esc(t.ip)}', '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-lock"></i> Bloquear</button>
+                <button class="btn-card-bloquear" aria-label="Bloquear" title="Bloquear" onclick="bloquearTerminal('${esc(t.ip)}', '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-lock"></i> <span class="btn-card-txt">Bloquear</span></button>
 
-                <button class="btn-card-apagar" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> Apagar PC</button>
+                <button class="btn-card-apagar" aria-label="Apagar PC" title="Apagar PC" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> <span class="btn-card-txt">Apagar PC</span></button>
 
             `;
 
@@ -3392,14 +3419,23 @@ async function _cargarResumenIncidencias() {
 }
 
 function _renderMonAlertasMini(data) {
+    const activas = data.filter(r => r.total > 0);
+
+    // Tarjeta KPI "Incidencias Pendientes" (Monitoreo, layout dashboard):
+    // numero = alumnos con incidencias activas; tag "Critico" si hay alguno grave (>=3).
+    const numEl = document.getElementById('monIncidenciasNum');
+    if (numEl) numEl.textContent = String(activas.length).padStart(2, '0');
+    const tagEl = document.getElementById('monIncidenciasTag');
+    if (tagEl) tagEl.style.display = activas.some(r => r.total >= 3) ? '' : 'none';
+
     const el = document.getElementById('monAlertasMini');
     if (!el) return;
-    const activas = data.filter(r => r.total > 0).slice(0, 4);
-    if (!activas.length) {
+    const lista = activas.slice(0, 4);
+    if (!lista.length) {
         el.innerHTML = '<p class="mon-alerts-empty">Sin incidencias activas</p>';
         return;
     }
-    el.innerHTML = activas.map(r => {
+    el.innerHTML = lista.map(r => {
         const grave = r.total >= 3;
         return `<div class="mon-alert-item">
             <div class="mon-alert-ico ${grave ? 'grave' : 'leve'}">
@@ -3415,25 +3451,56 @@ function _renderMonAlertasMini(data) {
 
 async function _cargarEventosMini() {
     try {
-        const res = await fetch(`${API_BASE}/admin/actividad?limit=4&offset=0`, { headers: authHeaders() });
+        // Actividad en vivo: los 11 eventos mas recientes (la lista tiene scroll).
+        const res = await fetch(`${API_BASE}/admin/actividad?limit=11&offset=0`, { headers: authHeaders() });
         if (!res.ok) return;
         const data = await res.json();
         const items = data.items || [];
         const el = document.getElementById('monEventosMini');
+        const cnt = document.getElementById('monLiveCount');
+        if (cnt) cnt.textContent = data.total != null ? data.total : items.length;
         if (!el) return;
         if (!items.length) {
             el.innerHTML = '<p class="mon-alerts-empty">Sin eventos recientes</p>';
             return;
         }
-        el.innerHTML = items.map(r => {
-            const hora = r.fecha_hora ? new Date(r.fecha_hora).toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '—';
+        const filas = items.map(r => {
+            const hora = r.fecha_hora ? new Date(r.fecha_hora).toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit'}) : '—';
             const isCrit = r.nivel === 'sospechoso';
+            const quien = (r.nombre_alumno || '').trim();
+            const term  = (r.nombre_terminal || '').trim();
+            // La descripcion ya viene legible del servidor ("Abrio: ...", "Herramienta
+            // del sistema: ..."); el exe crudo solo se muestra si no esta ya en ella.
+            const desc  = (r.descripcion || r.tipo || '—').trim();
+            const exe   = (r.proceso_exe || '').trim();
+            const mostrarExe = exe && !desc.toLowerCase().includes(exe.toLowerCase());
             return `<div class="mon-event-item${isCrit ? ' critical' : ''}">
-                <div class="mon-event-time">${hora} · ${escapeHtml(r.nombre_terminal || '—')}</div>
-                <div class="mon-event-desc">${escapeHtml(r.descripcion || r.tipo || '—')}</div>
+                <div class="mon-event-head">
+                    ${quien ? `<span class="mon-event-quien">${escapeHtml(quien)}</span>` : '<span class="mon-event-quien mon-event-quien-anon">Sistema</span>'}
+                    ${isCrit ? '<span class="mon-event-flag">Sospechoso</span>' : ''}
+                </div>
+                <div class="mon-event-desc">${escapeHtml(desc)}${mostrarExe ? ` <code class="mon-event-exe">${escapeHtml(exe)}</code>` : ''}</div>
+                <div class="mon-event-meta">
+                    <span class="mon-event-time">${hora}</span>
+                    ${term ? `<span class="mon-event-term"><i class="ph ph-desktop"></i> ${escapeHtml(term)}</span>` : ''}
+                </div>
             </div>`;
         }).join('');
+        // Fila final: "Ver más de hoy" -> abre Eventos filtrado al día de hoy.
+        const verMas = `<button class="mon-event-vermas" onclick="actVerHoy()">
+            <i class="ph ph-clock-counter-clockwise"></i> Ver toda la actividad de hoy
+        </button>`;
+        el.innerHTML = filas + verMas;
     } catch(e) { /* silencioso */ }
+}
+
+// Abrir/cerrar el drawer lateral "Actividad en vivo" (se superpone).
+function toggleActividadVivo() {
+    const drawer = document.getElementById('monLiveSide');
+    if (!drawer) return;
+    const abierto = drawer.classList.toggle('open');
+    document.body.classList.toggle('mon-live-open', abierto);
+    drawer.setAttribute('aria-hidden', abierto ? 'false' : 'true');
 }
 
 function _renderIncidencias(items) {
@@ -4266,6 +4333,26 @@ function actVerDesdeSospecha(pc, dni, fecha) {
     }, 150);
 }
 
+// "Ver más de hoy": va a la pestaña Eventos filtrando solo el día de hoy.
+function actVerHoy() {
+    cerrarMenuExpandido();
+    if (typeof toggleActividadVivo === 'function') {
+        const d = document.getElementById('monLiveSide');
+        if (d && d.classList.contains('open')) toggleActividadVivo();  // cerrar el drawer si está abierto
+    }
+    switchTab('actividad');
+    setTimeout(() => {
+        ['act-filtro-dni', 'act-filtro-terminal'].forEach(id => {
+            const el = document.getElementById(id); if (el) el.value = '';
+        });
+        const filtroNivel = document.getElementById('act-filtro-nivel');
+        if (filtroNivel) filtroNivel.value = '';
+        const filtroFecha = document.getElementById('act-filtro-fecha');
+        if (filtroFecha) filtroFecha.value = new Date().toLocaleDateString('en-CA');  // YYYY-MM-DD de hoy
+        cargarActividad();
+    }, 150);
+}
+
 // Alterna entre vista limpia (ignorados ocultos) y vista completa.
 function actToggleIgnorados() {
     _actVerIgnorados = !_actVerIgnorados;
@@ -4453,10 +4540,12 @@ async function bancoCargarRuido() {
 // ── Modal agregar/clasificar ──
 let _bancoModalDestino = 'app';     // 'app' | 'ruido'
 let _bancoModalDesdeFlujo = false;  // true si se abrió desde el Flujo (refresca el Flujo al guardar)
+let _bancoModalDesdeRanking = false;// true si se abrió desde el ranking de Programas (Indicadores)
 let _bancoPreDueno = '__sistema__'; // dueño sugerido para reponer al alternar a 'ruido'
 
 function bancoAbrirNuevo(destino) {
     _bancoModalDesdeFlujo = false;
+    _bancoModalDesdeRanking = false;
     bancoAbrirModal(destino, {});
 }
 
@@ -4490,9 +4579,10 @@ function bancoAbrirModal(destino, pre) {
     const modal = document.getElementById('modal-banco');
     if (!modal) return;
     _bancoPreDueno = pre.dueno_exe || '__sistema__';
-    // El selector de destino solo se muestra al clasificar desde el Flujo.
+    // El selector de destino (Programa/Ruido) se muestra al clasificar desde el
+    // Flujo o desde el ranking de Programas, para que el superadmin pueda decidir.
     const grupoDest = document.getElementById('banco-f-grupo-destino');
-    if (grupoDest) grupoDest.style.display = _bancoModalDesdeFlujo ? '' : 'none';
+    if (grupoDest) grupoDest.style.display = (_bancoModalDesdeFlujo || _bancoModalDesdeRanking) ? '' : 'none';
     // Rellenar campos comunes
     document.getElementById('banco-f-exe').value    = pre.nombre_exe || '';
     document.getElementById('banco-f-nombre').value = pre.nombre_amigable || '';
@@ -4520,6 +4610,17 @@ function bancoCerrarModal() {
     const modal = document.getElementById('modal-banco');
     if (modal) modal.style.display = 'none';
     _bancoModalDesdeFlujo = false;
+    _bancoModalDesdeRanking = false;
+}
+
+// Abrir el modal de clasificación desde el ranking de Programas (Indicadores).
+// A diferencia del Flujo, aquí sugerimos "app" por defecto: el ranking lista
+// programas que el alumno abre, y lo común es querer reconocerlos como apps
+// (aunque el superadmin puede alternar a ruido en el mismo modal).
+function bancoClasificarDesdeRanking(exe) {
+    if (_rolServidor !== 'superadmin') return;
+    _bancoModalDesdeRanking = true;
+    bancoAbrirModal('app', { nombre_exe: exe });
 }
 
 async function bancoGuardarModal() {
@@ -4548,13 +4649,19 @@ async function bancoGuardarModal() {
         const extra = data.eventos_corregidos
             ? ` (${data.eventos_corregidos} evento(s) corregido(s))` : '';
         mostrarNotificacion(`Guardado${extra}`, 'ok');
-        const desdeFlujo = _bancoModalDesdeFlujo;
+        const desdeFlujo    = _bancoModalDesdeFlujo;
+        const desdeRanking  = _bancoModalDesdeRanking;
         _bancoModalDesdeFlujo = false;
+        _bancoModalDesdeRanking = false;
         bancoCerrarModal();
         if (desdeFlujo) {
             // Se clasificó desde el Flujo: refrescar la lista para que la fila
             // (ya no sospechosa) desaparezca de la vista limpia.
             cargarActividad();
+        } else if (desdeRanking) {
+            // Se clasificó desde el ranking de Programas: recargar el ranking
+            // para que la fila pase de "Sin clasificar" a app/ruido.
+            _kpiCargarRanking();
         } else {
             bancoCargarPendientes();
             if (esApp) bancoCargarApps(); else bancoCargarRuido();
@@ -4961,6 +5068,54 @@ async function probarMensajeAhora() {
     } catch (e) { setS('Error de conexión.', 'text-red-500'); }
 }
 
+// ── Mensaje rápido a la sala (desde Comandos Globales en Monitoreo) ──
+function abrirMensajeRapido() {
+    const modal = document.getElementById('modal-msg-rapido');
+    if (!modal) return;
+    const inp = document.getElementById('msg-rapido-texto');
+    if (inp) inp.value = '';
+    const st = document.getElementById('msg-rapido-status');
+    if (st) st.textContent = '';
+    modal.style.display = 'flex';
+    setTimeout(() => inp?.focus(), 50);
+}
+
+function cerrarMensajeRapido() {
+    const modal = document.getElementById('modal-msg-rapido');
+    if (modal) modal.style.display = 'none';
+}
+
+async function enviarMensajeRapido() {
+    const inp    = document.getElementById('msg-rapido-texto');
+    const btn    = document.getElementById('msg-rapido-btn');
+    const status = document.getElementById('msg-rapido-status');
+    const setS   = (msg, cls) => { if (status) { status.textContent = msg; status.className = `text-xs min-h-4 ${cls}`; } };
+    const texto  = (inp?.value || '').trim();
+    if (!texto) { setS('Escribe un mensaje.', 'text-red-500'); return; }
+    if (btn) btn.disabled = true;
+    try {
+        // Reutiliza el envío inmediato del servidor (mismo de "Probar ahora").
+        const res = await fetch(`${API_BASE}/mensajes/probar`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mensaje: texto, hora_envio: '00:00', tipo: 'extra' }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setS(data.detail || 'Error al enviar.', 'text-red-500'); return; }
+        const n = data.entregados ?? 0;
+        if (n > 0) {
+            mostrarNotificacion(`Mensaje enviado a ${n} PC(s).`, 'ok');
+            cerrarMensajeRapido();
+        } else {
+            setS('Ninguna PC conectada en este momento.', 'text-amber-500');
+        }
+    } catch (e) {
+        setS('Error de conexión.', 'text-red-500');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 // ── Indicadores / KPIs ────────────────────────────────────────────────
 let _kpiCatalogo = [];          // catálogo completo recibido del servidor
 let _kpiActivos  = [];          // claves activas (en orden)
@@ -4989,19 +5144,26 @@ function kpiSetPestana(p) {
         b.classList.toggle('kpi-tab-activo', activo);
         b.setAttribute('aria-selected', activo ? 'true' : 'false');
     });
-    // Programas aún no tiene KPIs ni gráfico: mostramos solo el aviso.
+    // Programas: ranking de los más usados (con badge de estado y clasificar).
+    // Reusa el selector de período de la zona de gráficos, pero oculta las
+    // tarjetas de gráfico y la grilla de KPIs (que no aplican aquí).
     const esProgramas = (p === 'programas');
     const zonaGraf = document.getElementById('kpi-graf-zona');
-    const aviso    = document.getElementById('kpi-programas-aviso');
+    const ranking  = document.getElementById('kpi-programas-zona');
     const grid     = document.getElementById('kpi-grid');
-    if (zonaGraf) zonaGraf.style.display = esProgramas ? 'none' : '';
-    if (aviso)    aviso.style.display    = esProgramas ? '' : 'none';
+    // La zona de gráficos queda visible siempre (alberga el selector de período);
+    // sus tarjetas internas se muestran/ocultan por pestaña abajo.
+    if (zonaGraf) zonaGraf.style.display = '';
+    if (ranking)  ranking.style.display  = esProgramas ? '' : 'none';
     if (grid)     grid.style.display     = esProgramas ? 'none' : '';
-    // Mostrar solo el gráfico que corresponde a esta pestaña.
+    // Mostrar solo el gráfico que corresponde a esta pestaña (ninguno en Programas).
     document.querySelectorAll('.kpi-graf-card[data-graf-pestana]').forEach(c => {
-        c.style.display = (c.dataset.grafPestana === p) ? '' : 'none';
+        c.style.display = (!esProgramas && c.dataset.grafPestana === p) ? '' : 'none';
     });
-    if (esProgramas) return;
+    // El título "Gráficos" no aplica en Programas (solo queda el período).
+    const grafTitulo = document.querySelector('.kpi-graf-titulo');
+    if (grafTitulo) grafTitulo.textContent = esProgramas ? 'Período' : 'Gráficos';
+    if (esProgramas) { _kpiCargarRanking(); return; }
     _renderKpiGrid();
     cargarGraficos();
 }
@@ -5056,14 +5218,75 @@ async function cargarGraficos() {
     const params = _kpiParams();
     // Solo se carga el gráfico de la pestaña activa (Programas no tiene gráfico aún).
     if (_kpiPestana === 'equipos') {
-        // Uso por facultad
+        // Uso por facultad (horizontal)
         _kpiCargarUno(`${API_BASE}/kpis/grafico/facultades?${params}`, 'graf-facultades',
             d => _svgBarras(d.items.map(i => ({ etiqueta: i.facultad, valor: i.valor, full: i.facultad })), 'Sesiones', true));
     } else if (_kpiPestana === 'usuarios') {
-        // Atenciones por día
+        // Atenciones por día (horizontal)
         _kpiCargarUno(`${API_BASE}/kpis/grafico/atenciones?${params}`, 'graf-atenciones',
-            d => _svgBarras(d.items.map(i => ({ etiqueta: _kpiFechaCorta(i.fecha), valor: i.valor, full: i.fecha })), 'Atenciones'));
+            d => _svgBarras(d.items.map(i => ({ etiqueta: _kpiFechaCorta(i.fecha), valor: i.valor, full: i.fecha })), 'Atenciones', true));
+    } else if (_kpiPestana === 'programas') {
+        // Ranking de programas más usados (respeta el período).
+        _kpiCargarRanking();
     }
+}
+
+// ── Ranking de programas (pestaña Programas de Indicadores) ────────────
+async function _kpiCargarRanking() {
+    if (_kpiPeriodo === 'rango' && (!_kpiRango.desde || !_kpiRango.hasta)) return;
+    const cont = document.getElementById('kpi-programas-lista');
+    if (!cont) return;
+    cont.innerHTML = '<p class="kpi-empty">Cargando…</p>';
+    try {
+        const res = await fetch(`${API_BASE}/kpis/programas-ranking?${_kpiParams()}&limite=15`, { headers: authHeaders() });
+        if (!res.ok) { cont.innerHTML = '<p class="kpi-empty">No se pudo cargar el ranking.</p>'; return; }
+        const data = await res.json();
+        _kpiRenderRanking(data.items || []);
+    } catch (e) {
+        cont.innerHTML = '<p class="kpi-empty">Error de conexión.</p>';
+    }
+}
+
+function _kpiRenderRanking(items) {
+    const cont = document.getElementById('kpi-programas-lista');
+    if (!cont) return;
+    if (!items.length) {
+        cont.innerHTML = '<p class="kpi-empty">Sin actividad de programas en este período.</p>';
+        return;
+    }
+    const esSuper = _rolServidor === 'superadmin';
+    const maxAlum = Math.max(...items.map(i => i.alumnos || 0), 1);
+    cont.innerHTML = items.map((it, i) => {
+        const pct = Math.round(((it.alumnos || 0) / maxAlum) * 100);
+        const sinClasif = it.estado === 'sin_clasificar';
+        const badge = sinClasif
+            ? '<span class="prog-badge prog-badge-pend">Sin clasificar</span>'
+            : (it.categoria ? `<span class="prog-badge prog-badge-cat">${escapeHtml(it.categoria)}</span>` : '');
+        // Botón Clasificar: solo superadmin y solo en filas sin clasificar.
+        const accion = (sinClasif && esSuper)
+            ? `<button class="prog-clasificar" onclick="bancoClasificarDesdeRanking('${escapeHtml(it.exe)}')" title="Clasificar este programa">
+                 <i class="ph ph-tag"></i> Clasificar
+               </button>`
+            : '';
+        return `
+            <div class="prog-row${sinClasif ? ' prog-row-pend' : ''}">
+                <span class="prog-rank">${i + 1}</span>
+                <div class="prog-info">
+                    <div class="prog-top">
+                        <span class="prog-nombre">${escapeHtml(it.nombre || it.exe)}</span>
+                        ${badge}
+                    </div>
+                    <div class="prog-bar-wrap">
+                        <div class="prog-bar" style="width:${pct}%"></div>
+                    </div>
+                </div>
+                <div class="prog-metricas">
+                    <span class="prog-alumnos"><strong>${it.alumnos || 0}</strong> alumno${(it.alumnos === 1) ? '' : 's'}</span>
+                    <span class="prog-veces">${it.veces || 0} apertura${(it.veces === 1) ? '' : 's'}</span>
+                </div>
+                ${accion}
+            </div>`;
+    }).join('');
 }
 
 async function _kpiCargarUno(url, contId, render) {
@@ -5084,46 +5307,54 @@ async function _kpiCargarUno(url, contId, render) {
 }
 
 function _kpiFechaCorta(iso) {
-    // "2026-06-17" -> "17/06"
+    // "2026-06-17" -> "Mié 17/06" (abreviación del día + fecha)
     const [a, m, d] = iso.split('-');
-    return `${d}/${m}`;
+    // Mediodía local para que el día de la semana no se corra por zona horaria.
+    const dia = new Date(Number(a), Number(m) - 1, Number(d), 12);
+    const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const abrev = dias[dia.getDay()] || '';
+    return `${abrev} ${d}/${m}`;
 }
 
 // Genera un gráfico de barras en SVG. items: [{etiqueta, valor, full}]
 // horizontal=true para barras horizontales (mejor con muchas etiquetas largas, ej. facultades)
+// Gráfico de barras con HTML + CSS (flexbox), no SVG. Para barras simples es la
+// práctica recomendada: altura fija y ancho fluido salen gratis del layout, y el
+// texto es DOM real (nunca se deforma, escala y es accesible). La altura/ancho de
+// cada barra es un % relativo al máximo; el navegador hace el resto.
 function _svgBarras(items, unidad, horizontal = false) {
     const max = Math.max(...items.map(i => i.valor), 1);
     if (horizontal) {
-        const filaH = 30, gap = 8, padL = 130, padR = 50, w = 560;
-        const h = items.length * (filaH + gap) + 10;
-        let bars = '';
-        items.forEach((it, idx) => {
-            const y = idx * (filaH + gap) + 5;
-            const bw = Math.round((it.valor / max) * (w - padL - padR));
-            bars += `
-                <text x="${padL - 8}" y="${y + filaH / 2}" text-anchor="end" dominant-baseline="middle"
-                      class="kpi-svg-lbl"><title>${esc(it.full)}</title>${esc(_kpiTrunc(it.etiqueta, 18))}</text>
-                <rect x="${padL}" y="${y}" width="${Math.max(bw, 2)}" height="${filaH}" rx="4" class="kpi-svg-bar"/>
-                <text x="${padL + Math.max(bw, 2) + 6}" y="${y + filaH / 2}" dominant-baseline="middle" class="kpi-svg-val">${it.valor}</text>`;
-        });
-        return `<svg viewBox="0 0 ${w} ${h}" class="kpi-svg" role="img" aria-label="Gráfico de barras: ${esc(unidad)}">${bars}</svg>`;
+        // Barras horizontales: filas [etiqueta | barra | valor].
+        const filas = items.map(it => {
+            const pct = Math.round((it.valor / max) * 100);
+            return `
+                <div class="kpi-bar-row" title="${esc(it.full)}: ${it.valor}">
+                    <span class="kpi-bar-rlbl">${esc(_kpiTrunc(it.etiqueta, 24))}</span>
+                    <div class="kpi-bar-rtrack">
+                        <div class="kpi-bar-rfill" style="width:${Math.max(pct, 2)}%"></div>
+                    </div>
+                    <span class="kpi-bar-rval">${it.valor}</span>
+                </div>`;
+        }).join('');
+        return `<div class="kpi-bars kpi-bars-h" role="img" aria-label="Gráfico de barras: ${esc(unidad)}">${filas}</div>`;
     } else {
-        const w = 560, h = 220, padB = 34, padT = 14, padL = 28;
-        const n = items.length;
-        const bw = Math.max(6, Math.min(46, Math.floor((w - padL) / n) - 8));
-        const step = (w - padL) / n;
-        let bars = '';
-        items.forEach((it, idx) => {
-            const bh = Math.round((it.valor / max) * (h - padB - padT));
-            const x = padL + idx * step + (step - bw) / 2;
-            const y = h - padB - bh;
-            bars += `
-                <rect x="${x}" y="${y}" width="${bw}" height="${Math.max(bh, 1)}" rx="3" class="kpi-svg-bar">
-                    <title>${esc(it.full)}: ${it.valor}</title></rect>
-                ${it.valor > 0 ? `<text x="${x + bw / 2}" y="${y - 4}" text-anchor="middle" class="kpi-svg-val">${it.valor}</text>` : ''}
-                <text x="${x + bw / 2}" y="${h - padB + 14}" text-anchor="middle" class="kpi-svg-lbl-x">${esc(it.etiqueta)}</text>`;
-        });
-        return `<svg viewBox="0 0 ${w} ${h}" class="kpi-svg" role="img" aria-label="Gráfico de barras: ${esc(unidad)}">${bars}</svg>`;
+        // Barras verticales: columnas [valor arriba | barra | etiqueta abajo].
+        // Si las etiquetas son largas (ej. nombres de facultad) o hay muchas, se
+        // inclinan para que no se encimen; si son cortas (fechas) van rectas.
+        const largas = items.some(i => (i.etiqueta || '').length > 6) || items.length > 8;
+        const cols = items.map(it => {
+            const pct = Math.round((it.valor / max) * 100);
+            return `
+                <div class="kpi-bar-col" title="${esc(it.full)}: ${it.valor}">
+                    <span class="kpi-bar-cval">${it.valor > 0 ? it.valor : ''}</span>
+                    <div class="kpi-bar-ctrack">
+                        <div class="kpi-bar-cfill" style="height:${it.valor > 0 ? Math.max(pct, 2) : 0}%"></div>
+                    </div>
+                    <span class="kpi-bar-clbl">${esc(it.etiqueta)}</span>
+                </div>`;
+        }).join('');
+        return `<div class="kpi-bars kpi-bars-v${largas ? ' kpi-bars-v-rot' : ''}" role="img" aria-label="Gráfico de barras: ${esc(unidad)}">${cols}</div>`;
     }
 }
 
@@ -5264,5 +5495,6 @@ document.addEventListener('DOMContentLoaded', () => {
     _aplicarConfigApp();          // 1) pinta de inmediato lo cacheado (sin parpadeo)
     _cargarCamposConfigApp();
     _cargarAparienciaServidor();  // 2) refresca desde el servidor (config global)
+    _aplicarTooltipsMenu();    // tooltips de los iconos del menú en franja
     _restaurarSesion();
 });

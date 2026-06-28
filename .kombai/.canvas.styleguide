@@ -1,0 +1,136 @@
+{
+  "guides": [
+    {
+      "name": "material-dark-inspiration",
+      "tokens": {
+        "colors": {
+          "primary": "#007AFF",
+          "on-primary": "#FFFFFF",
+          "surface": "#1A1A24",
+          "surface-card": "#252533",
+          "surface-well": "rgba(31,41,55,0.4)",
+          "on-surface": "#FFFFFF",
+          "on-surface-secondary": "#9CA3AF",
+          "on-surface-muted": "#6B7280",
+          "hairline": "#1F2937",
+          "danger": "#EF4444",
+          "success": "#22C55E"
+        },
+        "typography": {
+          "display": {
+            "family": "\"Inter\", sans-serif",
+            "size": "36px",
+            "url": ""
+          },
+          "metric": {
+            "family": "\"Inter\", sans-serif",
+            "size": "72px",
+            "url": ""
+          },
+          "headline": {
+            "family": "\"Inter\", sans-serif",
+            "size": "20px",
+            "url": ""
+          },
+          "body": {
+            "family": "\"DM Sans\", sans-serif",
+            "size": "14px",
+            "url": ""
+          },
+          "label": {
+            "family": "\"DM Sans\", sans-serif",
+            "size": "10px",
+            "url": ""
+          }
+        },
+        "spacing": {
+          "sm": "16px",
+          "md": "24px",
+          "lg": "40px"
+        },
+        "radius": {
+          "md": "12px",
+          "lg": "16px",
+          "xl": "24px",
+          "xxl": "32px",
+          "full": "9999px"
+        }
+      },
+      "designInstructions": "## Token Instructions\n\n- `surface` (#1A1A24) -> deep indigo-charcoal app canvas; keep dark with white text\n- `surface-card` (#252533) -> \"glass cards\"; `surface-well` -> inner wells and calendar\n- `primary` (#007AFF iOS blue) -> only accent: active chart bars, highlights, selected calendar days, deltas, and the single hydration accent tile; one blue highlight per chart\n- `hairline` (#1F2937) -> borders and dividers\n- `danger` (#EF4444) -> pulse card accent and notification dot; `success` (#22C55E) -> \"Optimal Range\" badge\n- `radius.xl` (24px) -> glass cards; `radius.xxl` (32px) -> hydration accent tile\n- `radius.full` -> avatars, pills, icon buttons, chart bars\n- `metric` -> Inter 72px tracking-tight big stat numbers\n- `display`/`headline` -> Inter; `body`/`label` -> DM Sans\n- `label` -> 10px uppercase eyebrows with 0.1em tracking\n- spacing -> 4px base on a 12-col grid with gap-6 (24px)\n\n# Material Dark — \"VitalFlow\"\n\n> Design spec — version alpha. Source: static HTML (`material-dark.html`); tokens read from `:root` and component CSS. Fictional health-tracking dashboard; described factually.\n\n## Overview\n\nA **calm, modern dark dashboard** for personal health. Surfaces are deep indigo-charcoal — `{colors.surface}` `#1A1A24` canvas, `{colors.surface-card}` `#252533` \"glass cards\" — with white text and a single **iOS-blue** voltage `{colors.primary}` `#007AFF`. Blue is rationed: it lights the active chart bar, the selected/available calendar days, key metric deltas, and exactly one fully-blue **hydration accent tile**; everything else is neutral. Type pairs **Inter** (big stat numbers, titles) with **DM Sans** (body/labels). The layout is a 12-column grid of generously **rounded glass cards** (24px) carrying soft ambient shadows, populated by flat CSS data viz — bar charts, a dot/line blood-tracking plot, a calendar, and a progress mini-chart. It is screen-native and spacious: no skeuomorphism, restrained color, clear hierarchy.\n\n## Colors\n\n**Brand.** Blue `{colors.primary}` `#007AFF` is the only accent — active bars (with a glow + white dot marker), selected calendar/queue states, the hydration tile, and positive deltas. Discipline: one blue highlight per chart; neutrals carry the rest.\n\n**Surfaces.** Cards `{colors.surface-card}` `#252533` on canvas `{colors.surface}` `#1A1A24`; inner wells use `{colors.surface-well}` `rgba(31,41,55,0.4)`. Borders/dividers use `{colors.hairline}` `#1F2937`.\n\n**Text.** White `{colors.on-surface}`, `{colors.on-surface-secondary}` `#9CA3AF` for captions, `{colors.on-surface-muted}` `#6B7280` for labels.\n\n**Semantic.** Red `{colors.danger}` `#EF4444` accents the pulse card and notification dot; green `{colors.success}` `#22C55E` marks \"Optimal Range.\" \n\n## Typography\n\n**Inter** for headings and the large tracking-tight stat numbers; **DM Sans** for body and tiny uppercase labels.\n\n| Token    | Family   | Size | Weight | Tracking | Usage                       |\n| -------- | -------- | ---- | ------ | -------- | --------------------------- |\n| display  | Inter    | 36px | 700    | -0.02em  | Page title                  |\n| metric   | Inter    | 72px | 700    | -0.03em  | Big stat numbers (73, 86%)  |\n| headline | Inter    | 20px | 700    | normal   | Card titles                 |\n| body     | DM Sans  | 14px | 400    | normal   | Body, descriptions          |\n| label    | DM Sans  | 10px | 700    | 0.1em    | Uppercase eyebrows          |\n\n## Layout\n\nBase 4px on a 12-col grid (`gap-6` = 24px). A transparent top nav (logo + search field + notifications + profile) over a two-pane body: a 400px **left aside** (a tall glass card with calendar, doctor, patient queue, action buttons) and a flexible **main** of stacked card rows — stat + pulse chart, sleep bar chart + hydration accent tile, and a wide blood-tracking dot plot. Cards are uniform rounded glass panels.\n\n## Elevation & Depth\n\nSoft and modern. Glass cards carry `0 10px 30px -5px rgba(0,0,0,0.3)`; the blue accent tile and primary button carry colored blue elevation (`rgba(0,122,255,0.2–0.3)`). Hover adds a faint blue border glow. No hard shadows or borders — depth is gentle ambient shadow on rounded surfaces.\n\n## Shapes\n\nGenerous radii: `{rounded.md}` 12px (small wells/buttons), `{rounded.lg}` 16px (wells/rows), `{rounded.xl}` 24px (glass cards), `{rounded.xxl}` 32px (hydration tile), `{rounded.full}` (avatars, pills, icon buttons, chart bars). Soft, friendly, fully-rounded.\n\n## Components\n\n- **glass-card** — `#252533` rounded-3xl panel, soft shadow, blue border-glow on hover.\n- **accent-tile** — solid blue 32px-radius tile with white stats and blue elevation (hydration).\n- **button-primary** — blue pill with blue shadow, scales on press.\n- **icon-button** — 48px round gray-800 well with a tinted icon.\n- **bar-chart** — flex bars on a blue opacity ladder; the active bar is solid blue + glow + white dot, growing with a spring overshoot.\n- **calendar** — gray well; available days blue, selected day white-on-black, both rounded-xl.\n\n## Motion\n\n`{motion.easing-spring}` `cubic-bezier(0.34,1.56,0.64,1)` gives bars a `600ms` overshoot grow; hovers transition `300–500ms`; press states scale to 0.95. Motion is functional and subtle. (Transitions are globally disabled in the capture source, so timings are authored intent.)\n\n## Iconography\n\n**Tabler** icons, line + filled mix (`ti-scale`, `ti-heart-rate-monitor`, `ti-droplet-filled`, `ti-moon-stars`), shown in tinted blue/red icon tiles or gray for inline UI; ~20–24px.\n\n## Do's and Don'ts\n\n- **Do** keep the deep indigo-charcoal canvas with white text.\n- **Do** reserve blue for active data, selected states, deltas and the single accent tile.\n- **Do** use uniform rounded glass cards with soft ambient shadows on a 12-col grid.\n- **Do** render data with flat CSS charts (bars/dots/rings), Inter for numbers.\n- **Don't** add hard borders/shadows or skeuomorphic textures.\n- **Don't** over-saturate — only one blue highlight per chart, mostly neutral surfaces.\n- **Don't** shrink the radii; the friendly, rounded geometry is core.\n\n## Known Gaps\n\n- Values read from the implementation's resolved `:root`. Charts are static CSS mock-ups (Chart.js is loaded but unused). Copy/imagery are sample content; the source disables transitions globally.\n",
+      "id": "style_0be81d06d42e",
+      "created": "2026-06-21T03:29:40.477Z",
+      "modified": "2026-06-21T03:29:40.477Z"
+    },
+    {
+      "name": "monochrome-grid-inspiration",
+      "tokens": {
+        "colors": {
+          "ink": "#111827",
+          "slate-900": "#0F172A",
+          "on-ink": "#FFFFFF",
+          "surface": "#F8F9FA",
+          "surface-card": "#FFFFFF",
+          "surface-muted": "#F9FAFB",
+          "surface-dark": "#0F172A",
+          "on-dark": "#FFFFFF",
+          "on-dark-muted": "#94A3B8",
+          "on-surface": "#111827",
+          "on-surface-secondary": "#6B7280",
+          "on-surface-muted": "#9CA3AF",
+          "border": "#E5E7EB",
+          "border-strong": "#0F172A",
+          "success": "#10B981",
+          "success-strong": "#059669",
+          "warn": "#D97706"
+        },
+        "typography": {
+          "display": {
+            "family": "\"Inter\", sans-serif",
+            "size": "30px",
+            "url": ""
+          },
+          "metric": {
+            "family": "\"Inter\", sans-serif",
+            "size": "30px",
+            "url": ""
+          },
+          "headline": {
+            "family": "\"Inter\", sans-serif",
+            "size": "18px",
+            "url": ""
+          },
+          "body": {
+            "family": "\"DM Sans\", sans-serif",
+            "size": "14px",
+            "url": ""
+          },
+          "mono": {
+            "family": "\"Fira Code\", monospace",
+            "size": "12px",
+            "url": ""
+          },
+          "label": {
+            "family": "\"DM Sans\", sans-serif",
+            "size": "10px",
+            "url": ""
+          }
+        },
+        "spacing": {
+          "sm": "16px",
+          "md": "24px",
+          "lg": "32px"
+        },
+        "radius": {
+          "none": "0px",
+          "sm": "6px",
+          "md": "8px",
+          "full": "9999px"
+        }
+      },
+      "designInstructions": "## Token Instructions\n\n- `ink` → primary text and black-button color\n- `slate-900` → borders, hard offset shadows, and dark panels\n- `surface` (#F8F9FA) → off-white canvas; `surface-card` white cards on top\n- `surface-dark` → SQL / capacity / audit dark panels\n- `success` (emerald) → the ONLY accent: health, \"executing\"/positive states, deltas, pulse dot\n- `warn` (amber) → reserved for the single \"Locked\" status\n- `radius.none` → enforce radius 0 on key swiss cards (KPI/heatmap/bento/audit)\n- `radius.sm` / `radius.md` → small UI: nav items, search, soft buttons, secondary pills\n- `typography.mono` (Fira Code) → session IDs, SQL, and metric strings\n- `typography.label` → uppercase column heads / eyebrows (0.1em tracking)\n- icons → Tabler line icons, inherit slate ink; emerald only on positive/health\n\n\n# Monochrome Grid — \"DataCore\"\n\n> Design spec — version alpha. Source: static HTML (`monochrome-grid.html`); tokens read from `:root` and component CSS. Fictional enterprise-database dashboard; described factually.\n\n## Overview\n\nA **Swiss-style, near-monochrome enterprise dashboard**. The canvas is off-white `{colors.surface}` `#F8F9FA` with white cards and near-black slate ink (`{colors.ink}` `#111827`, `{colors.slate-900}` `#0F172A`), organized by a strict grey hairline system. Color is almost entirely absent — **emerald** `{colors.success}` `#10B981` is the only accent, rationed for positive deltas, \"Healthy\"/\"Executing\" status and health metrics (amber appears once for a \"Locked\" state). Type is a precise trio: **Inter** (headings, stat numbers), **DM Sans** (body), **Fira Code** (mono for session IDs, SQL and metrics). The signature is the **`swiss-border` card** — radius forced to 0 with a **hard 2px slate offset shadow** (no blur) — alongside a slate **heatmap grid**, a **bento** capacity cluster, a dark **SQL snippet** panel, and an animated **sparkline**. It reads as rigorous, data-dense and typographic.\n\n## Colors\n\n**Ink & surfaces.** `{colors.ink}` `#111827` is the primary text/black-button color; `{colors.slate-900}` `#0F172A` is the border + hard-shadow + dark-panel color. Cards are `{colors.surface-card}` white on `{colors.surface}` canvas, with `{colors.surface-muted}` `#F9FAFB` wells/hover and dark `{colors.surface-dark}` `#0F172A` for SQL/capacity/audit panels.\n\n**Hairlines.** `{colors.border}` `#E5E7EB` for light dividers/cards; `{colors.border-strong}` `#0F172A` for emphasized swiss cards.\n\n**Semantic (the only color).** Emerald `{colors.success}` / `{colors.success-strong}` for health, executing status, deltas and the pulse dot; amber `{colors.warn}` `#D97706` for the single \"Locked\" status. Discipline: greyscale everywhere, emerald only signals \"good/active.\"\n\n## Typography\n\n**Inter** for headings and tracking-tight numbers; **DM Sans** for body and uppercase labels; **Fira Code** for IDs, SQL and metric strings.\n\n| Token    | Family    | Size | Weight | Tracking | Usage                        |\n| -------- | --------- | ---- | ------ | -------- | ---------------------------- |\n| display  | Inter     | 30px | 700    | -0.02em  | Page h1 \"System Overview\"    |\n| metric   | Inter     | 30px | 700    | normal   | Stat numbers (24, 1.2 TB)    |\n| headline | Inter     | 18px | 700    | normal   | Card titles                  |\n| body     | DM Sans   | 14px | 400    | normal   | Body, descriptions           |\n| mono     | Fira Code | 12px | 400    | normal   | Session IDs, SQL, metrics    |\n| label    | DM Sans   | 10px | 700    | 0.1em    | Column heads, eyebrows       |\n\n## Layout\n\nBase 4px on a 12-col grid. A 256px left **sidebar** (logo tile, grouped nav with a black active item, user card) beside a column with a sticky **search header** and a `max-w-[1400px]` main: a 4-up **KPI row** of swiss cards, then an 8/4 split — left has a recent-databases list, a 24-col **performance heatmap**, and an active-sessions table with an expandable dark **SQL snippet**; right is a **bento** capacity cluster (dark total tile, health ring, node/region stats), a sparkline CPU card, and a dark security-audit panel.\n\n## Elevation & Depth\n\nSharp and graphic. The hallmark is the **hard offset shadow** — `2px 2px 0 #0F172A` on swiss cards, `4px 4px 0 rgba(15,23,42,0.3)` on dark panels — with **no blur**. Lighter list/table cards use a soft `shadow-sm`. Depth is communicated through hairline grids, the heatmap's slate ladder, and inset dark panels rather than ambient shadow.\n\n## Shapes\n\nMostly **sharp — `swiss-border` enforces radius 0** on KPI/heatmap/bento/audit cards. Small UI (nav items, search, soft buttons) use `{rounded.sm}` 6px or `{rounded.md}` 8px; status dots and avatars are `{rounded.full}`. The geometric philosophy is rectilinear and grid-locked.\n\n## Components\n\n- **card-swiss** — white, 1px slate border, `2px` hard offset shadow, radius 0; hover tints to `#F9FAFB`.\n- **card-soft** — lighter list/table card with `border-gray-200` + `shadow-sm`.\n- **panel-dark** — slate-900 panel (SQL snippet, total capacity, audit) with `4px` hard shadow.\n- **button-primary** — black, white label, rounded-sm, soft drop shadow, press-scale.\n- **status-pill** — emerald-100/700 (good) or amber-100/700 (locked) flat pills.\n- **heatmap** — 24-col grid of square cells on a slate intensity ladder (100→900).\n- **sparkline** — black 2px path with a dash-draw animation and faint gradient fill.\n\n## Motion\n\nMinimal and precise: the **sparkline** draws via `stroke-dashoffset` (`dash 2s ease-in-out`), and the live status dot uses a `pulse-ring 1.5s` emerald ripple. Otherwise the UI is static with color-only hovers. (Transitions are globally disabled in the capture source, so timings are authored intent.)\n\n## Iconography\n\n**Tabler** line icons (`ti-database`, `ti-server`, `ti-shield-lock`, `ti-brand-postgresql/mysql`, `ti-activity`), inheriting slate ink; emerald only on positive/health indicators; ~16–24px.\n\n## Do's and Don'ts\n\n- **Do** keep the off-white/white/slate greyscale system with disciplined hairlines.\n- **Do** reserve emerald for health, \"executing\"/positive states and deltas only.\n- **Do** use `swiss-border` (radius 0) + hard `2px` offset shadows on key cards.\n- **Do** set IDs, SQL and metrics in Fira Code; numbers/headings in Inter.\n- **Don't** introduce additional accent colors or soft/blurred shadows on swiss cards.\n- **Don't** round the KPI/heatmap/bento cards — sharpness is the brand.\n- **Don't** let emerald spread beyond status/positive semantics.\n\n## Known Gaps\n\n- Values read from the implementation's resolved `:root`. Slate/emerald/amber steps use Tailwind's default scale. Copy, data and SQL are sample content; the source disables transitions globally.\n",
+      "id": "style_36f057a8b23e",
+      "created": "2026-06-21T03:30:29.680Z",
+      "modified": "2026-06-21T03:30:29.680Z"
+    }
+  ]
+}

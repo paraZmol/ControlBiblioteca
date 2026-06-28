@@ -27,7 +27,7 @@
         }
     </script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link rel="stylesheet" href="static/css/style.css?v=38">
+    <link rel="stylesheet" href="static/css/style.css?v=81">
     <style>
         ::-webkit-scrollbar { width:6px; height:6px; }
         .dark ::-webkit-scrollbar-track { background:transparent; }
@@ -108,8 +108,11 @@
     <!-- Ventana flotante -->
     <div class="app-window">
 
+    <!-- Overlay para cerrar el menú expandido (mismo contexto que el sidebar) -->
+    <div id="sidebarMenuOverlay" class="sidebar-menu-overlay" onclick="toggleMenuExpandido()"></div>
+
     <!-- ══ SIDEBAR ══ -->
-    <aside id="sidebar" class="sidebar transition-colors duration-300 z-20">
+    <aside id="sidebar" class="sidebar">
         <!-- Logo -->
         <div>
             <div class="sidebar-logo-area">
@@ -118,6 +121,10 @@
                     <h1>UNASAM</h1>
                     <p>Biblioteca_OS</p>
                 </div>
+                <button id="btnColapsarSidebar" class="sidebar-collapse-btn" onclick="toggleMenuExpandido()"
+                        title="Abrir o cerrar menú" aria-label="Abrir o cerrar menú">
+                    <i class="ph ph-list"></i>
+                </button>
             </div>
 
             <!-- Nav -->
@@ -237,91 +244,129 @@
         <main class="app-scroll-main">
             <div>
 
-                <!-- ══ TAB: MONITOREO ══ -->
+                <!-- ══ TAB: MONITOREO (layout dashboard: KPIs arriba + 2 columnas) ══ -->
                 <div id="tab-monitoreo" class="mon-bento-view">
 
-                    <!-- ── Fila superior: Hero + Alertas + Eventos ── -->
-                    <div class="mon-bento-top">
+                    <!-- ── Fila superior: 4 tarjetas KPI ── -->
+                    <div class="mon-kpi-row">
 
-                        <!-- Hero Card: Centro de Control -->
+                        <!-- 1) Hero: Monitor Local (degradado verde) -->
                         <div class="bento-card mon-hero-card">
                             <div class="mon-hero-glow"></div>
                             <div class="mon-hero-body">
                                 <div class="mon-hero-left">
-                                    <div>
-                                        <h2 class="mon-hero-title">Centro de Control</h2>
-                                        <p class="mon-hero-sub">
+                                    <div class="mon-hero-top">
+                                        <span class="mon-hero-eyebrow">
                                             <span class="mon-live-ping">
                                                 <span class="mon-live-ping-inner"></span>
                                                 <span class="mon-live-ping-dot"></span>
                                             </span>
-                                            Sistema operando en tiempo real
-                                        </p>
+                                            Monitor Local
+                                        </span>
+                                        <i class="ph ph-desktop mon-hero-ico"></i>
                                     </div>
-                                    <!-- KPI stats en la parte inferior del hero -->
                                     <div id="seccionStats" class="mon-hero-stats">
-                                        <div class="mon-hero-kpi">
-                                            <p class="mon-hero-kpi-lbl">Equipos Online</p>
-                                            <p class="mon-hero-kpi-val"><span id="terminalesActivas">0</span><span class="mon-hero-kpi-total">/<span id="totalTerminales">0</span></span></p>
-                                        </div>
-                                        <div class="mon-hero-kpi">
-                                            <p class="mon-hero-kpi-lbl">Sesiones Hoy</p>
-                                            <p class="mon-hero-kpi-val"><span id="sesionesActivas">0</span><span class="mon-hero-kpi-note" id="monFechaHoy"></span></p>
-                                        </div>
-                                        <div class="mon-hero-kpi">
-                                            <p class="mon-hero-kpi-lbl">Alumnos</p>
-                                            <p class="mon-hero-kpi-val"><span id="totalAlumnos">0</span></p>
-                                        </div>
+                                        <p class="mon-hero-kpi-val"><span id="terminalesActivas">0</span><span class="mon-hero-kpi-total">/<span id="totalTerminales">0</span></span></p>
+                                        <p class="mon-hero-kpi-lbl">Terminales en línea</p>
+                                        <!-- Datos que el JS sigue llenando (sin mostrarse en el hero) -->
+                                        <span id="sesionesActivas" hidden>0</span>
+                                        <span id="monFechaHoy" hidden></span>
+                                        <span id="totalAlumnos" hidden>0</span>
                                     </div>
                                 </div>
-                                <div class="mon-hero-right">
-                                    <button class="mon-btn-block-all" onclick="bloquearTodas()">
-                                        <i class="ph ph-lock"></i> Bloquear Sala
-                                    </button>
-                                </div>
                             </div>
                         </div>
 
-                        <!-- Alertas Activas -->
-                        <div class="bento-card mon-alerts-card">
-                            <div class="bento-card-hdr">
-                                <div class="bento-card-ttl">
-                                    <i class="ph ph-shield-warning bento-icon-rose"></i>
-                                    Alertas Activas
-                                </div>
+                        <!-- 2) Sesiones Activas (KPI numérico) -->
+                        <div class="bento-card mon-kpi-card">
+                            <div class="mon-kpi-card-top">
+                                <span class="mon-kpi-icowrap mon-kpi-icowrap-a"><i class="ph ph-user"></i></span>
                             </div>
-                            <div class="mon-alerts-list" id="monAlertasMini">
-                                <p class="mon-alerts-empty">Sin incidencias activas</p>
+                            <div class="mon-kpi-num"><span id="sesionesActivasKpi">0</span></div>
+                            <p class="mon-kpi-name">Sesiones Activas</p>
+                        </div>
+
+                        <!-- 3) Incidencias Pendientes (KPI numérico) -->
+                        <div class="bento-card mon-kpi-card">
+                            <div class="mon-kpi-card-top">
+                                <span class="mon-kpi-icowrap mon-kpi-icowrap-rose"><i class="ph ph-warning"></i></span>
+                                <span class="mon-kpi-tag" id="monIncidenciasTag" style="display:none">Crítico</span>
+                            </div>
+                            <div class="mon-kpi-num"><span id="monIncidenciasNum">0</span></div>
+                            <p class="mon-kpi-name">Incidencias Pendientes</p>
+                        </div>
+
+                        <!-- 4) Comandos Globales -->
+                        <div class="bento-card mon-kpi-card mon-cmd-card">
+                            <p class="mon-kpi-eyebrow">Comandos Globales</p>
+                            <div class="mon-cmd-btns">
+                                <button class="mon-cmd-btn mon-cmd-btn-sec" onclick="bloquearTodas()" aria-label="Bloquear Sala" title="Bloquear Sala">
+                                    <i class="ph ph-lock"></i> <span class="mon-cmd-txt">Bloquear Sala</span>
+                                </button>
+                                <button class="mon-cmd-btn mon-cmd-btn-sec" onclick="abrirMensajeRapido()" aria-label="Mensaje" title="Mensaje">
+                                    <i class="ph ph-chat-circle-dots"></i> <span class="mon-cmd-txt">Mensaje</span>
+                                </button>
+                                <button class="mon-cmd-btn mon-cmd-btn-pri" onclick="switchTab('basedatos')" aria-label="Registrar estudiante" title="Registrar estudiante">
+                                    <i class="ph ph-user-plus"></i> <span class="mon-cmd-txt">Registrar estudiante</span>
+                                </button>
                             </div>
                         </div>
 
-                        <!-- Últimos Eventos -->
-                        <div class="bento-card mon-events-card">
-                            <div class="bento-card-hdr">
-                                <div class="bento-card-ttl">
-                                    <i class="ph ph-activity bento-icon-indigo"></i>
-                                    Últimos Eventos
-                                </div>
-                                <button class="bento-link-btn" onclick="switchTab('actividad')">Ver todo</button>
+                        <!-- Lista de alertas oculta: conserva el ID que llena el JS sin romper nada -->
+                        <div id="monAlertasMini" style="display:none"></div>
+                    </div>
+
+                    <!-- ── Fila inferior: Mapa de PCs (ancho completo) ── -->
+                    <div class="mon-split">
+                        <div class="mon-split-main" id="seccionEquipos">
+                            <div class="mon-section-hdr">
+                                <h2 class="mon-section-ttl"><span class="mon-section-bar mon-section-bar-a"></span> Mapa de Terminales</h2>
+                                <span class="bento-badge" id="badgeEquipos"></span>
                             </div>
-                            <div class="mon-events-timeline" id="monEventosMini">
-                                <p class="mon-alerts-empty">Sin eventos recientes</p>
-                            </div>
+                            <div id="terminalesGrid" class="terminales-grid"></div>
                         </div>
                     </div>
 
-                    <!-- ── Fila inferior: Grid de PCs ── -->
-                    <div class="bento-card mon-grid-card" id="seccionEquipos">
-                        <div class="bento-card-hdr">
-                            <div class="bento-card-ttl">
-                                <i class="ph ph-desktop bento-icon-indigo"></i>
-                                Equipos
-                            </div>
-                            <span class="bento-badge" id="badgeEquipos"></span>
+                    <!-- ── Drawer lateral derecho: Actividad en vivo (se superpone) ── -->
+                    <button id="monLiveTab" class="mon-live-tab" onclick="toggleActividadVivo()" aria-label="Abrir actividad en vivo">
+                    <i class="ph ph-activity"></i>
+                    <span class="mon-live-tab-txt">Actividad en vivo</span>
+                    <span class="mon-live-count" id="monLiveCount"></span>
+                </button>
+                <div id="monLiveOverlay" class="mon-live-overlay" onclick="toggleActividadVivo()"></div>
+                <aside id="monLiveSide" class="mon-live-drawer" aria-hidden="true">
+                    <div class="mon-live-drawer-hdr">
+                        <h2 class="mon-section-ttl"><span class="mon-section-bar mon-section-bar-ok"></span> Actividad en vivo</h2>
+                        <div class="mon-live-drawer-actions">
+                            <button class="bento-link-btn" onclick="switchTab('actividad')">Ver todos</button>
+                            <button class="mon-live-close" onclick="toggleActividadVivo()" aria-label="Cerrar"><i class="ph ph-x"></i></button>
                         </div>
-                        <div class="mon-grid-body">
-                            <div id="terminalesGrid" class="terminales-grid"></div>
+                    </div>
+                    <div class="mon-live-card" id="monLiveBody">
+                        <div class="mon-events-timeline" id="monEventosMini">
+                            <p class="mon-alerts-empty">Sin eventos recientes</p>
                         </div>
+                    </div>
+                </aside>
+                </div>
+
+                <!-- Modal: enviar mensaje rápido a todas las PCs (envío inmediato) -->
+                <div id="modal-msg-rapido" class="modal-overlay" style="display:none" role="dialog" aria-modal="true" aria-label="Enviar mensaje a la sala">
+                    <div class="modal-content">
+                        <h3><i class="ph ph-chat-circle-dots"></i> Enviar mensaje a la sala</h3>
+                        <p>Se mostrará de inmediato en todas las PCs conectadas. Para mensajes programados (cierre diario o avisos futuros) usa Configuración → Mensajes.</p>
+                        <div class="banco-form">
+                            <label class="banco-lbl" for="msg-rapido-texto">Mensaje</label>
+                            <input id="msg-rapido-texto" type="text" class="banco-input" maxlength="300"
+                                   placeholder="Ej: La sala cierra en 10 minutos, guarden su trabajo.">
+                        </div>
+                        <div class="modal-buttons">
+                            <button onclick="cerrarMensajeRapido()" class="kpi-btn-sec">Cancelar</button>
+                            <button onclick="enviarMensajeRapido()" id="msg-rapido-btn" class="kpi-btn-pri">
+                                <i class="ph ph-paper-plane-tilt"></i> Enviar ahora
+                            </button>
+                        </div>
+                        <p id="msg-rapido-status" class="text-xs min-h-4" style="margin-top:8px"></p>
                     </div>
                 </div>
 
@@ -966,11 +1011,18 @@
                         </div>
                     </div>
 
-                    <!-- Aviso de pestaña Programas (aún sin banco de programas) -->
-                    <div id="kpi-programas-aviso" class="kpi-proximamente" style="display:none">
-                        <i class="ph ph-squares-four" aria-hidden="true"></i>
-                        <h3>Programas más usados</h3>
-                        <p>Próximamente. Aquí verás los programas más utilizados por los estudiantes una vez que se configure el banco de programas reconocidos.</p>
+                    <!-- Pestaña Programas: ranking de los más usados (por alumnos
+                         distintos). Incluye apps reconocidas y exe sin clasificar,
+                         para detectar programas populares que conviene licenciar o
+                         asegurar. El ruido del banco queda excluido. -->
+                    <div id="kpi-programas-zona" class="kpi-programas-zona" style="display:none">
+                        <div class="kpi-programas-hdr">
+                            <h3 class="kpi-programas-titulo"><i class="ph ph-ranking" aria-hidden="true"></i> Programas más usados</h3>
+                            <p class="kpi-programas-sub">Ordenados por cantidad de alumnos distintos que los abrieron. Lo marcado <span class="prog-badge prog-badge-pend">Sin clasificar</span> aún no está en ningún banco.</p>
+                        </div>
+                        <div id="kpi-programas-lista" class="kpi-programas-lista">
+                            <p class="kpi-empty">Cargando…</p>
+                        </div>
                     </div>
                 </div>
 
@@ -1968,7 +2020,7 @@
 </div>
 
 
-<script src="static/js/app.js?v=33"></script>
+<script src="static/js/app.js?v=54"></script>
 <script>
 // Tema
 (function() {
@@ -2147,6 +2199,7 @@ function switchTab(tab) {
     if (titleEl) titleEl.textContent = titles[tab] || '';
 
     cerrarSidebar();
+    if (typeof cerrarMenuExpandido === 'function') cerrarMenuExpandido();  // cerrar drawer del menú al navegar
 
     if (tab === 'indicadores')   cargarIndicadores();
     if (tab === 'historial')     aplicarFiltros();
