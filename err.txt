@@ -1,0 +1,4 @@
+[15:11:37]
+Error de red al importar maestro: Unexpected token 'I', "Internal S"... is not valid JSON
+[15:18:57]
+Error de red al importar maestro: Unexpected token 'I', "Internal S"... is not valid JSON

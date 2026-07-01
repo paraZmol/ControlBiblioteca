@@ -1,11 +1,86 @@
 # Sistema de Control de Terminales — Biblioteca UNASAM
 
+> **Instalación completa → ver [`docs/INSTALACION_SERVIDOR.txt`](docs/INSTALACION_SERVIDOR.txt)**
+> Este archivo es solo un resumen de arquitectura. El instructivo detallado, con migración desde v3.0, está en `docs/`.
+
+---
+
 ## Arquitectura
 
 ```
 [PC Terminal] ──WS──► [Servidor Python FastAPI] ◄──HTTP── [Panel Admin Web]
-  C# WPF                  PostgreSQL                        HTML/JS
+  C# WPF .NET 8         MySQL/MariaDB  :8000              HTML/JS
 ```
+
+| Componente | Tecnología | Requisito |
+|---|---|---|
+| Servidor | Python 3.11+, FastAPI, MySQL 8.x / MariaDB | IP fija en red local |
+| Terminal (cliente) | Windows 10/11, .NET 8, WPF | Ejecutar como Administrador |
+| Panel Admin | Navegador moderno | Acceso a puerto 8000 del servidor |
+
+---
+
+## Instalación rápida (resumen)
+
+1. **MySQL corriendo** (XAMPP recomendado).
+2. **Python 3.11+** con "Add to PATH".
+3. Editar `server\config.json` → contraseña MySQL + IP fija de la PC.
+4. Ejecutar `server\instalar_servidor.bat` **como Administrador**.
+5. Reiniciar la PC (o correr `server\servidor_run.bat`).
+6. Crear `C:\WinSysCache\` con el `.exe` del cliente + `version.txt`.
+7. Acceder a `http://localhost:8000/admin` → `superadmin / admin123` → **cambiar contraseñas**.
+8. Importar alumnos por Excel desde el panel.
+
+> **Migración desde v3.0:** Leer obligatoriamente la Sección F de `docs/INSTALACION_SERVIDOR.txt`.
+
+---
+
+## Archivos clave
+
+| Archivo | Propósito |
+|---|---|
+| `server/config.json` | Única fuente de verdad: BD, IP, seguridad. Editar antes de instalar. |
+| `server/.env` | Generado automáticamente por el configurador. No editar a mano. |
+| `server/instalar_servidor.bat` | Instalador completo (venv + deps + BD + firewall + autoarranque). |
+| `server/servidor_run.bat` | Arranque manual del servidor. |
+| `client/kiosco.config.json` | IP y puerto del servidor que usa el ejecutable del kiosco. |
+| `C:\WinSysCache\version.txt` | Número de versión que leen los kioscos para auto-actualizarse. |
+
+---
+
+## Credenciales iniciales
+
+| Rol | Usuario | Contraseña inicial |
+|---|---|---|
+| Administración completa | `superadmin` | `admin123` |
+| Operación de sala | `admin` | `admin123` |
+| Nivel 2 (consola admin) | — | `max123` |
+
+> **Cambiar todas las contraseñas en el primer inicio** (Configuración → Credenciales).
+
+---
+
+## Seguridad — lista antes de producción
+
+- [ ] Cambiar contraseña de `superadmin` y `admin` al primer inicio
+- [ ] Cambiar `pass_nivel2` en `config.json` (`max123` es el valor por defecto)
+- [ ] La `SECRET_KEY` la genera el configurador automáticamente — no tocar
+- [ ] No exponer el puerto 8000 a internet (solo red local)
+- [ ] Verificar que `.env` esté en `.gitignore` ✓
+
+---
+
+## Solución de problemas
+
+| Problema | Causa probable | Solución |
+|---|---|---|
+| Panel no carga | MySQL apagado | Arrancar MySQL (XAMPP en verde) |
+| `Can't connect to MySQL` | Contraseña en `config.json` incorrecta | Corregir `database.password` y volver a correr el instalador |
+| Kiosco no conecta | IP del servidor incorrecta en `kiosco.config.json` | Editar `ServerIp` con la IP real del servidor |
+| `Address already in use` | Ya hay un servidor corriendo | Cerrar `python.exe` en Administrador de Tareas |
+| Kiosco no se actualiza | `version.txt` ausente o número no mayor | Verificar `C:\WinSysCache\version.txt` y reiniciar servidor |
+| Olvidé contraseña superadmin | — | Ver `docs/CASOS_DE_USO.txt` caso A-3 |
+
 
 ---
 

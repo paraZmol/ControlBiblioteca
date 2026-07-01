@@ -23,7 +23,7 @@ class Escuela(Base):
 
     id:           Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     nombre:       Mapped[str] = mapped_column(String(200), nullable=False)
-    id_facultad:  Mapped[int] = mapped_column(ForeignKey("facultades.id"), nullable=False)
+    id_facultad:  Mapped[int] = mapped_column(ForeignKey("facultades.id"), nullable=True)
 
     facultad:  Mapped["Facultad"]          = relationship(back_populates="escuelas")
     alumnos:   Mapped[list["AlumnoMaestro"]] = relationship(back_populates="escuela_rel")
@@ -40,6 +40,16 @@ class AlumnoMaestro(Base):
     nombre:       Mapped[str] = mapped_column(String(200), nullable=False)
     id_escuela:   Mapped[int] = mapped_column(ForeignKey("escuelas.id"),  nullable=True)
     id_facultad:  Mapped[int] = mapped_column(ForeignKey("facultades.id"), nullable=True)
+    # Vigencia de la credencial. fecha_alta = cuándo entró al padrón (registro del
+    # carnet). fecha_caducidad = vencimiento REAL del carnet (lo manda el sistema
+    # de biblioteca/Koha y puede no ser exactamente alta+2años). El servidor
+    # bloquea el login cuando hoy > fecha_caducidad; si no hay caducidad, cae al
+    # cálculo fecha_alta + vigencia_meses. NULL en ambas = padrón base sin reloj.
+    fecha_alta:       Mapped[datetime] = mapped_column(DateTime, nullable=True, default=datetime.now, index=True)
+    fecha_caducidad:  Mapped[datetime] = mapped_column(DateTime, nullable=True, index=True)
+    # Fecha de la última renovación desde el sistema. Casi siempre NULL (la
+    # mayoría saca carnet nuevo en vez de renovar). Se estampa al usar "Renovar".
+    fecha_renovacion: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
     escuela_rel:  Mapped["Escuela"]  = relationship(back_populates="alumnos", foreign_keys="[AlumnoMaestro.id_escuela]")
     facultad_rel: Mapped["Facultad"] = relationship(foreign_keys="[AlumnoMaestro.id_facultad]")
