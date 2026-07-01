@@ -18,6 +18,50 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api")
 
+# ── Vigencia de credenciales de alumno ──────────────────────────────
+# Un alumno puede usar el kiosco durante `vigencia_meses` desde su fecha_alta.
+# Al vencer, el servidor rechaza el login hasta que un admin lo renueve.
+_VIGENCIA_MESES_DEFAULT = 24
+
+async def _vigencia_meses(db: AsyncSession) -> int:
+    """Lee la vigencia (en meses) desde ajustes_sistema; default 24."""
+    from sqlalchemy import text as _text
+    try:
+        res = await db.execute(_text("SELECT valor FROM ajustes_sistema WHERE clave='vigencia_meses'"))
+        v = res.scalar_one_or_none()
+        n = int(v) if v is not None else _VIGENCIA_MESES_DEFAULT
+        return n if n > 0 else _VIGENCIA_MESES_DEFAULT
+    except Exception:
+        return _VIGENCIA_MESES_DEFAULT
+
+def _fecha_vencimiento(fecha_alta, meses: int):
+    """Fecha en que vence una credencial dada su alta y la vigencia en meses.
+    None si fecha_alta es None (padrón base sin reloj de vencimiento)."""
+    if not fecha_alta:
+        return None
+    # Sumar meses sin dependencias externas: avanzar años/meses y ajustar día.
+    y = fecha_alta.year + (fecha_alta.month - 1 + meses) // 12
+    m = (fecha_alta.month - 1 + meses) % 12 + 1
+    # Día seguro (28) para no romper en meses cortos; basta para vigencia anual.
+    import calendar
+    d = min(fecha_alta.day, calendar.monthrange(y, m)[1])
+    return fecha_alta.replace(year=y, month=m, day=d)
+
+def _alumno_vencido(fecha_alta, meses: int) -> bool:
+    venc = _fecha_vencimiento(fecha_alta, meses)
+    return bool(venc and datetime.now() > venc)
+
+def _venc_efectivo(fecha_alta, fecha_caducidad, meses: int):
+    """Fecha de vencimiento EFECTIVA: la caducidad real del carnet si existe;
+    si no, el cálculo alta + vigencia_meses. None = sin reloj (padrón base)."""
+    if fecha_caducidad:
+        return fecha_caducidad
+    return _fecha_vencimiento(fecha_alta, meses)
+
+def _vencido_efectivo(fecha_alta, fecha_caducidad, meses: int) -> bool:
+    venc = _venc_efectivo(fecha_alta, fecha_caducidad, meses)
+    return bool(venc and datetime.now() > venc)
+
 # E-10: límite de tamaño para subidas de Excel (DoS por archivo gigante).
 # 25 MB cubre de sobra un padrón de alumnos/personal. Configurable por env.
 import os as _os_mod
@@ -175,6 +219,14 @@ async def validar_alumno(request: Request, datos: AlumnoAuth, db: AsyncSession =
     alumno = result.scalar_one_or_none()
     if not alumno:
         raise HTTPException(status_code=404, detail="Alumno no encontrado")
+    # Vigencia: si la credencial venció, no se permite el ingreso hasta renovar.
+    # Prioriza la caducidad real del carnet; si no hay, usa alta + vigencia.
+    meses = await _vigencia_meses(db)
+    if _vencido_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, meses):
+        raise HTTPException(
+            status_code=403,
+            detail="Credencial vencida. Acércate al encargado para renovar tu acceso.",
+        )
     return {
         "valido": True,
         "codigo": alumno.codigo,
@@ -216,16 +268,24 @@ async def exportar_alumnos(
         .order_by(AlumnoMaestro.nombre)
     )
     alumnos = result.scalars().all()
+    meses = await _vigencia_meses(db)
+
+    def _fmt(dt):
+        return dt.strftime("%Y-%m-%d") if dt else ""
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Alumnos Registrados"
-    ws.append(["DNI", "Código", "Nombre Completo", "Facultad", "Escuela"])
+    ws.append(["DNI", "Código", "Nombre Completo", "Facultad", "Escuela",
+               "Fecha de ingreso", "Fecha de vigencia", "Fecha de renovación"])
 
     for a in alumnos:
         fac = a.facultad_rel.nombre if a.facultad_rel else ""
         esc = a.escuela_rel.nombre if a.escuela_rel else ""
-        ws.append([a.dni, a.codigo, a.nombre, fac, esc])
+        # Vigencia efectiva: caducidad real del carnet, o alta + vigencia_meses.
+        vigencia = _venc_efectivo(a.fecha_alta, a.fecha_caducidad, meses)
+        ws.append([a.dni, a.codigo, a.nombre, fac, esc,
+                   _fmt(a.fecha_alta), _fmt(vigencia), _fmt(a.fecha_renovacion)])
 
     stream = io.BytesIO()
     wb.save(stream)
@@ -353,6 +413,11 @@ async def iniciar_sesion(
     alumno = res_alumno.scalar_one_or_none()
     if not alumno:
         raise HTTPException(status_code=403, detail="Alumno no encontrado")
+    # Defensa en profundidad: bloquear también acá el inicio de sesión de un
+    # alumno con credencial vencida (no solo en /alumnos/validar).
+    meses = await _vigencia_meses(db)
+    if _vencido_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, meses):
+        raise HTTPException(status_code=403, detail="Credencial vencida. Renovar acceso con el encargado.")
 
     res_terminal = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
     terminal = res_terminal.scalar_one_or_none()
@@ -1959,15 +2024,18 @@ async def importar_maestro(
                     return raw_headers[i]
         return ""
 
-    idx_dni       = col(["dni"])
-    idx_apellidos = col(["apellidos", "a_paterno a_materno", "apellidos completos"])
-    idx_paterno   = col(["a_paterno", "apellido paterno", "paterno", "primer apellido"])
-    idx_materno   = col(["a_materno", "apellido materno", "materno", "segundo apellido"])
-    idx_nombres_p = col(["nombres"])
-    idx_nombre    = col(["nombre_completo", "nombre completo", "apellidos y nombres", "apellidos nombres", "apellidos y nombres del estudiante", "estudiante", "nombre", "alumno"])
-    idx_codigo    = col(["codigo_universitario", "codigo universitario", "codigo", "cod", "codigo de matricula", "matricula"])
-    idx_facultad  = col(["facultad", "nombre facultad", "fac"])
-    idx_escuela   = col(["escuela", "escuela profesional", "carrera"])
+    idx_dni          = col(["dni"])
+    idx_apellidos    = col(["apellidos", "a_paterno a_materno", "apellidos completos"])
+    idx_paterno      = col(["a_paterno", "apellido paterno", "paterno", "primer apellido"])
+    idx_materno      = col(["a_materno", "apellido materno", "materno", "segundo apellido"])
+    idx_nombres_p    = col(["nombres"])
+    idx_nombre       = col(["nombre_completo", "nombre completo", "apellidos y nombres", "apellidos nombres", "apellidos y nombres del estudiante", "estudiante", "nombre", "alumno"])
+    idx_codigo       = col(["codigo_universitario", "codigo universitario", "codigo", "cod", "codigo de matricula", "matricula"])
+    idx_facultad     = col(["facultad", "nombre facultad", "fac"])
+    idx_escuela      = col(["escuela", "escuela profesional", "carrera"])
+    idx_fecha_alta   = col(["fecha de ingreso", "fecha ingreso", "fecha_alta", "fecha alta", "ingreso"])
+    idx_fecha_cad    = col(["fecha de vigencia", "fecha vigencia", "fecha_caducidad", "fecha caducidad", "caducidad", "vigencia", "vencimiento"])
+    idx_fecha_renov  = col(["fecha de renovacion", "fecha renovacion", "fecha_renovacion", "renovacion"])
 
     # Log de columnas detectadas
     logger.info(f"[IMPORT-MAESTRO] DNI col={raw_headers[idx_dni] if idx_dni is not None else 'NO'} | "
@@ -2077,11 +2145,31 @@ async def importar_maestro(
             res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni))
             existente = res.scalar_one_or_none()
 
+            # Fechas: el Excel puede traer date, datetime o string
+            def _parse_fecha(val):
+                if val is None:
+                    return None
+                if isinstance(val, datetime):
+                    return val
+                if hasattr(val, 'year'):  # date
+                    return datetime(val.year, val.month, val.day)
+                try:
+                    return datetime.strptime(str(val).strip()[:10], "%Y-%m-%d")
+                except Exception:
+                    return None
+
+            fecha_alta  = _parse_fecha(fila[idx_fecha_alta]  if idx_fecha_alta  is not None and idx_fecha_alta  < len(fila) else None)
+            fecha_cad   = _parse_fecha(fila[idx_fecha_cad]   if idx_fecha_cad   is not None and idx_fecha_cad   < len(fila) else None)
+            fecha_renov = _parse_fecha(fila[idx_fecha_renov] if idx_fecha_renov is not None and idx_fecha_renov < len(fila) else None)
+
             if existente:
                 if nombre:              existente.nombre      = nombre
                 if codigo:              existente.codigo      = codigo
                 if id_esc is not None:  existente.id_escuela  = id_esc
                 if id_fac is not None:  existente.id_facultad = id_fac
+                if fecha_alta:          existente.fecha_alta       = fecha_alta
+                if fecha_cad:           existente.fecha_caducidad  = fecha_cad
+                if fecha_renov:         existente.fecha_renovacion = fecha_renov
                 actualizados += 1
             else:
                 db.add(AlumnoMaestro(
@@ -2090,6 +2178,9 @@ async def importar_maestro(
                     codigo=codigo or None,
                     id_escuela=id_esc,
                     id_facultad=id_fac,
+                    fecha_alta=fecha_alta,
+                    fecha_caducidad=fecha_cad,
+                    fecha_renovacion=fecha_renov,
                 ))
                 insertados += 1
 
@@ -2118,15 +2209,18 @@ async def listar_maestro(
     db: AsyncSession = Depends(get_db),
     admin: Usuario = Depends(obtener_usuario_actual),
     search: str | None = None,
+    solo_vencidos: bool = False,   # True = solo credenciales vencidas
     limit: int = 50,
     offset: int = 0,
 ):
-    """Lista paginada del maestro de alumnos con búsqueda opcional."""
+    """Lista paginada del maestro de alumnos con búsqueda opcional. Incluye el
+    estado de vigencia (vencido + fecha de vencimiento) de cada credencial."""
     if admin.rol not in ("superadmin", "admin"):
         raise HTTPException(status_code=403, detail="Acceso denegado")
     from sqlalchemy import or_, func
     from sqlalchemy.orm import aliased
     FacDir2 = aliased(Facultad, name="fac_direct2")
+    meses = await _vigencia_meses(db)
 
     q = (select(AlumnoMaestro, Escuela, Facultad, FacDir2)
          .outerjoin(Escuela,   AlumnoMaestro.id_escuela  == Escuela.id)
@@ -2139,6 +2233,17 @@ async def listar_maestro(
             AlumnoMaestro.nombre.ilike(like),
             AlumnoMaestro.codigo.ilike(like),
         ))
+    # Filtro de vencidos a nivel SQL. Vencido = caducidad real pasada, O (sin
+    # caducidad) alta anterior al corte (hoy - meses).
+    if solo_vencidos:
+        from sqlalchemy import or_, and_
+        corte = _fecha_vencimiento(datetime.now(), -meses)  # hoy - meses
+        ahora = datetime.now()
+        q = q.where(or_(
+            and_(AlumnoMaestro.fecha_caducidad.isnot(None), AlumnoMaestro.fecha_caducidad < ahora),
+            and_(AlumnoMaestro.fecha_caducidad.is_(None),
+                 AlumnoMaestro.fecha_alta.isnot(None), AlumnoMaestro.fecha_alta < corte),
+        ))
     total_q = select(func.count()).select_from(q.subquery())
     total = (await db.execute(total_q)).scalar()
     limit = min(max(limit, 1), 200)   # G-13: tope de seguridad
@@ -2146,6 +2251,7 @@ async def listar_maestro(
     rows = (await db.execute(q)).all()
     return {
         "total": total,
+        "vigencia_meses": meses,
         "alumnos": [
             {
                 "dni":        r.dni,
@@ -2154,6 +2260,10 @@ async def listar_maestro(
                 "facultad":   (fac.nombre if fac else None) or (fd.nombre if fd else ""),
                 "escuela":    esc.nombre if esc else "",
                 "id_escuela": r.id_escuela,
+                "fecha_alta": r.fecha_alta.isoformat() if r.fecha_alta else None,
+                "vence":      (_venc_efectivo(r.fecha_alta, r.fecha_caducidad, meses).isoformat()
+                               if _venc_efectivo(r.fecha_alta, r.fecha_caducidad, meses) else None),
+                "vencido":    _vencido_efectivo(r.fecha_alta, r.fecha_caducidad, meses),
             }
             for r, esc, fac, fd in rows
         ]
@@ -2310,6 +2420,38 @@ async def eliminar_maestro(
                               detalle="eliminado del maestro con todas sus sesiones", db=db)
     await db.commit()
     return {"mensaje": f"Alumno {dni} eliminado del maestro con todas sus sesiones"}
+
+
+@router.post("/admin/maestro/{dni}/renovar")
+async def renovar_credencial(
+    dni: str,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Renueva la credencial de un alumno: extiende su caducidad a HOY + vigencia,
+    con lo que vuelve a estar vigente y puede usar el kiosco. fecha_alta (registro
+    original) NO se toca: el alta es histórica; lo que se renueva es la caducidad."""
+    if admin.rol not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+    res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni))
+    alumno = res.scalar_one_or_none()
+    if not alumno:
+        raise HTTPException(status_code=404, detail="Alumno no encontrado")
+    meses = await _vigencia_meses(db)
+    ahora = datetime.now()
+    nueva_cad = _fecha_vencimiento(ahora, meses)  # hoy + vigencia
+    alumno.fecha_caducidad = nueva_cad
+    alumno.fecha_renovacion = ahora              # deja constancia de la renovación
+    if not alumno.fecha_alta:
+        alumno.fecha_alta = ahora   # base sin alta: registrar ingreso ahora
+    await registrar_auditoria(admin.username, "renovar_credencial", rol=admin.rol,
+                              objetivo=f"DNI {dni}",
+                              detalle=f"caducidad renovada hasta {nueva_cad.date()}", db=db)
+    await db.commit()
+    return {
+        "mensaje": f"Credencial de {alumno.nombre} renovada",
+        "vence": nueva_cad.isoformat(),
+    }
 
 
 @router.delete("/admin/reset-maestro")
@@ -3112,6 +3254,9 @@ KPI_CATALOGO = {
     "sesiones_activas":     ("Sesiones en curso ahora",  "Equipos",   "num", False, "equipos"),
     # ── Pestaña USUARIOS (alumnos / atención / disciplina) ──
     "alumnos_total":        ("Alumnos en el padrón",     "Alumnos",   "num", False, "usuarios"),
+    "alumnos_nuevos_mes":   ("Nuevos registrados (mes)", "Alumnos",   "num", False, "usuarios"),  # altas del mes en curso
+    "alumnos_crecimiento":  ("Crecimiento del padrón (mes)","Alumnos", "pct", False, "usuarios"),  # nuevos / padrón previo
+    "alumnos_vencidos":     ("Credenciales vencidas",    "Seguridad", "num", False, "usuarios"),  # requieren renovación
     "atendidos_hoy":        ("Alumnos atendidos (hoy)",  "Alumnos",   "num", False, "usuarios"),  # personas distintas
     "atendidos_semana":     ("Alumnos atendidos (semana)","Alumnos",  "num", False, "usuarios"),
     "atendidos_mes":        ("Alumnos atendidos (mes)",  "Alumnos",   "num", False, "usuarios"),
@@ -3131,9 +3276,13 @@ KPI_CATALOGO = {
 }
 
 # Orden por defecto cuando no hay config guardada.
+# Usuarios: el padrón y su evolución (total, nuevos, crecimiento, vencidas) +
+# 'Visitas de hoy'. Se quitó 'Alumnos atendidos (hoy)' por ser redundante con
+# 'Visitas de hoy' (ambas miden actividad de alumnos del día).
 KPI_DEFAULT_ACTIVOS = [
     "equipos_total", "equipos_en_uso", "ocupacion_pct", "sesiones_activas",
-    "atendidos_hoy", "atendidos_mes", "bans_activos", "sospechas_pend",
+    "alumnos_total", "alumnos_nuevos_mes", "alumnos_crecimiento", "alumnos_vencidos",
+    "sesiones_hoy", "atendidos_mes", "bans_activos", "sospechas_pend",
 ]
 
 
@@ -3159,6 +3308,24 @@ async def _kpis_calcular(db: AsyncSession) -> dict:
 
     # Alumnos / sesiones
     v["alumnos_total"]   = await _scalar(select(_f.count(AlumnoMaestro.dni)))
+    # Nuevos del mes en curso (altas con fecha_alta dentro del mes).
+    v["alumnos_nuevos_mes"] = await _scalar(
+        select(_f.count(AlumnoMaestro.dni)).where(AlumnoMaestro.fecha_alta >= ini_mes))
+    # Crecimiento %: nuevos del mes sobre el padrón que había ANTES de este mes.
+    _previos = (v["alumnos_total"] or 0) - (v["alumnos_nuevos_mes"] or 0)
+    v["alumnos_crecimiento"] = round((v["alumnos_nuevos_mes"] / _previos) * 100) if _previos > 0 else 0
+    # Credenciales vencidas: caducidad real pasada, O (sin caducidad) alta
+    # anterior al corte (hoy - vigencia_meses).
+    from sqlalchemy import or_ as _or, and_ as _and
+    _meses_vig = await _vigencia_meses(db)
+    _corte_venc = _fecha_vencimiento(datetime.now(), -_meses_vig)
+    _ahora = datetime.now()
+    v["alumnos_vencidos"] = await _scalar(
+        select(_f.count(AlumnoMaestro.dni)).where(_or(
+            _and(AlumnoMaestro.fecha_caducidad.isnot(None), AlumnoMaestro.fecha_caducidad < _ahora),
+            _and(AlumnoMaestro.fecha_caducidad.is_(None),
+                 AlumnoMaestro.fecha_alta.isnot(None), AlumnoMaestro.fecha_alta < _corte_venc),
+        )))
     v["sesiones_activas"] = await _scalar(select(_f.count(Sesion.id)).where(Sesion.estado == "activa"))
     v["atendidos_hoy"]   = await _scalar(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_dia))
     v["atendidos_semana"] = await _scalar(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_semana))
@@ -3332,6 +3499,34 @@ async def grafico_atenciones(
     )
     filas = {str(r.dia): r.n for r in (await db.execute(q)).all()}
     # Construir serie continua día a día
+    serie = []
+    cur = dt_ini.date()
+    fin = (dt_fin - timedelta(days=1)).date()
+    while cur <= fin:
+        clave = cur.isoformat()
+        serie.append({"fecha": clave, "valor": int(filas.get(clave, 0))})
+        cur += timedelta(days=1)
+    return {"periodo": periodo, "items": serie}
+
+
+@router.get("/kpis/grafico/nuevos")
+async def grafico_nuevos(
+    periodo: str = "semana", desde: str | None = None, hasta: str | None = None,
+    db: AsyncSession = Depends(get_db), usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """Serie diaria: alumnos NUEVOS registrados por día en el período (por
+    fecha_alta). Respeta el selector Semana/Mes/Rango como el resto de gráficos.
+    Rellena con 0 los días sin altas para que la serie sea continua."""
+    from sqlalchemy import func as _f
+    dt_ini, dt_fin = _kpi_rango_fechas(periodo, desde, hasta)
+    q = (
+        select(_f.date(AlumnoMaestro.fecha_alta).label("dia"),
+               _f.count(AlumnoMaestro.dni).label("n"))
+        .where(AlumnoMaestro.fecha_alta.isnot(None),
+               AlumnoMaestro.fecha_alta >= dt_ini, AlumnoMaestro.fecha_alta < dt_fin)
+        .group_by(_f.date(AlumnoMaestro.fecha_alta))
+    )
+    filas = {str(r.dia): r.n for r in (await db.execute(q)).all()}
     serie = []
     cur = dt_ini.date()
     fin = (dt_fin - timedelta(days=1)).date()

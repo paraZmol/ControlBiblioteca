@@ -340,6 +340,24 @@ async def _migrar_columnas():
             try:
                 await db.execute(text("ALTER TABLE configuracion_kiosco ADD COLUMN mensaje_duracion_seg INT DEFAULT 60"))
             except Exception: pass
+            # Vigencia de credenciales: fecha_alta marca cuándo entró el alumno al
+            # padrón. Al crear la columna, los alumnos existentes reciben HOY como
+            # alta (su vigencia arranca desde la migración). Las altas futuras la
+            # setean al insertar.
+            try:
+                await db.execute(text("ALTER TABLE alumnos_maestro ADD COLUMN fecha_alta DATETIME NULL"))
+                # Poblar SOLO en la creación de la columna (las filas existentes).
+                await db.execute(text("UPDATE alumnos_maestro SET fecha_alta = NOW() WHERE fecha_alta IS NULL"))
+            except Exception: pass
+            # Caducidad real del carnet (la manda biblioteca/Koha). Sin poblar:
+            # NULL = sin caducidad explícita → se usa el cálculo alta + vigencia.
+            try:
+                await db.execute(text("ALTER TABLE alumnos_maestro ADD COLUMN fecha_caducidad DATETIME NULL"))
+            except Exception: pass
+            # Fecha de última renovación (opcional; se estampa al renovar).
+            try:
+                await db.execute(text("ALTER TABLE alumnos_maestro ADD COLUMN fecha_renovacion DATETIME NULL"))
+            except Exception: pass
             # ajustes_sistema.valor: guarda config de KPIs (JSON) y el LOGO del panel
             # como data URL base64 (puede pesar >1 MB). TEXT (64 KB) no alcanza para el
             # logo → usar MEDIUMTEXT (16 MB). Idempotente.
@@ -1227,6 +1245,19 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         res_m = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == codigo))
                         maestro = res_m.scalar_one_or_none()
 
+                        # ── Verificar vigencia del carnet ──
+                        # Un carnet vencido no puede iniciar sesión: se le indica que
+                        # debe renovarlo en biblioteca.
+                        if maestro:
+                            from api.endpoints import _vigencia_meses, _vencido_efectivo, _venc_efectivo
+                            _meses_vig = await _vigencia_meses(db)
+                            if _vencido_efectivo(maestro.fecha_alta, maestro.fecha_caducidad, _meses_vig):
+                                _venc = _venc_efectivo(maestro.fecha_alta, maestro.fecha_caducidad, _meses_vig)
+                                _venc_txt = _venc.strftime("%d/%m/%Y") if _venc else ""
+                                logger.warning(f"[WS] {terminal_id} DNI={_mask_dni(codigo)} carnet VENCIDO ({_venc_txt}) — acceso denegado")
+                                await websocket.send_json({"tipo": "login_rechazado", "motivo": f"Su carnet venció el {_venc_txt}. Debe renovarlo en biblioteca para usar las PCs."})
+                                continue
+
                         if maestro:
                             partes = maestro.nombre.split()
                             if len(partes) >= 3:
@@ -1633,6 +1664,21 @@ async def websocket_admin(websocket: WebSocket):
 
                     if alumno is None:
                         await websocket.send_json({"tipo": "error", "motivo": f"Error: El DNI {dni_param} no existe"})
+                        continue
+
+                    # BLOQUEO POR VIGENCIA: una credencial vencida NO puede
+                    # desbloquear la PC. Se avisa al operador que el carnet venció
+                    # y debe renovarse. (La renovación se hace desde Base de Datos.)
+                    from api.endpoints import _vigencia_meses, _vencido_efectivo, _venc_efectivo
+                    _meses_vig = await _vigencia_meses(db)
+                    if _vencido_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, _meses_vig):
+                        _venc = _venc_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, _meses_vig)
+                        _venc_txt = _venc.strftime("%d/%m/%Y") if _venc else ""
+                        logger.warning(f"[WS-Admin] DNI={_mask_dni(alumno.dni)} carnet VENCIDO ({_venc_txt}) — desbloqueo denegado")
+                        await websocket.send_json({
+                            "tipo": "error",
+                            "motivo": f"Carnet VENCIDO el {_venc_txt}. {alumno.nombre} debe renovar su carnet en biblioteca para poder usar las PCs.",
+                        })
                         continue
 
                     partes = alumno.nombre.split()

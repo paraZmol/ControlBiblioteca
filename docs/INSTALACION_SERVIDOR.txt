@@ -1,8 +1,8 @@
 ═══════════════════════════════════════════════════════════════════
   INSTALACIÓN DEL SERVIDOR — Control Biblioteca UNASAM
-  Versión actual del sistema: 4.4x (muy por encima de la 3.0 original)
+  Versión actual del sistema: 4.5+ (muy por encima de la 3.0 original)
   Para: la PC del administrador / encargado del centro de cómputo (Windows)
-  Actualizado: 2026-06-10
+  Actualizado: 2026-07-01
 ═══════════════════════════════════════════════════════════════════
 
 Este instructivo reemplaza al de la versión 3.0. El sistema cambió bastante
@@ -176,17 +176,28 @@ LO MÁS IMPORTANTE — LEER ANTES DE EMPEZAR:
 
       [obligatorio] ControlBiblioteca.Client.exe
                     El ejecutable del kiosco que descargan las PCs cliente.
+                    Origen: client\publish\ControlBiblioteca.Client.exe
+                    (compilar primero — ver SECCIÓN D-2).
 
       [obligatorio] version.txt
                     Un archivo de texto con SOLO el número de versión, sin "v"
                     ni espacios. Ejemplo de su único contenido:
-                        4.44
+                        4.45
                     (Si lo editás con el Bloc de notas, guardá como UTF-8; el
                      servidor tolera el BOM, pero NO pongas comillas ni saltos
                      de línea extra.)
 
+    ► EN UNA INSTALACIÓN LIMPIA (primera vez): creá la carpeta y los dos
+      archivos manualmente:
+        1. Crear C:\WinSysCache\
+        2. Copiar el .exe del cliente (ver D-2 para compilarlo).
+        3. Crear version.txt con el Bloc de notas → escribir solo el número
+           de versión (ej: 4.45) → guardar como UTF-8 sin BOM.
+      Sin version.txt el servidor reporta "versión desconocida" y los kioscos
+      no saben si actualizar.
+
     Eso es TODO lo necesario: con esos dos archivos las actualizaciones
-    funcionan. Tu instalación actual ya los tiene.
+    funcionan.
 
     (NOTA TÉCNICA, no hace falta crearlo) El servidor sabe leer también un
     archivo opcional cliente.sha256 y lo informa, pero la versión ACTUAL del
@@ -429,10 +440,11 @@ LO MÁS IMPORTANTE — LEER ANTES DE EMPEZAR:
   Usuarios iniciales:     superadmin / admin   (contraseña inicial: admin123)
   Python:                 3.11 o superior
 
-  Las tablas de la base de datos se crean SOLAS la primera vez que arranca el
-  servidor (no hay que crear tablas a mano). Si agregás una versión nueva del
-  servidor sobre la misma base, las tablas que falten se crean solas; las
-  existentes NO se borran.
+  Las tablas de la base de datos las crea el CONFIGURADOR (paso [3/4] del
+  instalar_servidor.bat); no hay que crearlas a mano. Si instalás una versión
+  nueva del servidor sobre la misma base (sin pasar por el instalador), las
+  tablas faltantes también se crean solas al arrancar el servidor (init_db);
+  las tablas existentes y sus datos NO se tocan.
 
 
 ───────────────────────────────────────────────────────────────────

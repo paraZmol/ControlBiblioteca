@@ -27,7 +27,7 @@
         }
     </script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link rel="stylesheet" href="static/css/style.css?v=81">
+    <link rel="stylesheet" href="static/css/style.css?v=82">
     <style>
         ::-webkit-scrollbar { width:6px; height:6px; }
         .dark ::-webkit-scrollbar-track { background:transparent; }
@@ -541,6 +541,9 @@
                                         class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                                         oninput="buscarMaestro()">
                                 </div>
+                                <button id="maestroFiltroVencidos" onclick="toggleMaestroVencidos()" class="db-btn db-btn-filtro" aria-pressed="false">
+                                    <i class="ph ph-clock-countdown"></i> Solo vencidas
+                                </button>
                                 <span id="maestroTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
                             </div>
                             <div class="tabla-scroll-wrap overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
@@ -552,7 +555,8 @@
                                             <th class="p-4 font-semibold" style="width:110px">Código Univ.</th>
                                             <th class="p-4 font-semibold">Facultad</th>
                                             <th class="p-4 font-semibold">Escuela</th>
-                                            <th class="p-4 font-semibold" style="width:100px">Acciones</th>
+                                            <th class="p-4 font-semibold" style="width:120px">Vigencia</th>
+                                            <th class="p-4 font-semibold" style="width:130px">Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody id="maestroBody" class="divide-y divide-zinc-100 dark:divide-zinc-800/50"></tbody>
@@ -1003,10 +1007,10 @@
                                 <h4 class="kpi-graf-card-titulo"><i class="ph ph-buildings" aria-hidden="true"></i> Uso por facultad</h4>
                                 <div id="graf-facultades" class="kpi-graf-canvas"><p class="kpi-empty">Cargando...</p></div>
                             </div>
-                            <!-- Gráfico de USUARIOS: atenciones por día -->
+                            <!-- Gráfico de USUARIOS: alumnos nuevos registrados -->
                             <div class="kpi-graf-card" data-graf-pestana="usuarios">
-                                <h4 class="kpi-graf-card-titulo"><i class="ph ph-chart-line-up" aria-hidden="true"></i> Atenciones por día</h4>
-                                <div id="graf-atenciones" class="kpi-graf-canvas"><p class="kpi-empty">Cargando...</p></div>
+                                <h4 class="kpi-graf-card-titulo"><i class="ph ph-user-plus" aria-hidden="true"></i> Alumnos nuevos registrados</h4>
+                                <div id="graf-nuevos" class="kpi-graf-canvas"><p class="kpi-empty">Cargando...</p></div>
                             </div>
                         </div>
                     </div>
@@ -2020,7 +2024,7 @@
 </div>
 
 
-<script src="static/js/app.js?v=54"></script>
+<script src="static/js/app.js?v=58"></script>
 <script>
 // Tema
 (function() {
@@ -2207,6 +2211,9 @@ function switchTab(tab) {
     if (tab === 'incidencias')   switchSubtabInc('inc');
     if (tab === 'configuracion') switchSubtabCfg(_rolServidor === 'superadmin' ? 'actividad' : 'backdoor');
     if (tab === 'actividad')     actSetVista('flujo');
+
+    // Marcar como vistas las notificaciones de la pestaña abierta (baja el badge).
+    if (typeof marcarPestanaVista === 'function') marcarPestanaVista(tab);
 
     // Recordar la pestaña activa para sobrevivir a F5
     try { sessionStorage.setItem('panel_tab', tab); } catch (e) {}

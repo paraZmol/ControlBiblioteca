@@ -2033,6 +2033,8 @@ let _maestroSearch  = '';
 
 let _maestroVisible = false;
 
+let _maestroSoloVencidos = false;   // filtro "Solo vencidas"
+
 
 
 function toggleMaestro() {
@@ -2076,6 +2078,8 @@ async function cargarMaestro() {
     const params = new URLSearchParams({ limit: _maestroLimit, offset: _maestroOffset });
 
     if (_maestroSearch) params.set('search', _maestroSearch);
+
+    if (_maestroSoloVencidos) params.set('solo_vencidos', 'true');
 
     try {
 
@@ -2132,15 +2136,29 @@ function renderMaestro(data) {
 
 
 
-    body.innerHTML = data.alumnos.map(a => `
-        <tr>
+    body.innerHTML = data.alumnos.map(a => {
+        // Estado de vigencia de la credencial.
+        const vigHtml = a.vencido
+            ? `<span class="vig-badge vig-vencido" title="Vencida${a.vence ? ' el ' + _fechaCorta(a.vence) : ''}">Vencida</span>`
+            : (a.vence
+                ? `<span class="vig-badge vig-ok" title="Vence el ${_fechaCorta(a.vence)}">Vence ${_fechaCorta(a.vence)}</span>`
+                : `<span class="vig-badge vig-base" title="Padrón base, sin vencimiento">—</span>`);
+        // Botón Renovar: solo si está vencida (admin o superadmin).
+        const btnRenovar = a.vencido
+            ? `<button title="Renovar credencial (otros ${data.vigencia_meses || 24} meses)" class="tbl-btn tbl-btn-ok"
+                 onclick="renovarCredencial('${esc(a.dni)}','${esc(a.nombre)}')"><i class="ph ph-arrow-clockwise"></i></button>`
+            : '';
+        return `
+        <tr${a.vencido ? ' class="fila-vencida"' : ''}>
             <td><code>${esc(a.dni)}</code></td>
             <td>${esc(a.nombre)}</td>
             <td>${esc(a.codigo || '—')}</td>
             <td style="font-size:12px">${esc(a.facultad || '—')}</td>
             <td style="font-size:12px">${esc(a.escuela  || '—')}</td>
+            <td>${vigHtml}</td>
             <td>
                 <div style="display:flex;gap:4px;align-items:center">
+                    ${btnRenovar}
                     ${esSuperAdmin ? `<button title="Editar" class="tbl-btn tbl-btn-edit"
                         onclick="abrirEditarMaestro('${esc(a.dni)}','${esc(a.nombre)}','${esc(a.codigo||'')}','${esc(a.facultad||'')}','${esc(a.escuela||'')}')"><i class="ph ph-pencil-simple"></i></button>` : ''}
                     <button title="Registrar incidencia" class="tbl-btn tbl-btn-warn"
@@ -2149,7 +2167,8 @@ function renderMaestro(data) {
                         onclick="abrirBanearUsuario('${esc(a.dni)}','${esc(a.nombre)}')"><i class="ph ph-prohibit"></i></button>` : ''}
                 </div>
             </td>
-        </tr>`).join('');
+        </tr>`;
+    }).join('');
 
 
 
@@ -2163,6 +2182,51 @@ function renderMaestro(data) {
 
     }
 
+}
+
+
+
+// Formatea "2026-06-30T..." -> "30/06/2026" (para vigencia).
+function _fechaCorta(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d)) return '';
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+// Alterna el filtro "Solo vencidas" y recarga el maestro.
+function toggleMaestroVencidos() {
+    _maestroSoloVencidos = !_maestroSoloVencidos;
+    const btn = document.getElementById('maestroFiltroVencidos');
+    if (btn) {
+        btn.classList.toggle('db-btn-filtro-activo', _maestroSoloVencidos);
+        btn.setAttribute('aria-pressed', _maestroSoloVencidos ? 'true' : 'false');
+    }
+    _maestroOffset = 0;
+    cargarMaestro();
+}
+
+// Renueva la credencial de un alumno (resetea su vigencia a hoy).
+function renovarCredencial(dni, nombre) {
+    mostrarConfirmacion(
+        `Renovar la credencial de <strong>${escapeHtml(nombre)}</strong>. Su acceso volverá a estar vigente desde hoy.`,
+        async () => {
+            try {
+                const res = await fetch(`${API_BASE}/admin/maestro/${encodeURIComponent(dni)}/renovar`, {
+                    method: 'POST', headers: authHeaders(),
+                });
+                const data = await res.json();
+                if (!res.ok) { mostrarNotificacion(data.detail || 'No se pudo renovar', 'error'); return; }
+                mostrarNotificacion(`Credencial renovada (vence ${_fechaCorta(data.vence)})`, 'ok');
+                cargarMaestro();
+            } catch (e) {
+                mostrarNotificacion('Error de conexión', 'error');
+            }
+        },
+        { titulo: 'Renovar credencial', textoConfirmar: 'Renovar' }
+    );
 }
 
 
@@ -2492,6 +2556,11 @@ function abrirNuevoUsuario() {
                 _maestroOffset = 0;
 
                 cargarMaestro();
+
+                // Refrescar indicadores: el alta cambia 'Nuevos del mes', el total
+                // y el gráfico de alumnos nuevos. Si la pestaña no está visible, igual
+                // deja el estado al día para la próxima vez.
+                if (typeof cargarIndicadores === 'function') cargarIndicadores();
 
             } else {
 
@@ -3382,6 +3451,34 @@ async function cargarIncidencias() {
     }
 }
 
+// ── Badges de navegación como notificaciones (marcar como visto) ──────
+// El badge del ícono cuenta cosas de estado (incidencias/sospechas) que no
+// "se leen" solas. Guardamos en localStorage cuántas había la última vez que
+// el operador abrió esa pestaña; el badge del ícono solo muestra número si el
+// total ACTUAL supera lo visto (hay novedades). Al abrir la pestaña se marca
+// visto y el badge desaparece hasta que lleguen nuevas.
+function _notifVistas(clave) {
+    try { return parseInt(localStorage.getItem('notif_visto_' + clave) || '0', 10) || 0; }
+    catch (e) { return 0; }
+}
+function _marcarNotifsVistas(clave, total) {
+    try { localStorage.setItem('notif_visto_' + clave, String(total)); } catch (e) {}
+    // Ocultar de inmediato el badge del ícono correspondiente.
+    const map = { incidencias: 'incidencias-badge', actividad: 'actividad-badge' };
+    const b = document.getElementById(map[clave]);
+    if (b) b.style.display = 'none';
+    // Recordar el último total conocido para poder re-marcar al abrir.
+    _notifTotales[clave] = total;
+}
+// Último total conocido de cada badge (lo llenan los renderizadores).
+const _notifTotales = { incidencias: 0, actividad: 0 };
+
+// Llamada desde switchTab al abrir una pestaña con badge: marca visto su total.
+function marcarPestanaVista(tab) {
+    if (tab === 'incidencias') _marcarNotifsVistas('incidencias', _notifTotales.incidencias || 0);
+    if (tab === 'actividad')   _marcarNotifsVistas('actividad',   _notifTotales.actividad   || 0);
+}
+
 async function _cargarResumenIncidencias() {
     try {
         const res  = await fetch(`${API_BASE}/admin/incidencias/resumen`, { headers: authHeaders() });
@@ -3405,11 +3502,24 @@ async function _cargarResumenIncidencias() {
             }
         }
         const total = data.reduce((s, r) => s + r.total, 0);
-        [badge, document.getElementById('incidencias-badge-sub')].forEach(b => {
-            if (!b) return;
-            if (total > 0) { b.textContent = total; b.style.display = ''; }
-            else b.style.display = 'none';
-        });
+        _notifTotales.incidencias = total;
+        // Si el operador está viendo la pestaña Incidencias, se considera visto al
+        // instante (no debe quedar un badge de algo que tiene delante).
+        const viendoInc = document.getElementById('tab-incidencias')?.style.display !== 'none'
+                          && document.getElementById('tab-incidencias');
+        if (viendoInc) { try { localStorage.setItem('notif_visto_incidencias', String(total)); } catch(e) {} }
+        // Badge del ÍCONO (navegación): notificación → solo si hay NOVEDAD.
+        const nuevas = total - _notifVistas('incidencias');
+        if (badge) {
+            if (nuevas > 0) { badge.textContent = nuevas > 99 ? '99+' : nuevas; badge.style.display = ''; }
+            else badge.style.display = 'none';
+        }
+        // Badge del SUB-panel (dentro de la pestaña): siempre el total real.
+        const badgeSub = document.getElementById('incidencias-badge-sub');
+        if (badgeSub) {
+            if (total > 0) { badgeSub.textContent = total; badgeSub.style.display = ''; }
+            else badgeSub.style.display = 'none';
+        }
 
         // Poblar mini-panel de alertas en el hero del tab Monitoreo
         _renderMonAlertasMini(data);
@@ -4378,7 +4488,14 @@ async function _actActualizarBadge() {
         const badge = document.getElementById('actividad-badge');
         if (!badge) return;
         const n = data.sospechosos_hoy || 0;
-        if (n > 0) { badge.textContent = n > 99 ? '99+' : n; badge.style.display = ''; }
+        _notifTotales.actividad = n;
+        // Si está viendo la pestaña Actividad/Eventos, se marca visto al instante.
+        const viendoAct = document.getElementById('tab-actividad')?.style.display !== 'none'
+                          && document.getElementById('tab-actividad');
+        if (viendoAct) { try { localStorage.setItem('notif_visto_actividad', String(n)); } catch(e) {} }
+        // Badge del ícono: notificación → solo si hay sospechosos NUEVOS.
+        const nuevas = n - _notifVistas('actividad');
+        if (nuevas > 0) { badge.textContent = nuevas > 99 ? '99+' : nuevas; badge.style.display = ''; }
         else badge.style.display = 'none';
     } catch(e) { /* silencioso */ }
 }
@@ -5222,9 +5339,9 @@ async function cargarGraficos() {
         _kpiCargarUno(`${API_BASE}/kpis/grafico/facultades?${params}`, 'graf-facultades',
             d => _svgBarras(d.items.map(i => ({ etiqueta: i.facultad, valor: i.valor, full: i.facultad })), 'Sesiones', true));
     } else if (_kpiPestana === 'usuarios') {
-        // Atenciones por día (horizontal)
-        _kpiCargarUno(`${API_BASE}/kpis/grafico/atenciones?${params}`, 'graf-atenciones',
-            d => _svgBarras(d.items.map(i => ({ etiqueta: _kpiFechaCorta(i.fecha), valor: i.valor, full: i.fecha })), 'Atenciones', true));
+        // Alumnos nuevos registrados por día (horizontal)
+        _kpiCargarUno(`${API_BASE}/kpis/grafico/nuevos?${params}`, 'graf-nuevos',
+            d => _svgBarras(d.items.map(i => ({ etiqueta: _kpiFechaCorta(i.fecha), valor: i.valor, full: i.fecha })), 'Nuevos', true));
     } else if (_kpiPestana === 'programas') {
         // Ranking de programas más usados (respeta el período).
         _kpiCargarRanking();
