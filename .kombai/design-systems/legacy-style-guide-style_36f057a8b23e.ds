@@ -1,0 +1,193 @@
+---
+name: "[Legacy SG] monochrome-grid-inspiration"
+slug: legacy-style-guide-style_36f057a8b23e
+modes: [light]
+color:
+  palette:
+    canvas: "#ffffff"
+    ink: "#111827"
+    ink-2: "#555555"
+    ink-3: "#8a8a8a"
+    line: "#e2e2e2"
+    primary: "#2563eb"
+    on-primary: "#ffffff"
+    slate-900: "#0F172A"
+    on-ink: "#FFFFFF"
+    surface: "#F8F9FA"
+    surface-card: "#FFFFFF"
+    surface-muted: "#F9FAFB"
+    surface-dark: "#0F172A"
+    on-dark: "#FFFFFF"
+    on-dark-muted: "#94A3B8"
+    on-surface: "#111827"
+    on-surface-secondary: "#6B7280"
+    on-surface-muted: "#9CA3AF"
+    border: "#E5E7EB"
+    border-strong: "#0F172A"
+    success: "#10B981"
+    success-strong: "#059669"
+    warn: "#D97706"
+  semantic:
+    background.canvas: "{color.palette.canvas}"
+    surface.default: "{color.palette.canvas}"
+    surface.raised: "{color.palette.canvas}"
+    text.primary: "{color.palette.ink}"
+    text.secondary: "{color.palette.ink-2}"
+    text.tertiary: "{color.palette.ink-3}"
+    text.link: "{color.palette.primary}"
+    border.default: "{color.palette.line}"
+    border.focus: "{color.palette.primary}"
+    primary.bg: "{color.palette.primary}"
+    primary.fg: "{color.palette.on-primary}"
+typography:
+  family: { primary: "\"Inter\", sans-serif" }
+  textStyle:
+    heading-lg: { fontFamily: "\"Inter\", sans-serif", fontSize: "24px", fontWeight: 600, lineHeight: 1.2 }
+    body-md: { fontFamily: "\"Inter\", sans-serif", fontSize: "15px", fontWeight: 400, lineHeight: 1.5 }
+spacing:
+  sm: "16px"
+  md: "24px"
+  lg: "32px"
+radius:
+  none: "0px"
+  sm: "6px"
+  md: "8px"
+  full: "9999px"
+---
+
+> Migrated from a legacy style guide.
+> The palette above is mapped from the original tokens, which are also preserved below.
+
+## Legacy style-guide tokens
+
+### Colors
+
+- `ink`: `#111827`
+- `slate-900`: `#0F172A`
+- `on-ink`: `#FFFFFF`
+- `surface`: `#F8F9FA`
+- `surface-card`: `#FFFFFF`
+- `surface-muted`: `#F9FAFB`
+- `surface-dark`: `#0F172A`
+- `on-dark`: `#FFFFFF`
+- `on-dark-muted`: `#94A3B8`
+- `on-surface`: `#111827`
+- `on-surface-secondary`: `#6B7280`
+- `on-surface-muted`: `#9CA3AF`
+- `border`: `#E5E7EB`
+- `border-strong`: `#0F172A`
+- `success`: `#10B981`
+- `success-strong`: `#059669`
+- `warn`: `#D97706`
+
+### Typography
+
+- `display`: `{"family":"\"Inter\", sans-serif","size":"30px","url":""}`
+- `metric`: `{"family":"\"Inter\", sans-serif","size":"30px","url":""}`
+- `headline`: `{"family":"\"Inter\", sans-serif","size":"18px","url":""}`
+- `body`: `{"family":"\"DM Sans\", sans-serif","size":"14px","url":""}`
+- `mono`: `{"family":"\"Fira Code\", monospace","size":"12px","url":""}`
+- `label`: `{"family":"\"DM Sans\", sans-serif","size":"10px","url":""}`
+
+### Spacing
+
+- `sm`: `16px`
+- `md`: `24px`
+- `lg`: `32px`
+
+### Radius
+
+- `none`: `0px`
+- `sm`: `6px`
+- `md`: `8px`
+- `full`: `9999px`
+
+## Design instructions
+
+## Token Instructions
+
+- `ink` → primary text and black-button color
+- `slate-900` → borders, hard offset shadows, and dark panels
+- `surface` (#F8F9FA) → off-white canvas; `surface-card` white cards on top
+- `surface-dark` → SQL / capacity / audit dark panels
+- `success` (emerald) → the ONLY accent: health, "executing"/positive states, deltas, pulse dot
+- `warn` (amber) → reserved for the single "Locked" status
+- `radius.none` → enforce radius 0 on key swiss cards (KPI/heatmap/bento/audit)
+- `radius.sm` / `radius.md` → small UI: nav items, search, soft buttons, secondary pills
+- `typography.mono` (Fira Code) → session IDs, SQL, and metric strings
+- `typography.label` → uppercase column heads / eyebrows (0.1em tracking)
+- icons → Tabler line icons, inherit slate ink; emerald only on positive/health
+
+
+# Monochrome Grid — "DataCore"
+
+> Design spec — version alpha. Source: static HTML (`monochrome-grid.html`); tokens read from `:root` and component CSS. Fictional enterprise-database dashboard; described factually.
+
+## Overview
+
+A **Swiss-style, near-monochrome enterprise dashboard**. The canvas is off-white `{colors.surface}` `#F8F9FA` with white cards and near-black slate ink (`{colors.ink}` `#111827`, `{colors.slate-900}` `#0F172A`), organized by a strict grey hairline system. Color is almost entirely absent — **emerald** `{colors.success}` `#10B981` is the only accent, rationed for positive deltas, "Healthy"/"Executing" status and health metrics (amber appears once for a "Locked" state). Type is a precise trio: **Inter** (headings, stat numbers), **DM Sans** (body), **Fira Code** (mono for session IDs, SQL and metrics). The signature is the **`swiss-border` card** — radius forced to 0 with a **hard 2px slate offset shadow** (no blur) — alongside a slate **heatmap grid**, a **bento** capacity cluster, a dark **SQL snippet** panel, and an animated **sparkline**. It reads as rigorous, data-dense and typographic.
+
+## Colors
+
+**Ink & surfaces.** `{colors.ink}` `#111827` is the primary text/black-button color; `{colors.slate-900}` `#0F172A` is the border + hard-shadow + dark-panel color. Cards are `{colors.surface-card}` white on `{colors.surface}` canvas, with `{colors.surface-muted}` `#F9FAFB` wells/hover and dark `{colors.surface-dark}` `#0F172A` for SQL/capacity/audit panels.
+
+**Hairlines.** `{colors.border}` `#E5E7EB` for light dividers/cards; `{colors.border-strong}` `#0F172A` for emphasized swiss cards.
+
+**Semantic (the only color).** Emerald `{colors.success}` / `{colors.success-strong}` for health, executing status, deltas and the pulse dot; amber `{colors.warn}` `#D97706` for the single "Locked" status. Discipline: greyscale everywhere, emerald only signals "good/active."
+
+## Typography
+
+**Inter** for headings and tracking-tight numbers; **DM Sans** for body and uppercase labels; **Fira Code** for IDs, SQL and metric strings.
+
+| Token    | Family    | Size | Weight | Tracking | Usage                        |
+| -------- | --------- | ---- | ------ | -------- | ---------------------------- |
+| display  | Inter     | 30px | 700    | -0.02em  | Page h1 "System Overview"    |
+| metric   | Inter     | 30px | 700    | normal   | Stat numbers (24, 1.2 TB)    |
+| headline | Inter     | 18px | 700    | normal   | Card titles                  |
+| body     | DM Sans   | 14px | 400    | normal   | Body, descriptions           |
+| mono     | Fira Code | 12px | 400    | normal   | Session IDs, SQL, metrics    |
+| label    | DM Sans   | 10px | 700    | 0.1em    | Column heads, eyebrows       |
+
+## Layout
+
+Base 4px on a 12-col grid. A 256px left **sidebar** (logo tile, grouped nav with a black active item, user card) beside a column with a sticky **search header** and a `max-w-[1400px]` main: a 4-up **KPI row** of swiss cards, then an 8/4 split — left has a recent-databases list, a 24-col **performance heatmap**, and an active-sessions table with an expandable dark **SQL snippet**; right is a **bento** capacity cluster (dark total tile, health ring, node/region stats), a sparkline CPU card, and a dark security-audit panel.
+
+## Elevation & Depth
+
+Sharp and graphic. The hallmark is the **hard offset shadow** — `2px 2px 0 #0F172A` on swiss cards, `4px 4px 0 rgba(15,23,42,0.3)` on dark panels — with **no blur**. Lighter list/table cards use a soft `shadow-sm`. Depth is communicated through hairline grids, the heatmap's slate ladder, and inset dark panels rather than ambient shadow.
+
+## Shapes
+
+Mostly **sharp — `swiss-border` enforces radius 0** on KPI/heatmap/bento/audit cards. Small UI (nav items, search, soft buttons) use `{rounded.sm}` 6px or `{rounded.md}` 8px; status dots and avatars are `{rounded.full}`. The geometric philosophy is rectilinear and grid-locked.
+
+## Components
+
+- **card-swiss** — white, 1px slate border, `2px` hard offset shadow, radius 0; hover tints to `#F9FAFB`.
+- **card-soft** — lighter list/table card with `border-gray-200` + `shadow-sm`.
+- **panel-dark** — slate-900 panel (SQL snippet, total capacity, audit) with `4px` hard shadow.
+- **button-primary** — black, white label, rounded-sm, soft drop shadow, press-scale.
+- **status-pill** — emerald-100/700 (good) or amber-100/700 (locked) flat pills.
+- **heatmap** — 24-col grid of square cells on a slate intensity ladder (100→900).
+- **sparkline** — black 2px path with a dash-draw animation and faint gradient fill.
+
+## Motion
+
+Minimal and precise: the **sparkline** draws via `stroke-dashoffset` (`dash 2s ease-in-out`), and the live status dot uses a `pulse-ring 1.5s` emerald ripple. Otherwise the UI is static with color-only hovers. (Transitions are globally disabled in the capture source, so timings are authored intent.)
+
+## Iconography
+
+**Tabler** line icons (`ti-database`, `ti-server`, `ti-shield-lock`, `ti-brand-postgresql/mysql`, `ti-activity`), inheriting slate ink; emerald only on positive/health indicators; ~16–24px.
+
+## Do's and Don'ts
+
+- **Do** keep the off-white/white/slate greyscale system with disciplined hairlines.
+- **Do** reserve emerald for health, "executing"/positive states and deltas only.
+- **Do** use `swiss-border` (radius 0) + hard `2px` offset shadows on key cards.
+- **Do** set IDs, SQL and metrics in Fira Code; numbers/headings in Inter.
+- **Don't** introduce additional accent colors or soft/blurred shadows on swiss cards.
+- **Don't** round the KPI/heatmap/bento cards — sharpness is the brand.
+- **Don't** let emerald spread beyond status/positive semantics.
+
+## Known Gaps
+
+- Values read from the implementation's resolved `:root`. Slate/emerald/amber steps use Tailwind's default scale. Copy, data and SQL are sample content; the source disables transitions globally.

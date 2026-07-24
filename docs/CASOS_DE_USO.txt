@@ -1,7 +1,7 @@
 ═══════════════════════════════════════════════════════════════════
   CASOS DE USO — Control Biblioteca UNASAM
   Pasos exactos y respuesta esperada del sistema para cada operación.
-  Actualizado: 2026-06-15
+  Actualizado: 2026-07-16
 ═══════════════════════════════════════════════════════════════════
 
 Este archivo responde: "¿Cómo hago X? ¿Qué debería pasar?"
@@ -94,6 +94,22 @@ FLUJO_ALUMNO.txt.
      M-7. Quién puede acceder (roles)
      M-8. Vulnerabilidades y límites conocidos
   ............................................
+
+  N. Vigencia de credenciales (carnet de biblioteca)  [NUEVO]
+     N-1. Para qué sirve
+     N-2. Qué pasa cuando un alumno con carnet vencido intenta entrar
+     N-3. Ver quiénes están vencidos
+     N-4. Renovar la credencial de un alumno
+     N-5. De dónde salen las fechas reales
+     N-6. Exportar el padrón con las fechas
+
+  O. Motivos de uso gestionables  [NUEVO]
+     O-1. Qué son
+     O-2. Agregar un motivo
+     O-3. Editar un motivo
+     O-4. Quitar un motivo (desactivar)
+     O-5. Volver a activar un motivo
+     O-6. Cuidado: no dejar la lista vacía
 
   MEJORAS PENDIENTES (detectadas al documentar)
      → ver sección al final
@@ -1535,3 +1551,183 @@ FLUJO_ALUMNO.txt.
                                   BUG CONOCIDO: el panel valida solo 6
                                   caracteres. Usar siempre 8+ para evitar
                                   que el servidor rechace la solicitud.
+
+
+═══════════════════════════════════════════════════════════════════
+  N. VIGENCIA DE CREDENCIALES (CARNET DE BIBLIOTECA)  [NUEVO]
+═══════════════════════════════════════════════════════════════════
+
+  N-1. PARA QUÉ SIRVE
+  ─────────────────────────────────────────────────
+  El carnet de biblioteca de cada estudiante tiene una fecha de
+  caducidad. Vencido ese plazo, el alumno no debe poder usar las PCs
+  hasta renovarlo. El sistema aplica ese corte automáticamente.
+
+  Cada estudiante tiene tres fechas en el padrón:
+
+    fecha_alta        Cuándo entró al padrón (registro del carnet).
+    fecha_caducidad   Vencimiento REAL del carnet. Es la que manda.
+    fecha_renovacion  Cuándo se renovó desde el panel. Casi siempre
+                      vacía: la mayoría saca carnet nuevo en vez de
+                      renovar.
+
+  Cómo se decide si está vencido:
+    1. Si tiene fecha_caducidad  → se compara contra hoy.
+    2. Si NO la tiene            → se calcula fecha_alta + vigencia
+                                   (24 meses por defecto).
+    3. Si no tiene ninguna fecha → sin vencimiento (padrón base).
+
+  La vigencia en meses es configurable: tabla ajustes_sistema, clave
+  'vigencia_meses'. Si no existe, se usan 24 meses.
+
+
+  N-2. QUÉ PASA CUANDO UN ALUMNO CON CARNET VENCIDO INTENTA ENTRAR
+  ─────────────────────────────────────────────────
+  El bloqueo es del lado del SERVIDOR, en los dos caminos posibles:
+
+  a) El alumno escribe su DNI en la PC:
+     El servidor rechaza el login y el kiosco muestra:
+       "Su carnet venció el DD/MM/AAAA. Debe renovarlo en biblioteca
+        para usar las PCs."
+     La PC sigue bloqueada. No se crea sesión.
+
+  b) El encargado intenta desbloquear la PC desde el panel:
+     El panel muestra el error:
+       "Carnet VENCIDO el DD/MM/AAAA. [Nombre] debe renovar su carnet
+        en biblioteca para poder usar las PCs."
+     No se envía la orden de desbloqueo.
+
+  Como el corte vive en el servidor, no hace falta actualizar ni
+  recompilar el cliente de las PCs.
+
+
+  N-3. VER QUIÉNES ESTÁN VENCIDOS
+  ─────────────────────────────────────────────────
+  1. Panel → Base de Datos → Estudiantes.
+  2. Cada fila muestra una columna "Vigencia":
+       Verde  "Vence DD/MM/AAAA"  → vigente
+       Rojo   "Vencida"           → no puede usar las PCs
+       "—"                        → sin vencimiento (padrón base)
+  3. Las filas vencidas quedan resaltadas en rojo tenue.
+  4. Botón "Solo vencidas": filtra el listado para ver únicamente
+     las credenciales caducadas.
+
+  También hay un indicador global:
+     Panel → Indicadores → Usuarios → "Credenciales vencidas".
+
+
+  N-4. RENOVAR LA CREDENCIAL DE UN ALUMNO
+  ─────────────────────────────────────────────────
+  1. Panel → Base de Datos → Estudiantes.
+  2. Buscar al alumno (o activar "Solo vencidas").
+  3. En la fila vencida aparece un botón de renovar (icono de
+     recarga). Solo aparece si la credencial está vencida.
+  4. Confirmar en el aviso.
+  5. El sistema:
+       - Extiende fecha_caducidad a hoy + vigencia (24 meses).
+       - Registra fecha_renovacion = hoy.
+       - NO toca fecha_alta (el registro original es histórico).
+       - Deja constancia en Auditoría.
+  6. El alumno ya puede volver a usar las PCs de inmediato.
+
+  Quién puede hacerlo: admin y superadmin.
+
+
+  N-5. DE DÓNDE SALEN LAS FECHAS REALES
+  ─────────────────────────────────────────────────
+  Las fechas de registro y caducidad provienen del sistema de
+  biblioteca (Koha), que exporta un CSV con estas columnas:
+
+    cardnumber        DNI del alumno (su carnet usa el DNI)
+    categorycode      ST = estudiante (lo demás se descarta)
+    FECHA_REGISTRO    fecha de alta real
+    FECHA_CADUCIDAD   vencimiento real del carnet
+    FECHA_RENOVACIÓN  solo en los pocos casos renovados
+
+  ADVERTENCIA: el "Importar Excel" del panel NO carga fechas de
+  vigencia (el Excel del padrón no las tiene). Si se importa solo por
+  ahí, todos los alumnos quedan sin caducidad y el sistema les calcula
+  fecha_alta + 24 meses, lo que da vencimientos irreales.
+  Para cargar las fechas verdaderas hay que cruzar el padrón con el
+  CSV de Koha.
+
+
+  N-6. EXPORTAR EL PADRÓN CON LAS FECHAS
+  ─────────────────────────────────────────────────
+  Panel → Base de Datos → Estudiantes → "Exportar Excel".
+  El archivo incluye, además de los datos del alumno:
+
+    Fecha de ingreso     (fecha_alta)
+    Fecha de vigencia    (caducidad real, o la calculada)
+    Fecha de renovación  (vacía si nunca se renovó)
+
+  Solo superadmin puede exportar.
+
+
+═══════════════════════════════════════════════════════════════════
+  O. MOTIVOS DE USO GESTIONABLES  [NUEVO]
+═══════════════════════════════════════════════════════════════════
+
+  O-1. QUÉ SON
+  ─────────────────────────────────────────────────
+  Son las razones que el alumno elige en la PC al iniciar sesión
+  ("Investigación", "Tarea", "Clases virtuales"…). Antes eran fijas;
+  ahora se administran desde el panel.
+
+  El cliente del kiosco pide la lista al servidor cada vez que
+  arranca, así que los cambios llegan a las PCs SIN recompilar ni
+  reinstalar nada: basta con reiniciar el cliente.
+
+  Dónde: Panel → Configuración → Motivos de uso.
+  Quién: admin y superadmin.
+
+
+  O-2. AGREGAR UN MOTIVO
+  ─────────────────────────────────────────────────
+  1. Panel → Configuración → Motivos de uso.
+  2. Escribir el texto en el campo de arriba.
+  3. Clic en "Agregar".
+  4. Aparece en la lista de activos.
+  5. Las PCs lo mostrarán al reiniciar el cliente.
+
+  El sistema rechaza motivos vacíos, de más de 200 caracteres o
+  repetidos (avisa: "Ya existe el motivo «…»").
+
+
+  O-3. EDITAR UN MOTIVO
+  ─────────────────────────────────────────────────
+  1. Clic en el icono de lápiz del motivo.
+  2. Corregir el texto y aceptar.
+  3. Se guarda y queda registrado en Auditoría.
+
+  Nota: las sesiones ya registradas conservan el texto que tenían al
+  momento de crearse.
+
+
+  O-4. QUITAR UN MOTIVO (DESACTIVAR)
+  ─────────────────────────────────────────────────
+  Los motivos NUNCA se borran de verdad: se desactivan. Así el
+  historial de sesiones que ya los usó no se rompe.
+
+  1. Clic en el icono de ojo tachado.
+  2. El sistema avisa cuántas sesiones lo usaron, por ejemplo:
+       "Se usó en 80 sesión(es). El historial las conserva; solo deja
+        de aparecer en las PCs."
+  3. Confirmar.
+  4. El motivo pasa a la lista "Desactivados" (atenuado y tachado) y
+     desaparece de las PCs.
+
+
+  O-5. VOLVER A ACTIVAR UN MOTIVO
+  ─────────────────────────────────────────────────
+  1. Buscarlo en la sección "Desactivados" al final de la lista.
+  2. Clic en el icono de recarga.
+  3. Vuelve a la lista de activos y reaparece en las PCs.
+
+
+  O-6. CUIDADO: NO DEJAR LA LISTA VACÍA
+  ─────────────────────────────────────────────────
+  Si se desactivan TODOS los motivos, el alumno no tendría ninguna
+  opción que elegir al iniciar sesión. El panel advierte con el
+  mensaje "Ningún motivo activo: el alumno no vería opciones".
+  Mantener siempre al menos uno activo.

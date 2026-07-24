@@ -27,7 +27,7 @@
         }
     </script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link rel="stylesheet" href="static/css/style.css?v=82">
+    <link rel="stylesheet" href="static/css/style.css?v=84">
     <style>
         ::-webkit-scrollbar { width:6px; height:6px; }
         .dark ::-webkit-scrollbar-track { background:transparent; }
@@ -1274,6 +1274,10 @@
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-arrow-circle-up"></i> Actualizaciones
                         </button>
+                        <button id="subtab-btn-cfg-motivos" onclick="switchSubtabCfg('motivos')"
+                            class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-list-checks"></i> Motivos de uso
+                        </button>
                         <button id="subtab-btn-cfg-backdoor" onclick="switchSubtabCfg('backdoor')"
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-lock-key"></i> Backdoor
@@ -1481,6 +1485,41 @@
                                 </p>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Panel: Motivos de uso -->
+                    <!-- Gestiona la lista que el alumno elige en el kiosco al
+                         iniciar sesion. El cliente pide /catalogos/motivos al
+                         arrancar, asi que los cambios llegan sin recompilarlo. -->
+                    <div id="subtab-cfg-motivos" style="display:none">
+                        <section class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors">
+                            <div class="flex items-start justify-between flex-wrap gap-3 mb-1">
+                                <div>
+                                    <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                                        <i class="ph ph-list-checks text-indigo-600 dark:text-indigo-400"></i> Motivos de uso
+                                    </h3>
+                                    <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-2xl leading-relaxed">
+                                        Son las razones que el alumno elige en la PC al iniciar sesión.
+                                        Los cambios llegan a las terminales sin reinstalar nada.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- Alta rápida -->
+                            <form class="flex gap-2 flex-wrap items-center my-4" onsubmit="event.preventDefault(); motivoCrear();">
+                                <label for="motivo-nuevo" class="sr-only">Nuevo motivo</label>
+                                <input id="motivo-nuevo" type="text" maxlength="200"
+                                    placeholder="Escribe un motivo nuevo (ej. Consulta de tesis)"
+                                    class="input-filtro flex-1 min-w-64 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg px-3 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600">
+                                <button type="submit" class="db-btn db-btn-new">
+                                    <i class="ph ph-plus"></i> Agregar
+                                </button>
+                            </form>
+
+                            <div id="motivosLista" class="motivos-lista">
+                                <p class="kpi-empty">Cargando…</p>
+                            </div>
+                        </section>
                     </div>
 
                     <!-- Panel: Backdoor -->
@@ -2024,7 +2063,7 @@
 </div>
 
 
-<script src="static/js/app.js?v=58"></script>
+<script src="static/js/app.js?v=60"></script>
 <script>
 // Tema
 (function() {
@@ -2147,7 +2186,7 @@ function switchSubtabInc(sub) {
 }
 
 function switchSubtabCfg(sub) {
-    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones', 'backdoor', 'auditoria'].forEach(s => {
+    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones', 'motivos', 'backdoor', 'auditoria'].forEach(s => {
         const panel = document.getElementById('subtab-cfg-' + s);
         const btn   = document.getElementById('subtab-btn-cfg-' + s);
         if (!panel || !btn) return;
@@ -2168,6 +2207,7 @@ function switchSubtabCfg(sub) {
     });
     if (sub === 'aplicacion'      && typeof _cargarCamposConfigApp === 'function') _cargarCamposConfigApp();
     if (sub === 'actualizaciones' && typeof cargarRutaDistribucion === 'function') cargarRutaDistribucion();
+    if (sub === 'motivos'         && typeof motivosCargar === 'function') motivosCargar();
     if (sub === 'backdoor') {
         if (_rolServidor === 'superadmin' && typeof cargarConfigBackdoor === 'function') cargarConfigBackdoor();
         if (typeof cargarConfigOffline === 'function') cargarConfigOffline();

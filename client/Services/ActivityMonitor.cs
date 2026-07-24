@@ -43,6 +43,21 @@ namespace ControlBiblioteca.Client.Services
         // administrador, y el cliente corre como asInvoker (usuario normal).
         private const int POLL_MS = 1500;
 
+        // ── Sondeo de VENTANA EN FOCO (programa que el alumno mira AHORA) ──
+        // Distinto del monitoreo de procesos: aquel detecta APERTURAS (para
+        // sospechas/evidencia); esto detecta QUÉ está usando en este momento,
+        // para pintarlo en vivo en la tarjeta de la PC del panel. Es estado
+        // efímero: no se guarda en la base, no genera sospechas.
+        private const int FOCO_MS = 30000;               // cada 30 s
+        // Último exe en foco REPORTADO. Solo enviamos si cambió, para no
+        // inundar el WS: un alumno 10 min en Word = un solo envío.
+        private string _ultimoFocoReportado = "";
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
         // Conjunto de PIDs vistos en el sondeo anterior. Un proceso es "nuevo"
         // si su PID no estaba aquí. Se reemplaza completo en cada vuelta.
         private HashSet<int> _pidsVistos = new();
@@ -130,8 +145,10 @@ namespace ControlBiblioteca.Client.Services
             _cts    = new CancellationTokenSource();
             _appsReportadas.Clear();      // sesión nueva → lista de apps limpia
             _descargasReportadas.Clear(); // y de descargas
+            _ultimoFocoReportado = "";    // sesión nueva → sin foco previo
             IniciarWatcherProcesos();
             IniciarWatcherDescargas();
+            _ = Task.Run(() => LoopFocoAsync(_cts.Token));
         }
 
         public void Detener()
@@ -143,6 +160,7 @@ namespace ControlBiblioteca.Client.Services
             _pidsVistos = new();
             _appsReportadas.Clear();
             _descargasReportadas.Clear();
+            _ultimoFocoReportado = "";
         }
 
         // ── Monitoreo de procesos via polling (sin admin) ─────────────
@@ -440,6 +458,71 @@ namespace ControlBiblioteca.Client.Services
             }
             catch { }
             return "";
+        }
+
+        // ── Sondeo de ventana en foco ─────────────────────────────────
+
+        // Nombre del .exe de la ventana que está en primer plano, o "" si no
+        // se puede determinar. No lee el TÍTULO de la ventana a propósito:
+        // el título puede exponer datos privados del alumno (nombres, búsquedas).
+        // Solo el nombre del programa sale de la PC.
+        private static string ExeEnFoco()
+        {
+            try
+            {
+                IntPtr hwnd = GetForegroundWindow();
+                if (hwnd == IntPtr.Zero) return "";
+                GetWindowThreadProcessId(hwnd, out uint pid);
+                if (pid == 0) return "";
+                using var p = Process.GetProcessById((int)pid);
+                return p.ProcessName + ".exe";   // ProcessName no incluye extensión
+            }
+            catch { return ""; }
+        }
+
+        private async Task LoopFocoAsync(CancellationToken token)
+        {
+            while (_activo && !token.IsCancellationRequested)
+            {
+                try { await Task.Delay(FOCO_MS, token); }
+                catch (OperationCanceledException) { break; }
+                if (!_activo || token.IsCancellationRequested) break;
+
+                try
+                {
+                    string exe = ExeEnFoco();
+                    if (string.IsNullOrEmpty(exe)) continue;
+                    // Solo enviamos si el foco CAMBIÓ desde el último reporte.
+                    if (string.Equals(exe, _ultimoFocoReportado, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    _ultimoFocoReportado = exe;
+                    await EnviarFocoAsync(exe);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[ActivityMonitor] Error en foco: {ex.Message}");
+                }
+            }
+        }
+
+        // Evento de foco: tipo propio "foco", separado de "actividad" para que
+        // el servidor no lo trate como evento a registrar ni a evaluar por banco
+        // de sospechas. Es solo estado en vivo del mapa de terminales.
+        private async Task EnviarFocoAsync(string procesoExe)
+        {
+            try
+            {
+                if (!_ws.EstaConectado) return;
+                await _ws.EnviarAsync(JsonSerializer.Serialize(new
+                {
+                    tipo        = "foco",
+                    proceso_exe = procesoExe,
+                }));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ActivityMonitor] Error enviando foco: {ex.Message}");
+            }
         }
 
         // ── Envío al servidor ─────────────────────────────────────────

@@ -1315,6 +1315,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             if t_prev:
                                 t_prev.estado = "bloqueado"
                                 await manager.forzar_cierre_sesion(t_prev.nombre_red)
+                                await manager.limpiar_foco(t_prev.nombre_red)
                                 logger.warning(f"[WS] Sesión duplicada cerrada: alumno {_mask_dni(alumno.dni)} en {t_prev.nombre_red}")
 
                         t = await _buscar_terminal(db, terminal_id, terminal_ip)
@@ -1379,6 +1380,36 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 if not confirmada_ok:
                     logger.warning(f"[WS] {terminal_id} confirmó desbloqueo pero no se halló sesión activa sin confirmar")
                 await manager.notificar_admins()
+
+            elif tipo == "foco":
+                # Programa en foco AHORA (estado en vivo del mapa). No se guarda
+                # en la base ni genera sospechas: es estado efímero para pintar
+                # la tarjeta de la PC. Solo se difunde si el .exe es una app
+                # CONOCIDA (banco de apps); ruido y sin-clasificar se descartan
+                # para no ensuciar el mapa. Requiere sesión activa.
+                exe = str(data.get("proceso_exe", "") or "").strip()
+                exe = re.sub(r"[^\w.\- ]", "", exe)[:120]
+                if not exe:
+                    continue
+                nombre_red_foco = None
+                async with async_session() as db:
+                    t = await _buscar_terminal(db, terminal_id, terminal_ip)
+                    if not t:
+                        continue
+                    res_s = await db.execute(
+                        select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
+                    )
+                    if not res_s.scalar_one_or_none():
+                        continue  # sin sesión activa, no hay foco que mostrar
+                    # Leer el nombre DENTRO de la sesión: fuera, el objeto queda
+                    # detached y acceder a sus atributos lanzaría DetachedInstanceError.
+                    nombre_red_foco = t.nombre_red
+                if exe.lower() in _BANCO_APPS_SET:
+                    await manager.set_foco(nombre_red_foco, exe)
+                else:
+                    # No es app conocida: asegurar que la tarjeta no muestre un
+                    # foco viejo (p.ej. cerró Word y abrió algo sin clasificar).
+                    await manager.limpiar_foco(nombre_red_foco)
 
             elif tipo == "actividad":
                 # Evento de actividad del alumno en la PC (proceso, archivo, comando, navegador)
@@ -1499,6 +1530,8 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             await db.commit()
                             logger.info(f"[WS] {terminal_id} sesión cerrada: {ahora_logout.strftime('%I:%M:%S %p')}")
                             await manager.notificar_evento(f"SALIDA: Terminal {terminal_id} (manual logout)", "logout")
+                        # Sesión cerrada: la tarjeta ya no debe mostrar programa en foco.
+                        await manager.limpiar_foco(t.nombre_red)
                 await manager.bloquear_terminal(terminal_id)
                 await manager.notificar_admins()
 
@@ -1522,6 +1555,8 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         ahora = _cerrar_sesion(sesion, "desconexion_red")
                         logger.info(f"[WS] Sesión cerrada por desconexión en {terminal_id}: {ahora.strftime('%I:%M:%S %p')}")
                     await db.commit()
+                    # Terminal caída: borrar su programa en foco del mapa en vivo.
+                    await manager.limpiar_foco(t.nombre_red)
             await manager.notificar_evento(f"Terminal '{terminal_id}' perdió conexión", "offline")
             await manager.notificar_admins()
         except Exception as cleanup_exc:
@@ -1631,6 +1666,8 @@ async def websocket_admin(websocket: WebSocket):
                         await registrar_auditoria(op_username, "bloquear_terminal", rol=op_rol,
                                                   objetivo=tid, db=db)
                         await db.commit()
+                        # Bloqueada: la tarjeta ya no muestra programa en foco.
+                        await manager.limpiar_foco(t.nombre_red)
                 msg = f"Terminal {tid} bloqueada" if ok else f"Terminal {tid} no conectada (BD actualizada)"
                 await websocket.send_json({"tipo": "ok", "mensaje": msg})
                 await manager.notificar_admins()

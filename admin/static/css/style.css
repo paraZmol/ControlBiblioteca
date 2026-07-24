@@ -753,6 +753,26 @@ html.dark .sidebar {
     font-size: 11px; color: var(--t3); font-style: italic;
 }
 
+/* Programa en foco (en vivo): qué usa el alumno AHORA. Discreto, indigo de
+   acento porque es información, no alerta. El slot vacío no ocupa espacio,
+   así la tarjeta sin foco se ve igual que antes (degrada con dignidad). */
+.tc-foco-slot:empty { display: none; }
+.tc-foco {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 6px;
+    padding: 5px 10px;
+    background: var(--a-dim);
+    border: 1px solid var(--a-bdr);
+    border-radius: 10px;
+    min-width: 0;
+}
+.tc-foco-ico { font-size: 14px; color: var(--a); flex: none; }
+.tc-foco-txt {
+    font-size: 11.5px; font-weight: 600; color: var(--a);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    letter-spacing: .01em;
+}
+
 /* Action buttons row */
 .tc-acciones { display: flex; flex-direction: row; gap: 6px; }
 
@@ -2158,6 +2178,42 @@ html.dark .hc-row--active { background: oklch(0.25 0.04 200 / 0.25); }
 /* Resalta sutilmente la fila de una credencial vencida */
 .fila-vencida { background: var(--err-dim); }
 .fila-vencida:hover { background: var(--err-dim); }
+
+/* ── Motivos de uso (Configuración) ── */
+.motivos-lista { display: flex; flex-direction: column; gap: 8px; }
+.motivos-titulo {
+    font-size: 11px; font-weight: 700; color: var(--t3);
+    text-transform: uppercase; letter-spacing: .06em;
+    margin: 6px 0 2px;
+}
+.motivos-titulo-off { margin-top: 18px; }
+.motivo-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center; gap: 12px;
+    padding: 11px 14px;
+    background: var(--sur2); border: 1px solid var(--bdr);
+    border-radius: var(--r-sm);
+    transition: border-color .15s;
+}
+.motivo-item:hover { border-color: var(--bdr2); }
+.motivo-ico { font-size: 17px; color: var(--ok); }
+.motivo-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.motivo-desc {
+    font-size: 13.5px; font-weight: 600; color: var(--t1);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.motivo-usos { font-size: 11px; color: var(--t3); }
+.motivo-acciones { display: flex; gap: 5px; }
+/* Motivo desactivado: atenuado, ya no aparece en las PCs */
+.motivo-item-off { opacity: .62; border-style: dashed; }
+.motivo-item-off .motivo-ico { color: var(--t3); }
+.motivo-item-off .motivo-desc { text-decoration: line-through; color: var(--t2); }
+
+@media (max-width: 640px) {
+    .motivo-item { grid-template-columns: auto 1fr; row-gap: 8px; }
+    .motivo-acciones { grid-column: 2; justify-self: start; }
+}
 
 /* Botón de filtro toggle (ej. "Solo vencidas") */
 .db-btn-filtro {

@@ -1,0 +1,1025 @@
+===================================================================
+  MANUAL DE USUARIO
+  Sistema de Control de Acceso - Biblioteca UNASAM
+  Version 4.x  -  Julio 2026
+===================================================================
+
+
+  A QUIEN VA DIRIGIDO
+
+  Este manual es para el personal que atiende la sala de computo:
+  el ENCARGADO que opera el panel dia a dia, y el SUPERADMIN que
+  ademas configura el sistema.
+
+  No necesitas saber programacion. Si sabes usar un navegador web,
+  sabes usar este panel.
+
+
+  QUE HACE EL SISTEMA, EN UNA FRASE
+
+  Las computadoras de la sala arrancan bloqueadas. El alumno se
+  identifica con su DNI, dice para que la va a usar, y recien ahi
+  la PC se desbloquea. Todo queda registrado.
+
+
+  LAS DOS PANTALLAS DEL SISTEMA
+
+  EL KIOSCO   Es lo que ve el alumno en la PC de la sala. Una
+              pantalla azul de bloqueo que pide DNI y motivo.
+              No se puede cerrar ni minimizar.
+
+  EL PANEL    Es lo que ves vos, desde tu computadora, en el
+              navegador. Desde aca controlas toda la sala.
+
+  Este manual trata sobre EL PANEL. El kiosco se explica solo en
+  la medida en que necesitas saber que esta viendo el alumno.
+
+
+-------------------------------------------------------------------
+  INDICE
+-------------------------------------------------------------------
+
+  PARTE I - EMPEZAR
+
+     1. Entrar al panel
+     2. Como esta organizado el panel
+     3. Tu primer dia: el recorrido minimo
+
+  PARTE II - LA OPERACION DIARIA
+
+     4. Monitoreo: la pantalla donde vas a vivir
+     5. Atender a un alumno (desbloquear una PC)
+     6. Cuando un alumno NO puede entrar
+     7. Controlar la sala: bloquear, apagar, avisar
+
+  PARTE III - LAS PERSONAS
+
+     8. Base de Datos: quien puede usar las PCs
+     9. Vigencia de carnets: quien sigue habilitado
+    10. Egresados, docentes y autoridades
+
+  PARTE IV - CUANDO ALGO SE USA MAL
+
+    11. Como funciona la disciplina (leelo antes que nada)
+    12. Eventos: que programas abrieron los alumnos
+    13. Sospechas: revisar lo que el sistema detecto
+    14. Incidencias: dejar constancia
+    15. Bans: prohibir el acceso
+
+  PARTE V - CUENTAS Y REPORTES
+
+    16. Indicadores: leer el uso de la sala
+    17. Historial y exportaciones
+
+  PARTE VI - CONFIGURACION (SOLO SUPERADMIN)
+
+    18. Cuentas del panel
+    19. Motivos de uso
+    20. Mensajes programados a la sala
+    21. Apariencia del panel
+    22. Respaldo, auditoria y mantenimiento
+
+  PARTE VII - PROBLEMAS
+
+    23. Guia rapida de problemas frecuentes
+    24. Glosario
+
+
+===================================================================
+  PARTE I - EMPEZAR
+===================================================================
+
+-------------------------------------------------------------------
+  1. ENTRAR AL PANEL
+-------------------------------------------------------------------
+
+  1. Abri el navegador en cualquier PC conectada a la red de la
+     biblioteca.
+  2. Escribi la direccion del servidor. Es una direccion tipo
+     10.21.1.91 (preguntale al area de sistemas cual es la tuya).
+  3. Aparece la pantalla de ingreso. Escribi tu usuario y tu
+     contrasena y pulsa "Iniciar Sesion".
+
+  HAY DOS TIPOS DE CUENTA
+
+     ENCARGADO (admin)   Puede operar la sala: desbloquear, bloquear,
+                         apagar, ver y registrar. Es la cuenta del
+                         dia a dia.
+
+     SUPERADMIN          Todo lo anterior, MAS: banear, importar y
+                         borrar datos, crear cuentas y cambiar la
+                         configuracion del sistema.
+
+  Si entras como encargado, las opciones de superadmin sencillamente
+  no aparecen en pantalla. No es un error: el sistema oculta lo que
+  no te corresponde.
+
+  SI NO PODES ENTRAR
+     - Revisa mayusculas y minusculas: la contrasena las distingue.
+     - Si el navegador no carga nada, el servidor puede estar
+       apagado. Ver el capitulo 23.
+
+
+-------------------------------------------------------------------
+  2. COMO ESTA ORGANIZADO EL PANEL
+-------------------------------------------------------------------
+
+  A la izquierda hay un menu con siete secciones. En orden:
+
+     MONITOREO       El estado de todas las PCs, en vivo. Aca vas a
+                     pasar la mayor parte del tiempo.
+
+     INDICADORES     Graficos y numeros: cuanto se uso la sala, que
+                     facultades, que programas.
+
+     EVENTOS         Que programas abrieron los alumnos.
+                     (Al entrar, el titulo dice "Actividad de
+                     Alumnos"; es la misma seccion.)
+
+     HISTORIAL       Todas las sesiones pasadas. Se exporta a Excel
+                     y PDF.
+
+     ALERTAS         Incidencias, baneados y sospechas.
+                     (Al entrar, el titulo dice "Incidencias".)
+
+     BASE DE DATOS   El padron: estudiantes, egresados, docentes y
+                     autoridades.
+
+     CONFIGURACION   Ajustes del sistema. Casi todo es solo para
+                     superadmin.
+
+  ARRIBA A LA IZQUIERDA, EL INDICADOR MAS IMPORTANTE
+
+     "WS Conectado"      El panel esta hablando con el servidor.
+                         Todo funciona.
+
+     "WS Desconectado"   PERDISTE LA CONEXION. No vas a poder
+                         desbloquear ni bloquear nada hasta que
+                         vuelva. Ver capitulo 23.
+
+     Acostumbrate a mirarlo. Si esta desconectado, los botones de
+     accion no van a funcionar aunque los veas.
+
+  LOS NUMERITOS ROJOS (BADGES)
+
+  Algunas secciones del menu muestran un numero. Significa "hay
+  esto nuevo que no viste". Cuando entras a la seccion, el numero
+  desaparece. No es una cuenta total: es lo pendiente de mirar.
+
+
+-------------------------------------------------------------------
+  3. TU PRIMER DIA: EL RECORRIDO MINIMO
+-------------------------------------------------------------------
+
+  Si solo vas a hacer una cosa hoy, que sea esto:
+
+     1. Entra al panel (capitulo 1).
+     2. Anda a MONITOREO y mira que las PCs aparezcan.
+     3. Cuando venga un alumno, desbloquea su PC (capitulo 5).
+     4. Al cerrar, bloquea la sala (capitulo 7).
+
+  Todo lo demas se puede aprender despues. Los capitulos 5 y 7 son
+  el 90% del trabajo diario.
+
+
+===================================================================
+  PARTE II - LA OPERACION DIARIA
+===================================================================
+
+-------------------------------------------------------------------
+  4. MONITOREO: LA PANTALLA DONDE VAS A VIVIR
+-------------------------------------------------------------------
+
+  Es la primera pantalla que ves al entrar. Tiene tres zonas.
+
+  ARRIBA: LOS NUMEROS DEL DIA
+
+  Tarjetas con el resumen: equipos online, sesiones de hoy,
+  incidencias pendientes. La tarjeta de incidencias muestra la
+  etiqueta "Critico" cuando hay algo que requiere tu atencion.
+
+  AL COSTADO: COMANDOS GLOBALES
+
+  Tres botones que afectan a TODA la sala:
+     "Bloquear Sala"          Bloquea todas las PCs de una vez.
+     "Mensaje"                Manda un aviso a todas las pantallas.
+     "Registrar estudiante"   Da de alta a un alumno sin salir de aca.
+
+  ABAJO: EL MAPA DE TERMINALES
+
+  Una tarjeta por cada PC. Cada tarjeta te dice:
+
+     - El nombre de la PC.
+     - Su estado, con color:
+
+          "Disponible"   La PC esta encendida y en uso o libre.
+          "Bloqueado"    Encendida, esperando que alguien entre.
+          "Offline"      Apagada o sin conexion. Aparece atenuada.
+
+     - Quien la esta usando. Si nadie, dice "Sin usuario asignado".
+       Si la bloqueaste vos, dice "PC Bloqueada por Admin".
+
+  IMPORTANTE: si una PC dice "Offline", no le podes mandar ordenes.
+  Primero tiene que encenderse y conectarse.
+
+  LA PESTANA "ACTIVIDAD EN VIVO"
+
+  Al costado hay una pestana que se despliega y muestra, en tiempo
+  real, los ultimos programas que abrieron los alumnos. Sirve para
+  darte cuenta al momento si alguien esta haciendo algo raro. El
+  boton "Ver todos" te lleva a la seccion Eventos con el detalle
+  completo.
+
+
+-------------------------------------------------------------------
+  5. ATENDER A UN ALUMNO (DESBLOQUEAR UNA PC)
+-------------------------------------------------------------------
+
+  Esta es LA tarea principal del puesto. Hay dos formas de que una
+  PC se desbloquee, y conviene entender la diferencia.
+
+  FORMA A - EL ALUMNO SE IDENTIFICA SOLO (lo normal)
+
+  El alumno, sentado frente a la PC:
+     1. Escribe su DNI (8 digitos) en la pantalla azul.
+     2. Elige un motivo de la lista desplegable.
+     3. Pulsa "Ingresar".
+
+  Si todo esta bien, la PC se desbloquea sola en un par de segundos
+  y aparece "Bienvenido, {nombre}". Vos no tenes que hacer nada.
+
+  FORMA B - LO DESBLOQUEAS VOS DESDE EL PANEL
+
+  Cuando el alumno no puede hacerlo solo (teclado roto, no entiende
+  la pantalla, etc.):
+
+     1. En MONITOREO, busca la tarjeta de esa PC. Tiene que decir
+        "Bloqueado" y estar online.
+     2. Pulsa "Desbloquear". Se abre la ventana "Desbloquear
+        Terminal".
+     3. Escribi el DNI del alumno. Son exactamente 8 digitos: si
+        pones mas o menos, el sistema no te deja seguir.
+     4. Elegi la actividad de la lista. Es obligatoria.
+        Si elegis "Otros", se abre un campo de texto y tenes que
+        escribir el motivo.
+     5. Pulsa "Desbloquear".
+
+  El sistema muestra "Verificando en la UNASAM..." mientras
+  consulta. Espera. Si el alumno es valido, la PC se desbloquea.
+
+  QUE PASA POR DETRAS (util saberlo)
+
+     - Si el alumno ya tenia una sesion abierta en OTRA PC, esa
+       sesion se cierra automaticamente. Un alumno = una PC. La
+       otra maquina se bloquea sola.
+     - Queda registrada la sesion con la hora, la PC y el motivo.
+       Eso es lo que despues ves en Historial.
+
+  SI NO PASA NADA DESPUES DE PULSAR
+
+  Espera 10 segundos. Si aparece "Sin respuesta del servidor", la
+  conexion se corto. Revisa el indicador WS arriba a la izquierda.
+
+
+-------------------------------------------------------------------
+  6. CUANDO UN ALUMNO NO PUEDE ENTRAR
+-------------------------------------------------------------------
+
+  Te va a pasar seguido y son siempre las mismas cuatro razones.
+  Aprendete esta tabla y resolves el 100% de los casos del mostrador.
+
+  ---------------------------------------------------------------
+  DICE                    | SIGNIFICA        | QUE HACES
+  ---------------------------------------------------------------
+  "Carnet VENCIDO el      | Su carnet de     | Renovarle la
+  {fecha}. Debe renovar   | biblioteca       | credencial desde el
+  su carnet en            | caduco.          | panel (capitulo 9),
+  biblioteca..."          |                  | o mandarlo a
+                          |                  | tramitar uno nuevo.
+  ---------------------------------------------------------------
+  Mensaje de ban          | Esta sancionado. | Ver capitulo 15. Solo
+                          |                  | un superadmin puede
+                          |                  | levantar un ban.
+  ---------------------------------------------------------------
+  No figura registrado    | Su DNI no esta   | Registralo: boton
+                          | en el padron.    | "Registrar estudiante"
+                          |                  | en Monitoreo, o
+                          |                  | capitulo 8.
+  ---------------------------------------------------------------
+  Nada / no responde      | Se corto la      | Ver capitulo 23.
+                          | conexion.        |
+  ---------------------------------------------------------------
+
+  UN CONSEJO PRACTICO
+
+  Antes de discutir con el alumno, anda a BASE DE DATOS y busca su
+  DNI. En dos segundos ves si existe, si esta vigente y si tiene
+  incidencias. Es mas rapido que adivinar.
+
+  SI SE CAYO EL SERVIDOR Y NECESITAS QUE ALGUIEN TRABAJE IGUAL
+
+  Existe un modo de emergencia: el kiosco acepta un PIN del
+  encargado para desbloquear sin consultar al servidor. Ese PIN lo
+  configura el superadmin (capitulo 22).
+
+  Usalo solo si de verdad no hay servidor. Esa sesion se verifica
+  cuando la conexion vuelve, y si el alumno no era valido, la PC se
+  bloquea sola.
+
+
+-------------------------------------------------------------------
+  7. CONTROLAR LA SALA: BLOQUEAR, APAGAR, AVISAR
+-------------------------------------------------------------------
+
+  SOBRE UNA PC EN PARTICULAR
+
+  En su tarjeta, en Monitoreo:
+
+     "Bloquear"    Cierra la sesion del alumno y bloquea la PC.
+                   El alumno pierde el acceso en el acto.
+                   Usalo cuando alguien se porta mal o se fue sin
+                   cerrar sesion.
+
+     "Apagar PC"   Apaga la maquina de verdad, en remoto.
+                   Ojo: si el alumno tiene algo sin guardar, lo
+                   pierde. Avisale antes.
+
+  Ambas acciones piden confirmacion. Es a proposito.
+
+  SOBRE TODA LA SALA
+
+     "Bloquear Sala"   Bloquea todas las PCs a la vez. Es lo que
+                       usas al cerrar la biblioteca.
+
+     "Mensaje"         Abre "Enviar mensaje a la sala". Escribi el
+                       texto y pulsa "Enviar ahora". Aparece como
+                       un aviso en todas las pantallas.
+
+  LA RUTINA DE CIERRE RECOMENDADA
+
+     1. 15 minutos antes: manda un "Mensaje" avisando el cierre.
+        (Esto se puede automatizar; ver capitulo 20.)
+     2. A la hora: pulsa "Bloquear Sala".
+     3. Verifica en el mapa que todas quedaron "Bloqueado".
+
+
+===================================================================
+  PARTE III - LAS PERSONAS
+===================================================================
+
+-------------------------------------------------------------------
+  8. BASE DE DATOS: QUIEN PUEDE USAR LAS PCs
+-------------------------------------------------------------------
+
+  Solo puede entrar quien esta en el padron. Si no esta, no entra.
+  Esta seccion es donde se administra ese padron.
+
+  Arriba hay cuatro sub-pestanas: "Estudiantes", "Egresados",
+  "Docentes" y "Autoridad". La principal es Estudiantes.
+
+  BUSCAR A ALGUIEN
+
+  Escribi en el buscador. Funciona con nombre, DNI o codigo de
+  matricula; con cualquiera de los tres alcanza.
+
+  REGISTRAR UN ESTUDIANTE NUEVO
+
+     1. Pulsa "Nuevo Usuario".
+     2. Completa los datos. El DNI es obligatorio y son 8 digitos.
+     3. Pulsa "Registrar".
+
+  Desde ese momento el alumno ya puede usar las PCs. No hace falta
+  reiniciar nada.
+
+  Atajo: el boton "Registrar estudiante" de Monitoreo hace lo mismo
+  sin que tengas que cambiar de seccion. Es el que vas a usar cuando
+  tenes al alumno esperando en el mostrador.
+
+  EDITAR
+
+  El boton con forma de lapiz en la fila. Corregis y pulsas
+  "Guardar".
+
+  IMPORTAR MUCHOS DE UNA VEZ (solo superadmin)
+
+  Cuando llega el padron nuevo del semestre:
+
+     1. Pulsa "Importar Excel" y elegi el archivo.
+     2. Espera. Dice "Importando maestro..." y puede tardar.
+
+  El sistema NO borra lo que ya habia: compara por DNI, actualiza a
+  los que ya existen y agrega a los nuevos. Podes importar varias
+  veces sin miedo a duplicar.
+
+  EXPORTAR (hacer una copia)
+
+  "Exportar Excel" baja todo el padron, incluidas las fechas de
+  ingreso, de vigencia y de renovacion.
+
+  Hacelo antes de cualquier importacion grande. Es tu red de
+  seguridad.
+
+  VACIAR EL PADRON (solo superadmin)
+
+  Existe la opcion de borrar TODOS los estudiantes. Es irreversible.
+  No la uses salvo que sepas exactamente por que lo estas haciendo,
+  y nunca sin exportar antes.
+
+
+-------------------------------------------------------------------
+  9. VIGENCIA DE CARNETS: QUIEN SIGUE HABILITADO
+-------------------------------------------------------------------
+
+  El carnet de biblioteca no dura para siempre: vence a los 24 meses
+  (ese plazo es configurable).
+
+  Un carnet vencido NO PUEDE USAR LAS PCs. El bloqueo es automatico:
+  no depende de que vos te acuerdes.
+
+  COMO VES LA VIGENCIA
+
+  En Base de Datos, cada fila tiene una columna de vigencia:
+
+     "Vence {fecha}"   Todavia esta habilitado.
+     "Vencida"         Ya no puede entrar.
+     "—"               No hay fecha cargada.
+
+  Las filas vencidas se resaltan para que salten a la vista.
+
+  VER SOLO LOS VENCIDOS
+
+  Pulsa "Solo vencidas". Te filtra la lista. Sirve para saber a
+  cuanta gente hay que avisarle.
+
+  RENOVAR UNA CREDENCIAL
+
+     1. Busca al alumno.
+     2. En su fila, pulsa el boton "Renovar credencial (otros 24
+        meses)".
+     3. Aparece "Credencial renovada (vence {fecha})".
+
+  El alumno puede volver a entrar de inmediato.
+
+  QUE HACE Y QUE NO HACE LA RENOVACION
+
+  Extiende la fecha de vencimiento y deja registrada la fecha de
+  renovacion. NO cambia la fecha de ingreso original: esa se
+  conserva siempre como dato historico.
+
+  Nota: en la practica muchos alumnos prefieren tramitar un carnet
+  nuevo antes que renovar. Por eso la fecha de renovacion esta
+  vacia en la mayoria de los registros. Es normal.
+
+
+-------------------------------------------------------------------
+  10. EGRESADOS, DOCENTES Y AUTORIDADES
+-------------------------------------------------------------------
+
+  Son tres padrones aparte, en sus propias sub-pestanas. Funcionan
+  igual que Estudiantes: buscar, "Nuevo", editar, eliminar,
+  "Importar Excel" y "Exportar Excel".
+
+  La diferencia con Estudiantes: aca SI se puede eliminar un
+  registro de verdad.
+
+
+===================================================================
+  PARTE IV - CUANDO ALGO SE USA MAL
+===================================================================
+
+-------------------------------------------------------------------
+  11. COMO FUNCIONA LA DISCIPLINA (LEELO ANTES QUE NADA)
+-------------------------------------------------------------------
+
+  Los cuatro capitulos que siguen son un solo proceso. Si entendes
+  este esquema, los demas se leen solos:
+
+      El sistema detecta algo raro
+                |
+                v
+          SOSPECHA          Automatica. Nadie la escribio.
+                |           Solo dice "mira esto".
+                |
+       vos la revisas
+                |
+        +-------+-------+
+        |               |
+    Descartar        Aprobar
+    (era normal)         |
+                         v
+                    INCIDENCIA     Queda como constancia formal
+                         |         contra el alumno.
+                         |
+              se acumulan incidencias
+                         |
+                         v
+                       BAN         El alumno no puede usar las PCs.
+                                   Solo superadmin.
+
+  LA REGLA QUE APLICA LA BIBLIOTECA
+
+     3 incidencias LEVES activas  =  habilita banear
+     1 incidencia GRAVE           =  baneo inmediato recomendado
+
+  El sistema te avisa cuando se llega a ese punto, pero NO banea
+  solo. La decision siempre es de una persona.
+
+
+-------------------------------------------------------------------
+  12. EVENTOS: QUE PROGRAMAS ABRIERON LOS ALUMNOS
+-------------------------------------------------------------------
+
+  Cada vez que un alumno abre un programa, queda registrado. Esta
+  seccion es ese registro.
+
+  Tiene tres sub-pestanas: "Flujo", "Banco de apps" y "Banco de
+  ruido".
+
+  EL FLUJO
+
+  La lista de lo que se abrio, lo mas reciente arriba. Con el filtro
+  "Todos" / "Sospechosos" te quedas solo con lo que el sistema
+  marco como raro.
+
+  POR QUE HAY TANTA COSA QUE NO TE INTERESA
+
+  Windows abre decenas de procesos solo. Para separar la paja del
+  trigo el sistema usa dos listas:
+
+     BANCO DE APPS    Programas que SI son de un alumno usando la
+                      PC: Word, Chrome, AutoCAD.
+
+     BANCO DE RUIDO   Procesos del sistema que hay que ignorar.
+
+  Lo que no esta en ninguna de las dos aparece como "Sin
+  clasificar".
+
+  CLASIFICAR UN PROGRAMA
+
+  Cuando ves algo sin clasificar que reconoces, pulsa el boton
+  "Clasificar este programa" en su fila y decidile si es app o
+  ruido. Se aplica hacia atras: los registros viejos tambien se
+  corrigen.
+
+  Vale la pena hacerlo. Cuanto mejor clasificado, mas util es todo
+  lo demas: los indicadores, las sospechas y los reportes.
+
+  IGNORAR UN PROCESO
+
+  El boton "No registrar mas este proceso" lo saca de la vista para
+  siempre. Con "Ver ignorados" podes revisar la lista y arrepentirte.
+
+
+-------------------------------------------------------------------
+  13. SOSPECHAS: REVISAR LO QUE EL SISTEMA DETECTO
+-------------------------------------------------------------------
+
+  Estan en ALERTAS, sub-pestana "Sospechas".
+
+  Una sospecha es un aviso automatico. NO es una acusacion: es el
+  sistema diciendo "esto no me cuadra, decidilo vos".
+
+  Los filtros son "Pendientes", "Todas", "Aprobadas" y
+  "Descartadas". Empeza siempre por "Pendientes".
+
+  QUE HACER CON UNA
+
+     1. Pulsa sobre la sospecha. Se abre el contexto: quien era el
+        alumno, en que PC, a que hora, que programa, y si ya tiene
+        incidencias previas.
+
+     2. Decidi:
+
+        "Descartar"   Era normal. Un falso positivo. Desaparece y
+                      no pasa nada.
+
+        "Aprobar"     Era real. Se convierte automaticamente en una
+                      incidencia LEVE contra el alumno.
+
+  MI RECOMENDACION
+
+  Revisa las pendientes una vez por dia. Si las dejas acumular,
+  pierden valor: cuando son 200 ya nadie las mira, y ahi es cuando
+  se te pasa la que importaba.
+
+  Ante la duda, descarta. Una incidencia injusta es peor que una
+  sospecha perdida.
+
+
+-------------------------------------------------------------------
+  14. INCIDENCIAS: DEJAR CONSTANCIA
+-------------------------------------------------------------------
+
+  Estan en ALERTAS, sub-pestana "Incidencias".
+
+  Una incidencia es un registro formal de que un alumno hizo algo
+  indebido. Puede nacer de una sospecha aprobada, o la cargas vos a
+  mano.
+
+  REGISTRAR UNA
+
+     1. Pulsa "Registrar Incidencia".
+     2. Elegi al alumno.
+     3. Elegi el tipo:
+
+        "Leve — advertencia verbal / comportamiento"
+        "Grave — dano a equipos / conducta seria"
+
+     4. Describi que paso. Se especifico: dentro de seis meses,
+        "se porto mal" no le va a servir a nadie.
+     5. Pulsa "Registrar".
+
+  Si el alumno ya venia con antecedentes, el sistema te lo dice en
+  ese momento: "Este alumno ya tiene N incidencias activas."
+
+  EL AVISO DE LOS REINCIDENTES
+
+  Arriba de la lista hay un bloque, "Alumnos con 3 o mas incidencias
+  activas — requieren atencion". Esos son los casos que hay que
+  resolver: o se banea, o se decide formalmente no hacerlo.
+
+  RESOLVER UNA INCIDENCIA (solo superadmin)
+
+  El boton "Eliminar incidencia" la da por cerrada y deja de contar
+  para el total del alumno. Usalo cuando el tema ya se hablo y se
+  resolvio.
+
+
+-------------------------------------------------------------------
+  15. BANS: PROHIBIR EL ACCESO
+-------------------------------------------------------------------
+
+  Estan en ALERTAS, sub-pestana "Usuarios Baneados".
+  SOLO SUPERADMIN.
+
+  Un ban impide que el alumno use cualquier PC de la sala. Es la
+  sancion mas fuerte del sistema.
+
+  BANEAR
+
+     1. Desde la fila del alumno (en Base de Datos o en
+        Incidencias), pulsa el boton de banear.
+     2. Se abre "Banear Usuario". Escribi el motivo y la duracion.
+     3. Pulsa "Banear".
+
+  Efecto inmediato: si estaba usando una PC, se le cierra la sesion.
+  Cuando intente entrar de nuevo, el kiosco le va a decir por que no
+  puede.
+
+  VER LOS BANEADOS
+
+  Dos vistas: "Activos" (los que estan sancionados ahora) e
+  "Historial" (todos, incluyendo los que ya terminaron). En el
+  historial se distingue entre "Expirados (sistema)" —se cumplio el
+  plazo solo— y "Levantados (admin)" —alguien decidio perdonarlo—.
+
+  LEVANTAR UN BAN
+
+  El boton "Levantar ban" en la fila. Ojo con esto: al levantar el
+  ban tambien SE RESETEAN las incidencias del alumno. Arranca de
+  cero.
+
+  Es lo correcto si el tema se hablo y se cerro. Pero si lo haces
+  por comodidad, estas borrando el historial que justificaba la
+  sancion.
+
+
+===================================================================
+  PARTE V - CUENTAS Y REPORTES
+===================================================================
+
+-------------------------------------------------------------------
+  16. INDICADORES: LEER EL USO DE LA SALA
+-------------------------------------------------------------------
+
+  Es la seccion para responder preguntas del tipo "cuanta gente
+  vino este mes" o "que carrera usa mas la sala". Sirve para los
+  informes que te piden de arriba.
+
+  EL PERIODO
+
+  Arriba: "Semana", "Mes", "Rango". Con "Rango" elegis dos fechas y
+  pulsas "Aplicar". Todo lo que veas abajo respeta ese periodo.
+
+  LAS TRES SUB-PESTANAS
+
+  EQUIPOS   Uso de las maquinas. El grafico por facultad te dice
+            que carreras usan mas la sala.
+
+  USUARIOS  Cuantos alumnos nuevos se registraron, como viene
+            creciendo el padron, y cuantas credenciales estan
+            vencidas.
+
+  PROGRAMAS Ranking de los programas mas usados, del mas al menos.
+
+  PARA QUE SIRVE DE VERDAD EL RANKING DE PROGRAMAS
+
+  Este es el dato mas accionable del panel. Si un programa aparece
+  muy arriba:
+
+     - Puede que valga la pena comprar licencias.
+     - Si los alumnos lo estan usando pirateado, conviene instalar
+       una version legal antes de que sea un problema.
+
+  Por eso el ranking incluye tambien los programas SIN CLASIFICAR:
+  justamente el que todavia no clasificaste puede ser el que mas se
+  usa. Los que ya marcaste como ruido no aparecen.
+
+  PERSONALIZAR LOS INDICADORES (solo superadmin)
+
+  El boton "Personalizar" deja elegir que tarjetas se muestran.
+  Menos tarjetas y mejor elegidas se leen mejor que veinte.
+
+
+-------------------------------------------------------------------
+  17. HISTORIAL Y EXPORTACIONES
+-------------------------------------------------------------------
+
+  Todas las sesiones que hubo: quien, en que PC, cuando, cuanto
+  tiempo y para que.
+
+  Los chips de periodo son "Hoy", "Mes", "Ano", "Todo". Con
+  "Filtros" afinas mas y con "Limpiar filtros" volves al principio.
+  La barra "Ordenar por:" ordena por "Fecha", "Estudiante", "PC" o
+  "Actividad".
+
+  Una sesion en curso aparece con la etiqueta "En curso".
+
+  EXPORTAR
+
+     "Excel"   Baja la tabla. Ideal si despues queres hacer cuentas.
+     "PDF"     Documento listo para presentar o firmar.
+
+  Los dos respetan los filtros que tengas puestos. Si querias todo
+  el ano y exportaste con el filtro en "Hoy", te va a salir un
+  archivo de un dia. Revisa el filtro antes de exportar.
+
+  RECOMENDACION
+
+  Exporta a Excel una vez por mes y guardalo aparte. Es tu respaldo
+  y tu material para los informes.
+
+
+===================================================================
+  PARTE VI - CONFIGURACION (SOLO SUPERADMIN)
+===================================================================
+
+  Todo este bloque requiere cuenta de superadmin. Si entras como
+  encargado, no vas a ver estas opciones.
+
+
+-------------------------------------------------------------------
+  18. CUENTAS DEL PANEL
+-------------------------------------------------------------------
+
+  CONFIGURACION > "Credenciales".
+
+  Hay dos cuentas: "Usuario Admin" (acceso basico) y "Usuario
+  Superadmin" (acceso total). De cada una podes cambiar el nombre
+  de usuario y la contrasena.
+
+  BUENAS PRACTICAS
+
+     - Cambia las contrasenas de fabrica el primer dia.
+     - Que el personal de mostrador use la cuenta ADMIN, no la de
+       superadmin. Asi nadie borra el padron sin querer.
+     - No compartan la contrasena de superadmin por chat.
+
+
+-------------------------------------------------------------------
+  19. MOTIVOS DE USO
+-------------------------------------------------------------------
+
+  CONFIGURACION > "Motivos de uso".
+
+  Son las opciones que el alumno elige al entrar ("Tarea",
+  "Investigacion", etc.). Vos decidis cuales son.
+
+     AGREGAR      Escribi el motivo y pulsa "Agregar".
+     EDITAR       Cambia la descripcion.
+     QUITAR       Lo saca de la lista del kiosco.
+     REACTIVAR    Lo vuelve a poner.
+
+  DOS COSAS IMPORTANTES
+
+  1. Los cambios llegan solos a las PCs. No hay que reinstalar ni
+     recompilar nada: el kiosco pide la lista al servidor cada vez
+     que arranca.
+
+  2. Quitar un motivo NO borra el historial. Las sesiones viejas
+     que lo usaron lo conservan. Por eso "quitar" en realidad lo
+     desactiva: para no romper los reportes de meses anteriores.
+
+  CONSEJO: pocos motivos y claros. Si pones quince, todos van a
+  elegir el primero y el dato deja de servirte.
+
+
+-------------------------------------------------------------------
+  20. MENSAJES PROGRAMADOS A LA SALA
+-------------------------------------------------------------------
+
+  CONFIGURACION > "Backdoor" > "Mensajes Programados".
+
+  Es la version automatica del boton "Mensaje". En vez de acordarte
+  todos los dias, lo programas una vez.
+
+     "Cierre Diario"    Se manda todos los dias a la misma hora.
+                        Configuralo para 15 minutos antes de
+                        cerrar y te olvidas del tema.
+
+     "Mensajes Extra"   Un solo envio, para algo puntual.
+
+  Con "Duracion del aviso en pantalla" decidis cuantos segundos se
+  ve. El boton "Probar ahora" lo manda en el momento para que veas
+  como queda antes de dejarlo programado.
+
+
+-------------------------------------------------------------------
+  21. APARIENCIA DEL PANEL
+-------------------------------------------------------------------
+
+  CONFIGURACION > "Aplicacion".
+
+     "Icono del Administrador"   Cambia el logo. "Subir imagen
+                                 (PNG, JPG, SVG)" y despues
+                                 "Aplicar logo".
+
+     "Textos del Login..."       Cambia el "Titulo principal", el
+                                 "Subtitulo" y el "Pie de pagina"
+                                 de la pantalla de ingreso.
+                                 Pulsa "Guardar textos".
+
+  Los cambios se ven para todo el mundo, no solo para vos.
+
+
+-------------------------------------------------------------------
+  22. RESPALDO, AUDITORIA Y MANTENIMIENTO
+-------------------------------------------------------------------
+
+  COPIA DE SEGURIDAD
+
+  CONFIGURACION > "Aplicacion" > "Copia de seguridad" >
+  "Descargar backup .sql".
+
+  Baja TODA la base de datos en un archivo.
+
+  HACELO SEGUIDO. Una vez por semana como minimo, y siempre antes
+  de una importacion grande o de cualquier cosa que diga
+  "irreversible". Guardalo fuera del servidor: en un USB o en otra
+  computadora. Un backup que vive en la maquina que se rompio no
+  es un backup.
+
+  BITACORA DE AUDITORIA
+
+  CONFIGURACION > "Auditoria". Registra quien hizo que y cuando:
+  quien baneo, quien importo, quien borro. Es donde mirar cuando
+  algo cambio y nadie sabe por que.
+
+  CONSOLAS DEL SISTEMA
+
+  CONFIGURACION > "Actividad del Sistema". Dos consolas tecnicas:
+  "Actividad de Terminales" y "Sistema y Errores". Si tenes que
+  reportar un problema al area de sistemas, "Descargar log" y
+  mandaselo: les ahorra la mitad del diagnostico.
+
+  ATAJO DE MANTENIMIENTO Y PIN OFFLINE
+
+  CONFIGURACION > "Backdoor".
+
+     "Atajo de Mantenimiento"    Combinacion de teclas + PIN para
+                                 salir del kiosco y poder trabajar
+                                 sobre la PC (instalar, actualizar).
+
+     "Modo Offline de
+      Emergencia"                El PIN que usa el encargado para
+                                 desbloquear si el servidor se cayo
+                                 (capitulo 6).
+
+  Estos PINs son las llaves del sistema. Que los sepa la menor
+  cantidad de gente posible, y cambialos si alguien que los conocia
+  deja el puesto.
+
+  ACTUALIZAR LOS CLIENTES
+
+  CONFIGURACION > "Actualizaciones". Se indica la ruta de
+  distribucion y las PCs se actualizan solas al arrancar. Las
+  instrucciones estan en "Como publicar una actualizacion".
+
+  RESET TOTAL
+
+  Existe. Borra todo. No lo uses. Si crees que lo necesitas,
+  consulta con el area de sistemas primero, y haz un backup antes.
+
+
+===================================================================
+  PARTE VII - PROBLEMAS
+===================================================================
+
+-------------------------------------------------------------------
+  23. GUIA RAPIDA DE PROBLEMAS FRECUENTES
+-------------------------------------------------------------------
+
+  Ordenados por frecuencia real.
+
+  DICE "WS DESCONECTADO" Y NO PUEDO HACER NADA
+
+  El panel perdio contacto con el servidor. Los botones de accion no
+  van a funcionar.
+     1. Espera 30 segundos: se reconecta solo bastante seguido.
+     2. Recarga la pagina (F5).
+     3. Si sigue, el servidor esta caido. Avisa a sistemas. Mientras
+        tanto, usa el PIN offline (capitulo 6) para que la gente
+        pueda trabajar.
+
+  UNA PC APARECE "OFFLINE" PERO ESTA ENCENDIDA
+
+     1. Verifica el cable de red.
+     2. Reinicia la PC: el kiosco arranca solo y se reconecta.
+     3. Si no vuelve, revisa "Actividad del Sistema" en
+        Configuracion.
+
+  EL PANEL ME MUESTRA INFORMACION VIEJA
+
+  Es el cache del navegador. Pulsa Ctrl + F5 (recarga forzada).
+  Si el panel se ve raro despues de una actualizacion, es casi
+  siempre esto.
+
+  UN ALUMNO DICE QUE NO PUEDE ENTRAR
+
+  Ver el capitulo 6, que tiene la tabla completa. El atajo: busca su
+  DNI en Base de Datos y fijate si existe, si esta vigente y si
+  tiene un ban.
+
+  DESBLOQUEE UNA PC PERO SIGUE BLOQUEADA
+
+  La orden salio pero la PC no confirmo. Suele ser que se colgo o
+  perdio la red. Reiniciala.
+
+  NO ME DEJA PONER EL DNI
+
+  El campo acepta exactamente 8 digitos y solo numeros. Si el
+  documento tiene otro formato, no va a entrar por ahi.
+
+  EXPORTE UN EXCEL Y SALIO CASI VACIO
+
+  Tenias un filtro puesto. Pulsa "Limpiar filtros" y exporta de
+  nuevo.
+
+  NO VEO UN BOTON QUE ESTE MANUAL MENCIONA
+
+  Casi seguro es una funcion de superadmin y entraste como
+  encargado. Fijate con que cuenta iniciaste sesion.
+
+
+-------------------------------------------------------------------
+  24. GLOSARIO
+-------------------------------------------------------------------
+
+  BAN            Prohibicion de usar las PCs. La sancion mas fuerte.
+                 Solo superadmin.
+
+  BANCO DE APPS  Lista de programas que cuentan como uso real de un
+                 alumno.
+
+  BANCO DE RUIDO Lista de procesos del sistema que se ignoran.
+
+  ENCARGADO      Cuenta de operacion diaria (admin). Puede atender
+                 la sala pero no configurar el sistema.
+
+  INCIDENCIA     Registro formal de una falta. Leve o grave.
+
+  KIOSCO         El programa que corre en la PC del alumno y la
+                 mantiene bloqueada.
+
+  MAESTRO        El padron de estudiantes.
+
+  MOTIVO DE USO  Lo que el alumno declara al entrar.
+
+  OFFLINE        Sin conexion con el servidor.
+
+  PADRON         El listado de gente autorizada.
+
+  SESION         El periodo entre que un alumno entra y sale de una
+                 PC.
+
+  SOSPECHA       Aviso automatico de actividad rara. Todavia no es
+                 una acusacion.
+
+  SUPERADMIN     Cuenta con acceso total.
+
+  TERMINAL       Cada una de las PCs de la sala.
+
+  VIGENCIA       Hasta cuando vale el carnet de biblioteca.
+
+  WS             La conexion en vivo entre el panel y el servidor.
+                 Si esta caida, no se pueden dar ordenes.
+
+
+===================================================================
+  FIN DEL MANUAL
+
+  Documentacion relacionada, para consulta tecnica:
+     CASOS_DE_USO_POR_MODULO.txt   los 100 casos por modulo
+     CATALOGO_CASOS_DE_USO.txt     los 100 casos por actor
+     README.md                     instalacion y arquitectura
+===================================================================

@@ -528,6 +528,138 @@ async def obtener_motivos_activos(db: AsyncSession = Depends(get_db)):
     return [{"id": m.id, "descripcion": m.descripcion} for m in motivos]
 
 
+# ── Gestion de motivos de uso (razon por la que el alumno usa la PC) ──
+# El kiosco pide /catalogos/motivos al arrancar, asi que cualquier cambio acá
+# se refleja en las PCs sin recompilar el cliente.
+# Borrado LOGICO: un motivo usado en sesiones viejas nunca se borra de verdad,
+# se desactiva (desaparece del kiosco pero el historial conserva su motivo).
+
+class _MotivoReq(BaseModel):
+    descripcion: str
+    activo: bool = True
+
+
+@router.get("/admin/motivos")
+async def listar_motivos(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Lista TODOS los motivos (activos e inactivos) con cuántas sesiones usan
+    cada uno, para que el panel pueda avisar antes de desactivar."""
+    from models import CatalogoMotivo
+    from sqlalchemy import func as _f
+    if admin.rol not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+    # Conteo de uso por motivo (por id y tambien por texto en razon_uso, que es
+    # como lo guardan las sesiones historicas importadas).
+    res = await db.execute(select(CatalogoMotivo).order_by(CatalogoMotivo.descripcion))
+    motivos = res.scalars().all()
+    usos_id = dict((await db.execute(
+        select(Sesion.motivo_id, _f.count(Sesion.id))
+        .where(Sesion.motivo_id.isnot(None)).group_by(Sesion.motivo_id)
+    )).all())
+    usos_txt = dict((await db.execute(
+        select(Sesion.razon_uso, _f.count(Sesion.id))
+        .where(Sesion.razon_uso.isnot(None)).group_by(Sesion.razon_uso)
+    )).all())
+    return {
+        "motivos": [
+            {
+                "id": m.id,
+                "descripcion": m.descripcion,
+                "activo": bool(m.activo),
+                "usos": int(usos_id.get(m.id, 0)) + int(usos_txt.get(m.descripcion, 0)),
+            }
+            for m in motivos
+        ]
+    }
+
+
+@router.post("/admin/motivos")
+async def crear_motivo(
+    datos: _MotivoReq,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Agrega un motivo nuevo. El kiosco lo mostrara al recargar."""
+    from models import CatalogoMotivo
+    if admin.rol not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+    desc = (datos.descripcion or "").strip()
+    if not desc:
+        raise HTTPException(status_code=422, detail="La descripción no puede estar vacía")
+    if len(desc) > 200:
+        raise HTTPException(status_code=422, detail="La descripción es demasiado larga (máx. 200)")
+    dup = (await db.execute(
+        select(CatalogoMotivo).where(CatalogoMotivo.descripcion == desc))).scalar_one_or_none()
+    if dup:
+        raise HTTPException(status_code=409, detail=f"Ya existe el motivo «{desc}»")
+    m = CatalogoMotivo(descripcion=desc, activo=True)
+    db.add(m)
+    await registrar_auditoria(admin.username, "crear_motivo", rol=admin.rol,
+                              objetivo=desc, db=db)
+    await db.commit()
+    return {"mensaje": f"Motivo «{desc}» agregado", "id": m.id}
+
+
+@router.put("/admin/motivos/{motivo_id}")
+async def editar_motivo(
+    motivo_id: int,
+    datos: _MotivoReq,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Edita la descripción y/o el estado (activo) de un motivo."""
+    from models import CatalogoMotivo
+    if admin.rol not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+    m = (await db.execute(
+        select(CatalogoMotivo).where(CatalogoMotivo.id == motivo_id))).scalar_one_or_none()
+    if not m:
+        raise HTTPException(status_code=404, detail="Motivo no encontrado")
+    desc = (datos.descripcion or "").strip()
+    if not desc:
+        raise HTTPException(status_code=422, detail="La descripción no puede estar vacía")
+    if len(desc) > 200:
+        raise HTTPException(status_code=422, detail="La descripción es demasiado larga (máx. 200)")
+    dup = (await db.execute(select(CatalogoMotivo).where(
+        CatalogoMotivo.descripcion == desc, CatalogoMotivo.id != motivo_id))).scalar_one_or_none()
+    if dup:
+        raise HTTPException(status_code=409, detail=f"Ya existe otro motivo «{desc}»")
+    antes = m.descripcion
+    m.descripcion = desc
+    m.activo = bool(datos.activo)
+    await registrar_auditoria(admin.username, "editar_motivo", rol=admin.rol,
+                              objetivo=f"{antes} -> {desc}",
+                              detalle=f"activo={m.activo}", db=db)
+    await db.commit()
+    return {"mensaje": f"Motivo actualizado"}
+
+
+@router.delete("/admin/motivos/{motivo_id}")
+async def quitar_motivo(
+    motivo_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Quita un motivo de la lista del kiosco.
+
+    Borrado LOGICO (activo=False): el historial de sesiones que ya usó ese
+    motivo lo conserva. Nunca se borra la fila para no romper esos datos."""
+    from models import CatalogoMotivo
+    if admin.rol not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+    m = (await db.execute(
+        select(CatalogoMotivo).where(CatalogoMotivo.id == motivo_id))).scalar_one_or_none()
+    if not m:
+        raise HTTPException(status_code=404, detail="Motivo no encontrado")
+    m.activo = False
+    await registrar_auditoria(admin.username, "desactivar_motivo", rol=admin.rol,
+                              objetivo=m.descripcion, db=db)
+    await db.commit()
+    return {"mensaje": f"Motivo «{m.descripcion}» desactivado (ya no aparece en las PCs)"}
+
+
 # Mapeo columna -> campos ORM para ORDER BY.
 # "escuela" y "estudiante" usan Alumno para agrupación real con JOIN.
 _SORT_MAP = {
