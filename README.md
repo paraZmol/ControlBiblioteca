@@ -60,7 +60,16 @@ Se instala de forma **independiente en cada lugar** (biblioteca central, otras f
 | Parte | Tecnología | Dónde corre | Qué hace |
 |-------|-----------|-------------|----------|
 | **Servidor** | Python + FastAPI + WebSockets | PC del encargado de cada lugar | Orquesta todo: API REST, WebSockets, base de datos MySQL/MariaDB. |
-| **Cliente kiosco** | C# WPF (.NET 8) | Cada PC de uso de los alumnos | Bloquea la PC, pide DNI, monitorea actividad, se auto-actualiza. |
+| **Indicadores (KPIs y gráficos)**
+- Tablero por pestañas: Equipos, Usuarios y Programas. KPIs personalizables por el superadmin.
+- Gráficos de uso por facultad y de alumnos nuevos registrados, con período semana / mes / rango.
+- **Ranking de programas más usados**, que incluye los aún sin clasificar para detectar software que conviene licenciar o asegurar.
+
+**Banco de programas y banco de ruido**
+- Lista blanca de aplicaciones reconocidas y catálogo de procesos de fondo.
+- Lo que no está en ningún banco se marca **sospechoso** hasta que el superadmin lo clasifique (clasificación retroactiva).
+
+**Cliente kiosco** | C# WPF (.NET 8) | Cada PC de uso de los alumnos | Bloquea la PC, pide DNI, monitorea actividad, se auto-actualiza. |
 | **Panel admin** | HTML + JavaScript (vanilla) | Navegador, servido por el servidor | Monitoreo en vivo y control de las PCs. |
 
 ---
@@ -110,14 +119,16 @@ graph TD
 
 **Base de datos**
 - Padrón de alumnos y personal: alta/edición/eliminación e **importar/exportar Excel**.
+- **Vigencia de credenciales:** cada carnet tiene fecha de caducidad; el servidor **bloquea el acceso** de los vencidos y el panel permite renovarlos. Filtro "Solo vencidas" y columna de vigencia en el listado.
 
 **Alertas**
 - **Sospechas:** revisar y aprobar (crea incidencia) o descartar.
 - **Incidencias:** registrar faltas; botón de baneo directo en incidencias graves.
 - **Baneados:** banear/levantar ban; historial de bans (solo superadmin).
 
-**Configuración (solo superadmin)**
+**Configuración**
 - Cambiar credenciales; personalizar ícono y textos del login; gestionar el atajo/PIN del modo offline y mantenimiento; mensajes programados a las PCs; **backup SQL** de toda la base; **auditoría** de acciones.
+- **Motivos de uso gestionables:** agregar, editar, desactivar o reactivar las razones que el alumno elige en la PC. Los cambios llegan a las terminales sin recompilar el cliente.
 
 **Cliente kiosco**
 - Bloqueo de teclado y pantalla completa; monitoreo de actividad; auto-actualización; reconexión automática; modo offline de emergencia.
@@ -128,14 +139,14 @@ graph TD
 
 **Motor:** MySQL / MariaDB (la base se llama `biblioteca_unasam`). El sistema **se niega a arrancar** si no apunta a MySQL — no usa SQLite. Las tablas se crean solas al arrancar (`create_all`); no hay que crearlas a mano.
 
-**16 tablas:**
+**21 tablas:**
 
 | Tabla | Qué guarda |
 |-------|-----------|
-| `alumnos_maestro` | Padrón de estudiantes. |
+| `alumnos_maestro` | Padrón de estudiantes, con vigencia del carnet (alta / caducidad / renovación). |
 | `facultades` / `escuelas` | Catálogos académicos. |
 | `terminales` | PCs registradas. |
-| `catalogo_motivos` | Motivos de uso configurables. |
+| `catalogo_motivos` | Motivos de uso, gestionables desde el panel. |
 | `sesiones` | Historial completo de accesos. |
 | `usuarios` | Cuentas del panel (admin/superadmin). |
 | `bans` | Baneos de alumnos (quién baneó/levantó y cuándo). |
@@ -147,6 +158,9 @@ graph TD
 | `configuracion_kiosco` | Atajos y PIN del backdoor/offline del kiosco. |
 | `mensajes_programados` | Avisos programados a las PCs. |
 | `auditoria` | Bitácora de acciones administrativas. |
+| `banco_apps` | Programas reconocidos (lista blanca). |
+| `banco_ruido` | Procesos de fondo que se ocultan del flujo. |
+| `egresados` / `docentes` / `autoridades` | Otros padrones del centro de cómputo. |
 
 > **Migración desde la v3.0:** la estructura cambió (nombres de tablas/columnas distintos). NO se restaura una base v3.0 sobre la nueva. La migración se hace exportando a Excel desde la v3.0 e importando en la versión nueva. Procedimiento paso a paso en [docs/INSTALACION_SERVIDOR.txt](docs/INSTALACION_SERVIDOR.txt), sección E.
 
@@ -241,6 +255,7 @@ Toda la documentación viva está en [`docs/`](docs/) y en la raíz:
 | [docs/INDICE.txt](docs/INDICE.txt) | Índice general de la documentación. |
 | [docs/INSTALACION_SERVIDOR.txt](docs/INSTALACION_SERVIDOR.txt) | Cómo instalar el servidor en la PC del administrador + migración desde v3.0. |
 | [docs/CASOS_DE_USO.txt](docs/CASOS_DE_USO.txt) | "¿Cómo hago X? ¿Qué debería pasar?" — guía operativa paso a paso. |
+| [docs/CATALOGO_CASOS_DE_USO.txt](docs/CATALOGO_CASOS_DE_USO.txt) | Catálogo completo de los 100 casos de uso, agrupados por actor (alumno / admin / superadmin / sistema) con flujos verificados contra el código. **Base para el manual de usuario.** |
 | [docs/FLUJO_ADMIN.txt](docs/FLUJO_ADMIN.txt) | Flujo del administrador en el panel. |
 | [docs/FLUJO_ALUMNO.txt](docs/FLUJO_ALUMNO.txt) | Flujo del alumno en el kiosco. |
 | [docs/PRUEBAS_EN_CAMPO.txt](docs/PRUEBAS_EN_CAMPO.txt) | Checklist de verificación presencial en la biblioteca. |

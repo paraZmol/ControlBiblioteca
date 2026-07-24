@@ -110,7 +110,9 @@
       "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('Sintaxis main.py + endpoints.py OK'\\)\")",
       "Bash(.venv/Scripts/python.exe -c \"from dotenv import load_dotenv; load_dotenv\\(\\); import main; import api.endpoints; print\\('main.py + endpoints.py importan OK — sin errores'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('core/rate_limit.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK sintaxis'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK sintaxis endpoints.py'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('api/endpoints.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK sintaxis endpoints.py'\\)\")",
+      "WebFetch(domain:www.imperosoftware.com)",
+      "WebFetch(domain:www.flexera.com)"
     ],
     "additionalDirectories": [
       "\\tmp",

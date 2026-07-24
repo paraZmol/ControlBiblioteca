@@ -939,7 +939,18 @@ function conectarWebSocket() {
 
             addLog('activity', `Status update: ${data.total} terminal(es) conectada(s) [${(data.terminales||[]).join(', ')}]`);
 
+            // Foco vigente (programa en uso por terminal), para pintar el mapa
+            // recién montado sin esperar el próximo cambio de foco.
+            if (data.focos && typeof data.focos === 'object') {
+                _focoTerminales = { ...data.focos };
+            }
+
             cargarDashboard();
+
+        } else if (data.tipo === 'foco') {
+
+            // Programa en foco de una terminal cambió (o se limpió si viene vacío).
+            aplicarFoco(data.nombre_terminal, data.proceso_exe || '');
 
         } else if (data.tipo === 'evento_log') {
 
@@ -1555,6 +1566,61 @@ async function apagarPc(ip, sesionId = null, nombrePc = null, nombreAlumno = nul
 
 
 
+// Programa en foco por terminal (nombre_red -> exe). Estado en vivo del mapa,
+// alimentado por eventos WS "foco". No se persiste.
+let _focoTerminales = {};
+
+// Nombres bonitos para los .exe más comunes. Si no está en el mapa, se muestra
+// el .exe tal cual (sin extensión), que ya es legible para el encargado.
+const _APP_NOMBRES = {
+    'winword.exe': 'Word', 'excel.exe': 'Excel', 'powerpnt.exe': 'PowerPoint',
+    'msaccess.exe': 'Access', 'onenote.exe': 'OneNote', 'outlook.exe': 'Outlook',
+    'chrome.exe': 'Chrome', 'msedge.exe': 'Edge', 'firefox.exe': 'Firefox',
+    'brave.exe': 'Brave', 'opera.exe': 'Opera',
+    'acad.exe': 'AutoCAD', 'sketchup.exe': 'SketchUp', 'revit.exe': 'Revit',
+    'photoshop.exe': 'Photoshop', 'illustrator.exe': 'Illustrator',
+    'code.exe': 'VS Code', 'pycharm64.exe': 'PyCharm', 'idea64.exe': 'IntelliJ',
+    'devenv.exe': 'Visual Studio', 'netbeans64.exe': 'NetBeans',
+    'acrord32.exe': 'Adobe Reader', 'acrobat.exe': 'Acrobat',
+    'soffice.bin': 'LibreOffice', 'soffice.exe': 'LibreOffice',
+    'vlc.exe': 'VLC', 'zoom.exe': 'Zoom', 'spss.exe': 'SPSS',
+    'mathcad.exe': 'Mathcad', 'matlab.exe': 'MATLAB', 'rstudio.exe': 'RStudio',
+    'notepad.exe': 'Bloc de notas', 'wordpad.exe': 'WordPad',
+};
+
+function nombreAppBonito(exe) {
+    if (!exe) return '';
+    const bonito = _APP_NOMBRES[exe.toLowerCase()];
+    if (bonito) return bonito;
+    // Fallback: quitar .exe y capitalizar la primera letra.
+    const base = exe.replace(/\.exe$/i, '');
+    return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+// HTML de la línea de foco. Vacío si no hay foco (la tarjeta degrada sin dejar hueco).
+function focoHtml(exe) {
+    if (!exe) return '';
+    return `<div class="tc-foco" title="Programa en uso ahora">
+        <i class="ph ph-app-window tc-foco-ico" aria-hidden="true"></i>
+        <span class="tc-foco-txt">${escapeHtml(nombreAppBonito(exe))}</span>
+    </div>`;
+}
+
+// Aplica el foco a UNA tarjeta por DOM, sin redibujar todo el mapa (evita
+// parpadeo). Si la tarjeta no está en pantalla, solo actualiza el registro.
+function aplicarFoco(nombreRed, exe) {
+    if (exe) _focoTerminales[nombreRed] = exe;
+    else     delete _focoTerminales[nombreRed];
+
+    const card = document.querySelector(`.terminal-card[data-terminal="${(window.CSS && CSS.escape) ? CSS.escape(nombreRed) : nombreRed}"]`);
+    if (!card) return;                       // pestaña no visible o mapa no montado
+    const slot = card.querySelector('.tc-foco-slot');
+    if (!slot) return;
+    // Solo mostramos foco si la tarjeta tiene un alumno activo (pill presente).
+    const conSesion = card.querySelector('.tc-alumno-pill');
+    slot.innerHTML = (exe && conSesion) ? focoHtml(exe) : '';
+}
+
 function renderTerminales(terminales, sesiones = []) {
 
     const grid = document.getElementById('terminalesGrid');
@@ -1654,8 +1720,12 @@ function renderTerminales(terminales, sesiones = []) {
                 ? `<p class="tc-alumno-empty">PC Bloqueada por Admin</p>`
                 : `<p class="tc-alumno-empty">Sin usuario asignado</p>`;
 
+        // Programa en foco (en vivo). Solo con sesión activa y foco conocido.
+        const nombreRed = t.nombre || t.ip;
+        const foco = (sesion && sesion.activa) ? (_focoTerminales[nombreRed] || '') : '';
+
         return `
-            <div class="terminal-card ${t.estado}">
+            <div class="terminal-card ${t.estado}" data-terminal="${escapeHtml(nombreRed)}">
                 <div class="tc-header">
                     <div class="tc-name-row">
                         <span class="tc-status-dot ${dotClass}"></span>
@@ -1667,6 +1737,7 @@ function renderTerminales(terminales, sesiones = []) {
                     <div class="terminal-estado estado-${t.estado}">${estadoLabel(t.estado)}</div>
                 </div>
                 <div class="tc-user-area">${alumnoHtml}</div>
+                <div class="tc-foco-slot">${focoHtml(foco)}</div>
                 <div class="tc-acciones">${botonesPrimarios}</div>
             </div>`;
 
@@ -5615,3 +5686,138 @@ document.addEventListener('DOMContentLoaded', () => {
     _aplicarTooltipsMenu();    // tooltips de los iconos del menú en franja
     _restaurarSesion();
 });
+
+
+// ═══════════════════════════════════════════════════════════════════
+// MOTIVOS DE USO (Configuración > Motivos de uso)
+// La lista que el alumno elige en la PC al iniciar sesión. El kiosco pide
+// /catalogos/motivos al arrancar, así que los cambios llegan sin recompilarlo.
+// Quitar un motivo NO lo borra: lo desactiva (el historial viejo lo conserva).
+// ═══════════════════════════════════════════════════════════════════
+
+let _motivosCache = [];
+
+async function motivosCargar() {
+    const cont = document.getElementById('motivosLista');
+    if (!cont) return;
+    try {
+        const res = await fetch(`${API_BASE}/admin/motivos`, { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok) { cont.innerHTML = '<p class="kpi-empty">No se pudieron cargar los motivos.</p>'; return; }
+        const data = await res.json();
+        _motivosCache = data.motivos || [];
+        _motivosRender();
+    } catch (e) {
+        cont.innerHTML = '<p class="kpi-empty">Error de conexión.</p>';
+    }
+}
+
+function _motivosRender() {
+    const cont = document.getElementById('motivosLista');
+    if (!cont) return;
+    if (!_motivosCache.length) {
+        cont.innerHTML = '<p class="kpi-empty">No hay motivos. Agregá el primero arriba.</p>';
+        return;
+    }
+    const activos   = _motivosCache.filter(m => m.activo);
+    const inactivos = _motivosCache.filter(m => !m.activo);
+
+    const fila = m => `
+        <div class="motivo-item${m.activo ? '' : ' motivo-item-off'}">
+            <i class="ph ${m.activo ? 'ph-check-circle' : 'ph-prohibit'} motivo-ico" aria-hidden="true"></i>
+            <div class="motivo-info">
+                <span class="motivo-desc">${escapeHtml(m.descripcion)}</span>
+                <span class="motivo-usos">${m.usos > 0 ? `usado en ${m.usos} sesión${m.usos === 1 ? '' : 'es'}` : 'sin uso todavía'}</span>
+            </div>
+            <div class="motivo-acciones">
+                <button class="tbl-btn tbl-btn-edit" title="Editar" aria-label="Editar motivo"
+                    onclick="motivoEditar(${m.id})"><i class="ph ph-pencil-simple"></i></button>
+                ${m.activo
+                    ? `<button class="tbl-btn tbl-btn-ban" title="Quitar de las PCs" aria-label="Desactivar motivo"
+                         onclick="motivoDesactivar(${m.id})"><i class="ph ph-eye-slash"></i></button>`
+                    : `<button class="tbl-btn tbl-btn-ok" title="Volver a activar" aria-label="Activar motivo"
+                         onclick="motivoActivar(${m.id})"><i class="ph ph-arrow-counter-clockwise"></i></button>`}
+            </div>
+        </div>`;
+
+    let html = `<p class="motivos-titulo">En uso en las PCs (${activos.length})</p>`;
+    html += activos.length
+        ? activos.map(fila).join('')
+        : '<p class="kpi-empty">Ningún motivo activo: el alumno no vería opciones.</p>';
+    if (inactivos.length) {
+        html += `<p class="motivos-titulo motivos-titulo-off">Desactivados (${inactivos.length})</p>`;
+        html += inactivos.map(fila).join('');
+    }
+    cont.innerHTML = html;
+}
+
+async function motivoCrear() {
+    const input = document.getElementById('motivo-nuevo');
+    const desc  = (input?.value || '').trim();
+    if (!desc) { mostrarNotificacion('Escribí el motivo', 'error'); input?.focus(); return; }
+    try {
+        const res = await fetch(`${API_BASE}/admin/motivos`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ descripcion: desc, activo: true }),
+        });
+        const data = await res.json();
+        if (!res.ok) { mostrarNotificacion(data.detail || 'No se pudo agregar', 'error'); return; }
+        mostrarNotificacion(data.mensaje || 'Motivo agregado', 'ok');
+        if (input) input.value = '';
+        motivosCargar();
+    } catch (e) { mostrarNotificacion('Error de conexión', 'error'); }
+}
+
+function motivoEditar(id) {
+    const m = _motivosCache.find(x => x.id === id);
+    if (!m) return;
+    const nuevo = prompt('Editar el motivo:', m.descripcion);
+    if (nuevo === null) return;                 // canceló
+    const desc = nuevo.trim();
+    if (!desc) { mostrarNotificacion('El motivo no puede quedar vacío', 'error'); return; }
+    if (desc === m.descripcion) return;         // sin cambios
+    _motivoGuardar(id, desc, m.activo);
+}
+
+function motivoDesactivar(id) {
+    const m = _motivosCache.find(x => x.id === id);
+    if (!m) return;
+    const aviso = m.usos > 0
+        ? `Se usó en ${m.usos} sesión(es). El historial las conserva; solo deja de aparecer en las PCs.`
+        : 'Dejará de aparecer en las PCs.';
+    mostrarConfirmacion(
+        `Quitar <strong>${escapeHtml(m.descripcion)}</strong> de las opciones. ${aviso}`,
+        async () => {
+            try {
+                const res = await fetch(`${API_BASE}/admin/motivos/${id}`, {
+                    method: 'DELETE', headers: authHeaders(),
+                });
+                const data = await res.json();
+                if (!res.ok) { mostrarNotificacion(data.detail || 'No se pudo quitar', 'error'); return; }
+                mostrarNotificacion(data.mensaje || 'Motivo desactivado', 'ok');
+                motivosCargar();
+            } catch (e) { mostrarNotificacion('Error de conexión', 'error'); }
+        },
+        { titulo: 'Quitar motivo', textoConfirmar: 'Quitar' }
+    );
+}
+
+function motivoActivar(id) {
+    const m = _motivosCache.find(x => x.id === id);
+    if (!m) return;
+    _motivoGuardar(id, m.descripcion, true);
+}
+
+async function _motivoGuardar(id, descripcion, activo) {
+    try {
+        const res = await fetch(`${API_BASE}/admin/motivos/${id}`, {
+            method: 'PUT',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ descripcion, activo }),
+        });
+        const data = await res.json();
+        if (!res.ok) { mostrarNotificacion(data.detail || 'No se pudo guardar', 'error'); return; }
+        mostrarNotificacion(data.mensaje || 'Guardado', 'ok');
+        motivosCargar();
+    } catch (e) { mostrarNotificacion('Error de conexión', 'error'); }
+}

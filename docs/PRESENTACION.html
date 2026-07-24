@@ -1,0 +1,846 @@
+<title>Sistema de Control de Acceso — Biblioteca UNASAM</title>
+
+<style>
+  :root{
+    --ink:#12121a; --ink2:#4a4a5c; --ink3:#76768c;
+    --bg:#fbfbfd; --sur:#ffffff; --sur2:#f2f2f7;
+    --bdr:#e2e2ec; --bdr2:#cdcddc;
+    --a:#4f46e5; --a-dim:#eeecfd; --a-bdr:#c7c2f5;
+    --ok:#15803d; --ok-dim:#e8f6ec; --ok-bdr:#a8ddb8;
+    --wrn:#b45309; --wrn-dim:#fdf3e3; --wrn-bdr:#e8c893;
+    --err:#be123c; --err-dim:#fdeef1;
+    --serif: Georgia,"Times New Roman",serif;
+    --sans: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono: "JetBrains Mono",Consolas,"SF Mono",monospace;
+    --r:10px; --r-sm:6px;
+    --shadow: 0 1px 2px rgba(18,18,26,.05), 0 8px 24px -12px rgba(18,18,26,.12);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --ink:#ececf4; --ink2:#a4a4bb; --ink3:#75758d;
+      --bg:#0b0b12; --sur:#14141d; --sur2:#1b1b26;
+      --bdr:#282836; --bdr2:#3a3a4c;
+      --a:#8b84f8; --a-dim:#1d1a3d; --a-bdr:#3b3480;
+      --ok:#4ade80; --ok-dim:#0f2a1a; --ok-bdr:#215e38;
+      --wrn:#fbbf24; --wrn-dim:#2e2109; --wrn-bdr:#6b4d10;
+      --err:#fb7185; --err-dim:#33101c;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#ececf4; --ink2:#a4a4bb; --ink3:#75758d;
+    --bg:#0b0b12; --sur:#14141d; --sur2:#1b1b26;
+    --bdr:#282836; --bdr2:#3a3a4c;
+    --a:#8b84f8; --a-dim:#1d1a3d; --a-bdr:#3b3480;
+    --ok:#4ade80; --ok-dim:#0f2a1a; --ok-bdr:#215e38;
+    --wrn:#fbbf24; --wrn-dim:#2e2109; --wrn-bdr:#6b4d10;
+    --err:#fb7185; --err-dim:#33101c;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  }
+  :root[data-theme="light"]{
+    --ink:#12121a; --ink2:#4a4a5c; --ink3:#76768c;
+    --bg:#fbfbfd; --sur:#ffffff; --sur2:#f2f2f7;
+    --bdr:#e2e2ec; --bdr2:#cdcddc;
+    --a:#4f46e5; --a-dim:#eeecfd; --a-bdr:#c7c2f5;
+    --ok:#15803d; --ok-dim:#e8f6ec; --ok-bdr:#a8ddb8;
+    --wrn:#b45309; --wrn-dim:#fdf3e3; --wrn-bdr:#e8c893;
+    --err:#be123c; --err-dim:#fdeef1;
+    --shadow: 0 1px 2px rgba(18,18,26,.05), 0 8px 24px -12px rgba(18,18,26,.12);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+
+  /* ---------- portada ---------- */
+  .hero{
+    border-bottom:1px solid var(--bdr);
+    background:
+      radial-gradient(900px 400px at 78% -10%, var(--a-dim), transparent 65%),
+      var(--sur);
+  }
+  .hero-in{max-width:1180px;margin:0 auto;padding:80px 24px 64px}
+  .eyebrow{
+    font-family:var(--mono); font-size:11.5px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--a); margin:0 0 22px;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  .eyebrow::before{content:"";width:26px;height:1.5px;background:var(--a);flex:none}
+  h1{
+    font-family:var(--serif); font-weight:400; font-size:clamp(2.2rem,5.2vw,3.7rem);
+    line-height:1.1; letter-spacing:-.015em; margin:0 0 20px; text-wrap:balance;
+  }
+  h1 em{font-style:italic;color:var(--a)}
+  .lead{
+    font-size:clamp(1.02rem,1.9vw,1.2rem); color:var(--ink2);
+    max-width:62ch; margin:0 0 34px;
+  }
+  .hero-facts{
+    display:flex; flex-wrap:wrap; gap:0; border:1px solid var(--bdr);
+    border-radius:var(--r); overflow:hidden; background:var(--bg);
+    max-width:760px;
+  }
+  .fact{flex:1 1 150px; padding:16px 20px; border-right:1px solid var(--bdr)}
+  .fact:last-child{border-right:none}
+  .fact-n{
+    font-family:var(--mono); font-size:1.55rem; font-weight:600;
+    font-variant-numeric:tabular-nums; letter-spacing:-.03em; display:block;
+  }
+  .fact-l{font-size:11.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;margin-top:3px}
+
+  /* ---------- layout ---------- */
+  .cols{display:grid;grid-template-columns:212px 1fr;gap:52px;padding:52px 0 90px}
+  nav.toc{position:sticky;top:24px;align-self:start;font-size:13.5px}
+  .toc-t{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--ink3);margin:0 0 12px;padding-bottom:9px;border-bottom:1px solid var(--bdr);
+  }
+  .toc a{
+    display:block;padding:5px 0 5px 11px;color:var(--ink2);text-decoration:none;
+    border-left:2px solid var(--bdr);line-height:1.4;
+  }
+  .toc a:hover{color:var(--a);border-left-color:var(--a-bdr)}
+  .toc a.on{color:var(--a);border-left-color:var(--a);font-weight:600}
+  .toc a:focus-visible,a:focus-visible,button:focus-visible{outline:2px solid var(--a);outline-offset:2px;border-radius:2px}
+
+  section{scroll-margin-top:20px;margin-bottom:64px}
+  h2{
+    font-family:var(--serif);font-weight:400;font-size:1.92rem;letter-spacing:-.012em;
+    margin:0 0 6px;text-wrap:balance;
+  }
+  .h2-num{
+    font-family:var(--mono);font-size:11px;color:var(--a);letter-spacing:.12em;
+    display:block;margin-bottom:7px;text-transform:uppercase;
+  }
+  .sub{color:var(--ink2);margin:0 0 26px;max-width:66ch}
+  h3{font-size:1.02rem;font-weight:650;margin:30px 0 10px;letter-spacing:-.005em}
+  p{max-width:68ch}
+  strong{font-weight:650;color:var(--ink)}
+
+  /* ---------- tarjetas ---------- */
+  .grid{display:grid;gap:14px;margin:22px 0}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(255px,1fr))}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(205px,1fr))}
+  .card{
+    background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);
+    padding:20px 22px;box-shadow:var(--shadow);
+  }
+  .card h4{margin:0 0 7px;font-size:.97rem;font-weight:650}
+  .card p{margin:0;font-size:14.2px;color:var(--ink2)}
+  .card-k{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
+    color:var(--a);display:block;margin-bottom:9px;
+  }
+
+  /* ---------- tablas ---------- */
+  .tw{overflow-x:auto;margin:20px 0;border:1px solid var(--bdr);border-radius:var(--r);background:var(--sur)}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:520px}
+  th{
+    text-align:left;padding:11px 15px;background:var(--sur2);border-bottom:1px solid var(--bdr);
+    font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);font-weight:650;
+    white-space:nowrap;
+  }
+  td{padding:11px 15px;border-bottom:1px solid var(--bdr);vertical-align:top;color:var(--ink2)}
+  tr:last-child td{border-bottom:none}
+  td strong{color:var(--ink)}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .tot td{background:var(--a-dim);font-weight:650;color:var(--ink);border-top:1.5px solid var(--a-bdr)}
+
+  /* ---------- pills ---------- */
+  .pill{
+    display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.07em;
+    text-transform:uppercase;padding:2.5px 8px;border-radius:20px;border:1px solid;white-space:nowrap;
+  }
+  .p-ok{background:var(--ok-dim);color:var(--ok);border-color:var(--ok-bdr)}
+  .p-est{background:var(--wrn-dim);color:var(--wrn);border-color:var(--wrn-bdr)}
+  .p-no{background:var(--sur2);color:var(--ink3);border-color:var(--bdr2)}
+
+  /* ---------- avisos ---------- */
+  .note{
+    border-left:3px solid var(--a);background:var(--a-dim);padding:15px 19px;
+    border-radius:0 var(--r-sm) var(--r-sm) 0;margin:22px 0;font-size:14.5px;
+  }
+  .note.warn{border-left-color:var(--wrn);background:var(--wrn-dim)}
+  .note.ok{border-left-color:var(--ok);background:var(--ok-dim)}
+  .note p{margin:0;max-width:none;color:var(--ink)}
+  .note p + p{margin-top:9px}
+  .note-t{font-weight:650;display:block;margin-bottom:4px}
+
+  /* ---------- pasos ---------- */
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:20px 0}
+  ol.steps li{
+    counter-increment:s;position:relative;padding:0 0 18px 42px;
+    border-left:1.5px solid var(--bdr);margin-left:13px;
+  }
+  ol.steps li:last-child{border-left-color:transparent;padding-bottom:0}
+  ol.steps li::before{
+    content:counter(s);position:absolute;left:-13.5px;top:-2px;width:26px;height:26px;
+    background:var(--sur);border:1.5px solid var(--a-bdr);color:var(--a);border-radius:50%;
+    display:grid;place-items:center;font-family:var(--mono);font-size:11.5px;font-weight:600;
+  }
+  ol.steps b{display:block;margin-bottom:2px;color:var(--ink)}
+  ol.steps span{font-size:14.2px;color:var(--ink2)}
+
+  /* ---------- flujo disciplina ---------- */
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin:24px 0}
+  .fstep{
+    flex:1 1 165px;background:var(--sur);border:1px solid var(--bdr);padding:15px 17px;
+    position:relative;
+  }
+  .fstep:first-child{border-radius:var(--r) 0 0 var(--r)}
+  .fstep:last-child{border-radius:0 var(--r) var(--r) 0}
+  .fstep + .fstep{border-left:none}
+  .fstep-k{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3)}
+  .fstep-n{font-weight:650;margin:5px 0 4px;font-size:.98rem}
+  .fstep-d{font-size:13.2px;color:var(--ink2)}
+  .fstep.auto{background:var(--sur2)}
+  .fstep.crit{border-color:var(--err);background:var(--err-dim)}
+  .fstep.crit .fstep-n{color:var(--err)}
+  @media(max-width:700px){
+    .fstep{flex:1 1 100%;border-radius:0!important;border-left:1px solid var(--bdr)!important}
+    .fstep:first-child{border-radius:var(--r) var(--r) 0 0!important}
+    .fstep:last-child{border-radius:0 0 var(--r) var(--r)!important}
+    .fstep + .fstep{border-top:none}
+  }
+
+  /* ---------- glosario ---------- */
+  dl.gl{display:grid;grid-template-columns:auto 1fr;gap:0;margin:20px 0;
+    border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;background:var(--sur)}
+  dl.gl dt{
+    font-family:var(--mono);font-size:12.5px;font-weight:600;padding:10px 16px;
+    border-bottom:1px solid var(--bdr);background:var(--sur2);white-space:nowrap;color:var(--ink);
+  }
+  dl.gl dd{margin:0;padding:10px 16px;border-bottom:1px solid var(--bdr);font-size:14px;color:var(--ink2)}
+  dl.gl dt:last-of-type,dl.gl dd:last-of-type{border-bottom:none}
+  @media(max-width:560px){
+    dl.gl{grid-template-columns:1fr}
+    dl.gl dt{border-bottom:none;padding-bottom:2px;background:var(--sur)}
+  }
+
+  .src{font-size:12.2px;color:var(--ink3);margin-top:9px}
+  .src a{color:var(--ink3)}
+  a{color:var(--a)}
+
+  footer{border-top:1px solid var(--bdr);padding:34px 0 60px;color:var(--ink3);font-size:13.5px}
+
+  .theme-btn{
+    position:fixed;top:16px;right:16px;z-index:50;background:var(--sur);color:var(--ink2);
+    border:1px solid var(--bdr);border-radius:20px;padding:7px 15px;cursor:pointer;
+    font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    box-shadow:var(--shadow);
+  }
+  .theme-btn:hover{color:var(--a);border-color:var(--a-bdr)}
+
+  @media(max-width:900px){
+    .cols{grid-template-columns:1fr;gap:0;padding-top:36px}
+    nav.toc{position:static;margin-bottom:34px;
+      border:1px solid var(--bdr);border-radius:var(--r);padding:16px 18px;background:var(--sur)}
+    .toc a{border-left:none;padding-left:0}
+    .toc a.on{border-left:none}
+  }
+  @media print{
+    .theme-btn,nav.toc{display:none}
+    .cols{grid-template-columns:1fr}
+    body{background:#fff;color:#000;font-size:11pt}
+    section{page-break-inside:avoid}
+  }
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<button class="theme-btn" id="tt" aria-label="Cambiar tema claro u oscuro">Tema</button>
+
+<header class="hero">
+  <div class="hero-in">
+    <p class="eyebrow">Universidad Nacional Santiago Antúnez de Mayolo · Biblioteca Central</p>
+    <h1>Un sistema de control de acceso <em>hecho a medida</em>, no comprado.</h1>
+    <p class="lead">
+      Las computadoras de la sala arrancan bloqueadas. El alumno se identifica con su DNI,
+      declara para qué la va a usar, y recién ahí se desbloquea. Todo queda registrado.
+      Este documento explica qué construimos, por qué conviene frente a comprar una
+      licencia comercial, y cómo se usa.
+    </p>
+    <div class="hero-facts">
+      <div class="fact"><span class="fact-n">24 822</span><span class="fact-l">Líneas de código</span></div>
+      <div class="fact"><span class="fact-n">100</span><span class="fact-l">Casos de uso documentados</span></div>
+      <div class="fact"><span class="fact-n">21</span><span class="fact-l">Tablas de datos</span></div>
+      <div class="fact"><span class="fact-n">US$ 0</span><span class="fact-l">En licencias anuales</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+<div class="cols">
+
+  <nav class="toc" aria-label="Índice">
+    <p class="toc-t">Contenido</p>
+    <a href="#que">1 · Qué construimos</a>
+    <a href="#costo">2 · El costo real</a>
+    <a href="#medida">3 · La ventaja de fondo</a>
+    <a href="#limites">4 · Qué no tenemos</a>
+    <a href="#usar">5 · Cómo se usa</a>
+    <a href="#disciplina">6 · Sospecha / ban</a>
+    <a href="#datos">7 · Padrón y vigencia</a>
+    <a href="#decidir">8 · Decidir con datos</a>
+    <a href="#problemas">9 · Si algo falla</a>
+    <a href="#glosario">10 · Glosario</a>
+  </nav>
+
+  <main>
+
+  <!-- 1 -->
+  <section id="que">
+    <span class="h2-num">Sección 1</span>
+    <h2>Qué construimos</h2>
+    <p class="sub">
+      Tres piezas que trabajan juntas sobre la red interna de la biblioteca. No depende de internet.
+    </p>
+
+    <div class="grid g3">
+      <div class="card">
+        <span class="card-k">En la PC del alumno</span>
+        <h4>El kiosco</h4>
+        <p>Mantiene la máquina bloqueada. No se puede cerrar, minimizar ni evadir con Ctrl+Alt+Supr. Pide DNI y motivo.</p>
+      </div>
+      <div class="card">
+        <span class="card-k">En el servidor</span>
+        <h4>El cerebro</h4>
+        <p>Valida quién puede entrar, registra cada sesión y guarda el historial. Corre en una PC común de la biblioteca.</p>
+      </div>
+      <div class="card">
+        <span class="card-k">En el navegador</span>
+        <h4>El panel</h4>
+        <p>Desde donde el encargado ve la sala en vivo y actúa: desbloquear, bloquear, apagar, avisar.</p>
+      </div>
+    </div>
+
+    <h3>Lo que resuelve, concretamente</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Antes</th><th>Con el sistema</th></tr></thead>
+        <tbody>
+          <tr><td>Cualquiera se sentaba y usaba una PC.</td><td><strong>Solo entra quien está en el padrón</strong>, con carnet vigente y sin sanción.</td></tr>
+          <tr><td>No se sabía quién usó qué máquina ni cuándo.</td><td>Cada sesión queda registrada: alumno, PC, hora, duración y motivo.</td></tr>
+          <tr><td>Para bloquear una PC había que ir físicamente.</td><td>Se bloquea, desbloquea o apaga <strong>en remoto</strong>, una o todas.</td></tr>
+          <tr><td>No había forma de justificar presupuesto con datos.</td><td>Reportes de uso por facultad, por programa y por período, exportables a Excel y PDF.</td></tr>
+          <tr><td>El mal uso no dejaba rastro.</td><td>El sistema detecta actividad sospechosa y deja constancia formal.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section id="costo">
+    <span class="h2-num">Sección 2</span>
+    <h2>El costo real de la alternativa</h2>
+    <p class="sub">
+      Investigamos precios públicos de los productos comerciales equivalentes. Lo primero
+      que encontramos es en sí mismo un dato.
+    </p>
+
+    <div class="note warn">
+      <p><span class="note-t">Este mercado no publica sus precios.</span>
+      EnvisionWare, NetSupport y la línea empresarial de Faronics operan con modelo
+      <em>“contactar a ventas”</em>. Las cifras firmes que conseguimos no vienen de los
+      vendedores: vienen de <strong>actas de compra pública de bibliotecas de Estados
+      Unidos</strong>, que sí publican sus cotizaciones.</p>
+    </div>
+
+    <h3>Precios verificados, con fuente</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Producto</th><th>Precio</th><th>Modelo</th><th>Evidencia</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>EnvisionWare LPT:One</strong><br>bundle primer edificio</td>
+            <td class="num">US$ 795<br><span style="color:var(--ink3)">+US$ 159/año</span></td>
+            <td>Único + mant. 20%</td>
+            <td><span class="pill p-ok">Verificado</span><div class="src">Cotización US-96635, Pahrump Community Library, 09/08/2025</div></td>
+          </tr>
+          <tr>
+            <td><strong>EnvisionWare LPT:One</strong><br>licencias por estación</td>
+            <td class="num">US$ 49.30<br><span style="color:var(--ink3)">c/estación</span></td>
+            <td>Por estación (tramo 25–49)</td>
+            <td><span class="pill p-ok">Verificado</span><div class="src">Misma cotización. 25 × 49.30 = US$ 1 232.50</div></td>
+          </tr>
+          <tr>
+            <td><strong>EnvisionWare PC Reservation</strong><br>licencia nueva — <em>el componente central</em></td>
+            <td class="num" style="color:var(--err)">Sin precio<br>público</td>
+            <td>Solo cotización</td>
+            <td><span class="pill p-no">No hallado</span><div class="src">Es el vacío más importante de la investigación</div></td>
+          </tr>
+          <tr>
+            <td><strong>Deep Freeze Enterprise</strong><br>académico, tramo 25–99</td>
+            <td class="num">US$ 23.50<br><span style="color:var(--ink3)">c/estación</span></td>
+            <td>Perpetua + mant. anual</td>
+            <td><span class="pill p-ok">Verificado</span><div class="src">Learning Services US (revendedor)</div></td>
+          </tr>
+          <tr>
+            <td><strong>Faronics Insight</strong><br>académico, tramo 25–49</td>
+            <td class="num">US$ 30.00<br><span style="color:var(--ink3)">+US$ 5/año</span></td>
+            <td>Perpetua + renovación</td>
+            <td><span class="pill p-ok">Verificado</span><div class="src">Learning Services US</div></td>
+          </tr>
+          <tr>
+            <td><strong>NetSupport School</strong></td>
+            <td class="num">£ 5.00<br><span style="color:var(--ink3)">disp./año</span></td>
+            <td>Suscripción anual</td>
+            <td><span class="pill p-est">Tercero</span><div class="src">BESA LendED (Reino Unido) — no confirmado para Perú</div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>El dato más sólido: el mantenimiento anual</h3>
+    <p>
+      Tres proveedores independientes convergen en lo mismo. <strong>Faronics publica 20 %</strong>,
+      <strong>EnvisionWare aplica 20 % exacto</strong> en la cotización citada, y
+      <strong>Oracle cobra 22 %</strong> (derivable de su lista de precios). El mantenimiento
+      anual ronda el <strong>20–22 % del costo de licencia</strong>, todos los años, para siempre.
+    </p>
+    <div class="note">
+      <p><span class="note-t">Por qué esto importa más que el precio inicial.</span>
+      Una licencia no se paga una vez. Se paga el primer año, y después cada año se sigue
+      pagando una quinta parte para tener derecho a actualizaciones y soporte. A diez años,
+      el mantenimiento supera al desembolso inicial.</p>
+    </div>
+
+    <h3>Estimación para 25 estaciones</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Concepto</th><th>Año 1</th><th>Cada año siguiente</th></tr></thead>
+        <tbody>
+          <tr><td>LPT:One — bundle primer edificio</td><td class="num">US$ 795.00</td><td class="num">US$ 159.00</td></tr>
+          <tr><td>LPT:One — 25 clientes</td><td class="num">US$ 1 232.50</td><td class="num">US$ 246.50</td></tr>
+          <tr><td>PC Reservation — mantenimiento</td><td class="num">—</td><td class="num">US$ 385.25</td></tr>
+          <tr><td>PC Reservation — licencia nueva</td><td class="num" style="color:var(--err)">desconocido</td><td class="num">—</td></tr>
+          <tr><td>Instalación y servicios profesionales</td><td class="num">US$ 3 600.00</td><td class="num">—</td></tr>
+          <tr class="tot"><td>Despliegue completo realista <span class="pill p-est">Estimado</span></td><td class="num">US$ 8 000 – 15 000</td><td class="num">US$ 790+</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn">
+      <p><span class="note-t">Honestidad sobre estas cifras.</span>
+      Las de EnvisionWare son <strong>precios negociados y con descuento</strong> para
+      bibliotecas pequeñas concretas — incluyen bonificación del primer año de mantenimiento.
+      Son datos reales de transacción, pero presentarlos como “precio de lista” sería
+      incorrecto y un vendedor podría objetarlo con razón. El rango de US$ 8 000–15 000 es
+      <strong>una estimación</strong>, no un dato verificado, porque la licencia del
+      componente central no tiene precio público.</p>
+      <p>Preferimos presentar esto con sus huecos a la vista antes que inflar el ahorro con
+      una cifra que no podamos sostener si nos piden la fuente.</p>
+    </div>
+
+    <div class="note ok">
+      <p><span class="note-t">Lo que sí podemos afirmar sin reservas.</span>
+      Nuestro sistema corre con <strong>16 dependencias, todas de código abierto y sin costo
+      de licencia</strong>: FastAPI, SQLAlchemy, MariaDB, entre otras. El gasto recurrente en
+      licencias es <strong>US$ 0 al año</strong>, hoy y a diez años. Eso no es una estimación:
+      es verificable abriendo el archivo de dependencias del proyecto.</p>
+    </div>
+
+    <h3>Un argumento adicional: a esta escala no calificamos</h3>
+    <p>
+      Con 25 estaciones, la biblioteca queda <strong>por debajo de los mínimos de compra</strong>
+      de varios proveedores. Microsoft exige 250 usuarios para sector público en Enterprise
+      Agreement — y desde noviembre de 2025 dejó de ofrecerlo por debajo de ~2 400 puestos.
+      Deep Freeze exige un mínimo de 10 licencias. Una institución de nuestro tamaño termina
+      <strong>pagando capacidad que no usa</strong>, o directamente fuera del vehículo de compra.
+    </p>
+
+    <div class="note">
+      <p><span class="note-t">Cómo verificar esto de forma independiente.</span>
+      Las contrataciones públicas del Perú son datos abiertos: cerca de 2 millones de
+      adjudicaciones desde 2003, bajo licencia CC BY 4.0. La UNASAM puede comparar
+      empíricamente contra <strong>lo que otras entidades públicas peruanas efectivamente
+      pagaron</strong>, en lugar de discutir sobre precios de lista.
+      (El organismo hoy es <strong>OECE</strong>, ex-OSCE.)</p>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section id="medida">
+    <span class="h2-num">Sección 3</span>
+    <h2>La ventaja de fondo no es el precio</h2>
+    <p class="sub">
+      Si el ahorro fuera el único argumento, sería un argumento débil. Lo determinante es
+      que un producto comprado se adapta a lo que el fabricante imaginó; este se adaptó a
+      cómo trabaja realmente esta biblioteca.
+    </p>
+
+    <div class="grid g2">
+      <div class="card">
+        <span class="card-k">Identidad</span>
+        <h4>Funciona con el DNI, como el carnet real</h4>
+        <p>En esta biblioteca el número del carnet <em>es</em> el DNI, no el código de matrícula.
+        Un producto genérico asume un modelo de identidad propio; el nuestro se construyó
+        sobre el que ya se usaba en el mostrador.</p>
+      </div>
+      <div class="card">
+        <span class="card-k">Datos existentes</span>
+        <h4>Se alimenta del padrón que ya existía</h4>
+        <p>Importa directamente la exportación de Koha, el sistema bibliotecario en uso,
+        con sus fechas reales de registro y caducidad. No hubo que recargar nada a mano
+        ni pagar una integración.</p>
+      </div>
+      <div class="card">
+        <span class="card-k">Reglas propias</span>
+        <h4>La disciplina sigue el criterio de la casa</h4>
+        <p>Tres incidencias leves habilitan sanción; una grave la recomienda de inmediato.
+        Esa regla la definió la biblioteca, no un fabricante en otro país. Y si mañana
+        cambia, se cambia.</p>
+      </div>
+      <div class="card">
+        <span class="card-k">Vigencia</span>
+        <h4>Carnets con caducidad automática</h4>
+        <p>El carnet vence a los 24 meses y el bloqueo es automático: no depende de que
+        alguien lo recuerde. El plazo es configurable sin tocar el código.</p>
+      </div>
+      <div class="card">
+        <span class="card-k">Sin internet</span>
+        <h4>Diseñado para la red interna</h4>
+        <p>Todo corre en la LAN de la biblioteca. Si se cae internet, la sala sigue
+        funcionando. Un sistema en la nube, en cambio, deja de atender.</p>
+      </div>
+      <div class="card">
+        <span class="card-k">Autonomía</span>
+        <h4>Cambios el mismo día</h4>
+        <p>Agregar un motivo de uso llega solo a las PCs, sin reinstalar nada. Con un
+        proveedor externo, un cambio así es un ticket de soporte y una espera.</p>
+      </div>
+    </div>
+
+    <div class="note ok">
+      <p><span class="note-t">El activo que queda en la universidad.</span>
+      El código, la base de datos y la documentación pertenecen a la UNASAM.
+      No hay dependencia de un proveedor que pueda subir el precio, discontinuar el
+      producto o ser adquirido por otra empresa. <strong>Está documentado en 100 casos de
+      uso con evidencia línea por línea</strong>, precisamente para que otra persona pueda
+      retomarlo.</p>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section id="limites">
+    <span class="h2-num">Sección 4</span>
+    <h2>Qué no tenemos, y conviene decirlo</h2>
+    <p class="sub">
+      Un producto comercial trae cosas reales que este sistema no tiene. Presentarlo sin
+      esta sección sería vender, no informar.
+    </p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Un producto comercial ofrece</th><th>Nuestra situación</th></tr></thead>
+        <tbody>
+          <tr><td>Soporte 24/7 con contrato y tiempos de respuesta</td><td>Depende del personal técnico de la universidad. <strong>Es el riesgo principal.</strong></td></tr>
+          <tr><td>Actualizaciones y parches del fabricante</td><td>Requieren que alguien las haga. Sin equipo asignado, el sistema se congela en el tiempo.</td></tr>
+          <tr><td>Certificaciones y auditorías externas</td><td>No las tenemos.</td></tr>
+          <tr><td>Comunidad amplia y documentación de terceros</td><td>La documentación es propia. Buena, pero nuestra.</td></tr>
+          <tr><td>Responsabilidad contractual ante fallas</td><td>La asume la institución.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn">
+      <p><span class="note-t">La conclusión honesta.</span>
+      El ahorro en licencias es real y verificable. Pero se sostiene solo si la universidad
+      <strong>asigna a alguien el mantenimiento</strong>. Un sistema a medida sin responsable
+      designado se convierte, en dos o tres años, en un problema más caro que la licencia
+      que se evitó. Esa es la decisión de fondo que corresponde tomar a las autoridades.</p>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section id="usar">
+    <span class="h2-num">Sección 5</span>
+    <h2>Cómo se usa: lo esencial</h2>
+    <p class="sub">
+      El 90 % del trabajo diario son dos tareas. Si alguien nuevo solo aprende esta sección,
+      ya puede atender el mostrador.
+    </p>
+
+    <h3>Atender a un alumno</h3>
+    <p>
+      Lo normal es que el alumno se identifique solo: escribe su DNI en la pantalla azul,
+      elige un motivo, pulsa <strong>Ingresar</strong> y la PC se desbloquea en segundos.
+      El encargado no hace nada.
+    </p>
+    <p>Cuando el alumno no puede hacerlo solo, se desbloquea desde el panel:</p>
+
+    <ol class="steps">
+      <li><b>Ubicar la PC en Monitoreo</b><span>Su tarjeta debe decir “Bloqueado” y estar en línea.</span></li>
+      <li><b>Pulsar “Desbloquear”</b><span>Se abre la ventana “Desbloquear Terminal”.</span></li>
+      <li><b>Escribir el DNI</b><span>Exactamente 8 dígitos. Con más o menos, el sistema no deja continuar.</span></li>
+      <li><b>Elegir la actividad</b><span>Es obligatoria. Si se elige “Otros”, hay que escribir el motivo.</span></li>
+      <li><b>Confirmar y esperar</b><span>Muestra “Verificando en la UNASAM...”. Si el alumno es válido, la PC se desbloquea.</span></li>
+    </ol>
+
+    <div class="note">
+      <p><span class="note-t">Un alumno, una PC.</span>
+      Si el alumno ya tenía sesión abierta en otra máquina, esa sesión se cierra sola y
+      la otra PC se bloquea. Evita que una sola persona ocupe varios puestos.</p>
+    </div>
+
+    <h3>Cuando un alumno no puede entrar</h3>
+    <p>Son siempre las mismas cuatro razones. Con esta tabla se resuelve el total de los casos del mostrador:</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>La pantalla dice</th><th>Significa</th><th>Qué hacer</th></tr></thead>
+        <tbody>
+          <tr><td>“Carnet VENCIDO el…”</td><td>Su carnet caducó</td><td>Renovarlo desde el panel, o derivarlo a tramitar uno nuevo</td></tr>
+          <tr><td>Mensaje de sanción</td><td>Está baneado</td><td>Solo un superadmin puede levantar la sanción</td></tr>
+          <tr><td>No figura registrado</td><td>Su DNI no está en el padrón</td><td>Registrarlo con “Registrar estudiante”</td></tr>
+          <tr><td>No responde nada</td><td>Se cortó la conexión</td><td>Revisar el indicador WS (sección 9)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">
+      <p><span class="note-t">Atajo práctico.</span>
+      Antes de discutir con el alumno, buscar su DNI en <strong>Base de Datos</strong>. En dos
+      segundos se ve si existe, si está vigente y si tiene sanciones. Es más rápido que adivinar.</p>
+    </div>
+
+    <h3>Controlar la sala</h3>
+    <div class="grid g3">
+      <div class="card"><span class="card-k">Una PC</span><h4>Bloquear</h4><p>Cierra la sesión del alumno al instante y bloquea la máquina.</p></div>
+      <div class="card"><span class="card-k">Una PC</span><h4>Apagar</h4><p>La apaga en remoto. Si el alumno tiene algo sin guardar, lo pierde: conviene avisarle.</p></div>
+      <div class="card"><span class="card-k">Toda la sala</span><h4>Bloquear Sala</h4><p>Bloquea todas las PCs a la vez. Es lo que se usa al cerrar la biblioteca.</p></div>
+    </div>
+
+    <div class="note ok">
+      <p><span class="note-t">Rutina de cierre recomendada.</span>
+      Quince minutos antes, enviar un <strong>Mensaje</strong> avisando el cierre — se puede dejar
+      programado para que salga solo todos los días. A la hora, pulsar <strong>Bloquear Sala</strong>
+      y verificar en el mapa que todas quedaron en “Bloqueado”.</p>
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section id="disciplina">
+    <span class="h2-num">Sección 6</span>
+    <h2>De la sospecha a la sanción</h2>
+    <p class="sub">
+      Cuatro conceptos que son un solo proceso. Entendido el recorrido, cada pieza se
+      explica sola.
+    </p>
+
+    <div class="flow">
+      <div class="fstep auto">
+        <span class="fstep-k">Automático</span>
+        <p class="fstep-n">Sospecha</p>
+        <p class="fstep-d">El sistema detecta algo inusual. No acusa: solo señala “mirá esto”.</p>
+      </div>
+      <div class="fstep">
+        <span class="fstep-k">Decide una persona</span>
+        <p class="fstep-n">Revisión</p>
+        <p class="fstep-d">El encargado descarta (era normal) o aprueba (era real).</p>
+      </div>
+      <div class="fstep">
+        <span class="fstep-k">Queda constancia</span>
+        <p class="fstep-n">Incidencia</p>
+        <p class="fstep-d">Registro formal contra el alumno. Leve o grave.</p>
+      </div>
+      <div class="fstep crit">
+        <span class="fstep-k">Solo superadmin</span>
+        <p class="fstep-n">Ban</p>
+        <p class="fstep-d">El alumno no puede usar ninguna PC de la sala.</p>
+      </div>
+    </div>
+
+    <div class="note">
+      <p><span class="note-t">La regla de la biblioteca.</span>
+      <strong>3 incidencias leves activas</strong> habilitan la sanción.
+      <strong>1 incidencia grave</strong> la recomienda de inmediato.
+      El sistema avisa cuando se llega a ese punto, pero <strong>nunca sanciona solo</strong>:
+      la decisión siempre es de una persona.</p>
+    </div>
+
+    <h3>Dos advertencias operativas</h3>
+    <div class="grid g2">
+      <div class="card">
+        <h4>Revisar las sospechas a diario</h4>
+        <p>Si se acumulan, pierden valor: cuando son doscientas ya nadie las mira, y ahí es
+        cuando se pasa por alto la que importaba. Ante la duda, descartar — una incidencia
+        injusta es peor que una sospecha perdida.</p>
+      </div>
+      <div class="card">
+        <h4>Levantar un ban borra el historial</h4>
+        <p>Al levantar una sanción, <strong>se desactivan todas las incidencias activas</strong>
+        del alumno: arranca de cero. Es lo correcto si el tema se habló y se cerró. Pero
+        hacerlo por comodidad elimina el registro que justificaba la sanción.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 -->
+  <section id="datos">
+    <span class="h2-num">Sección 7</span>
+    <h2>El padrón y la vigencia de carnets</h2>
+    <p class="sub">Solo puede entrar quien está en el padrón. Si no está, no entra.</p>
+
+    <h3>Vigencia automática</h3>
+    <p>
+      El carnet vence a los <strong>24 meses</strong> — plazo configurable. Un carnet vencido
+      no puede usar las PCs, y el bloqueo es automático. En el padrón cada fila muestra
+      <span class="pill p-ok">Vence 12/04/2027</span> o <span class="pill p-est">Vencida</span>,
+      y las vencidas se resaltan. El filtro <strong>“Solo vencidas”</strong> permite ver de una
+      a cuánta gente hay que avisarle.
+    </p>
+    <p>
+      Renovar es un botón en la fila del alumno: extiende la vigencia otros 24 meses y deja
+      registrada la fecha de renovación. <strong>No modifica la fecha de ingreso original</strong>,
+      que se conserva siempre como dato histórico.
+    </p>
+
+    <h3>Carga masiva sin riesgo</h3>
+    <div class="note ok">
+      <p><span class="note-t">Importar no borra.</span>
+      Al importar el padrón del semestre, el sistema <strong>compara por DNI</strong>: actualiza
+      a los que ya existen y agrega a los nuevos. Se puede importar varias veces sin duplicar
+      ni perder nada. Aun así, la recomendación es <strong>exportar antes</strong>: es la red de
+      seguridad.</p>
+    </div>
+  </section>
+
+  <!-- 8 -->
+  <section id="decidir">
+    <span class="h2-num">Sección 8</span>
+    <h2>Decidir con datos, no con impresiones</h2>
+    <p class="sub">
+      La sección de indicadores existe para responder las preguntas que llegan de arriba,
+      con números en lugar de estimaciones.
+    </p>
+
+    <div class="grid g3">
+      <div class="card"><span class="card-k">Equipos</span><h4>Uso por facultad</h4><p>Qué carreras usan realmente la sala. Sirve para justificar dónde poner más máquinas.</p></div>
+      <div class="card"><span class="card-k">Usuarios</span><h4>Crecimiento del padrón</h4><p>Cuántos alumnos nuevos por período y cuántas credenciales están vencidas.</p></div>
+      <div class="card"><span class="card-k">Programas</span><h4>Ranking de uso</h4><p>Qué software se usa más, del más al menos.</p></div>
+    </div>
+
+    <div class="note">
+      <p><span class="note-t">El dato más accionable del panel.</span>
+      Si un programa aparece muy arriba en el ranking, hay dos conclusiones directas:
+      puede convenir <strong>comprar licencias</strong> de ese software, o —si los alumnos lo
+      están usando de forma no autorizada— <strong>instalar una versión legal</strong> antes de
+      que se convierta en un problema.</p>
+      <p>Por eso el ranking incluye también los programas <strong>sin clasificar</strong>:
+      justamente el que todavía nadie catalogó puede ser el más usado. Se excluye únicamente
+      lo que ya se marcó como ruido del sistema.</p>
+    </div>
+
+    <p>
+      Todo el historial se exporta a <strong>Excel</strong> (para hacer cuentas) y a
+      <strong>PDF</strong> (para presentar). Ambos respetan los filtros aplicados: conviene
+      revisar el filtro antes de exportar.
+    </p>
+  </section>
+
+  <!-- 9 -->
+  <section id="problemas">
+    <span class="h2-num">Sección 9</span>
+    <h2>Si algo falla</h2>
+    <p class="sub">Ordenado por frecuencia real, no por gravedad.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Síntoma</th><th>Causa</th><th>Solución</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Dice “WS Desconectado”</strong> y no funciona ningún botón</td><td>El panel perdió contacto con el servidor</td><td>Esperar 30 s (suele reconectar solo) / recargar con F5 / si sigue, avisar a sistemas y usar el PIN de emergencia</td></tr>
+          <tr><td>El panel muestra información vieja</td><td>Caché del navegador</td><td><strong>Ctrl + F5</strong>. Es casi siempre esto después de una actualización.</td></tr>
+          <tr><td>Una PC figura “Offline” pero está encendida</td><td>Perdió la red</td><td>Revisar el cable / reiniciar la PC (el kiosco arranca solo)</td></tr>
+          <tr><td>Se desbloqueó una PC pero sigue bloqueada</td><td>La orden salió, la PC no confirmó</td><td>Reiniciarla</td></tr>
+          <tr><td>Un Excel exportado sale casi vacío</td><td>Había un filtro puesto</td><td>“Limpiar filtros” y exportar de nuevo</td></tr>
+          <tr><td>No aparece un botón que la documentación menciona</td><td>Es función de superadmin</td><td>Verificar con qué cuenta se inició sesión</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <p><span class="note-t">El indicador que conviene mirar siempre.</span>
+      Arriba a la izquierda, <strong>“WS Conectado”</strong> significa que el panel está hablando
+      con el servidor. Si dice <strong>“WS Desconectado”</strong>, los botones de acción no van a
+      funcionar aunque se vean en pantalla.</p>
+    </div>
+
+    <div class="note ok">
+      <p><span class="note-t">Si se cae el servidor y hace falta que la gente trabaje.</span>
+      Existe un modo de emergencia: el kiosco acepta un PIN del encargado para desbloquear
+      sin consultar al servidor. Esas sesiones <strong>se verifican solas cuando la conexión
+      vuelve</strong>, y si el alumno no era válido, la PC se bloquea. Usarlo únicamente cuando
+      de verdad no hay servidor.</p>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section id="glosario">
+    <span class="h2-num">Sección 10</span>
+    <h2>Glosario</h2>
+    <p class="sub">Los términos que aparecen en el panel y en esta presentación.</p>
+
+    <dl class="gl">
+      <dt>Kiosco</dt><dd>El programa que corre en la PC del alumno y la mantiene bloqueada.</dd>
+      <dt>Terminal</dt><dd>Cada una de las PCs de la sala.</dd>
+      <dt>Padrón / Maestro</dt><dd>El listado de personas autorizadas a usar las PCs.</dd>
+      <dt>Sesión</dt><dd>El período entre que un alumno entra y sale de una PC.</dd>
+      <dt>Motivo de uso</dt><dd>Lo que el alumno declara al ingresar. La lista la define la biblioteca.</dd>
+      <dt>Vigencia</dt><dd>Hasta cuándo vale el carnet de biblioteca. Vencido, no se puede entrar.</dd>
+      <dt>Sospecha</dt><dd>Aviso automático de actividad inusual. Todavía no es una acusación.</dd>
+      <dt>Incidencia</dt><dd>Registro formal de una falta. Leve o grave.</dd>
+      <dt>Ban</dt><dd>Prohibición de usar las PCs. La sanción más fuerte. Solo superadmin.</dd>
+      <dt>Banco de apps</dt><dd>Programas que cuentan como uso real de un alumno.</dd>
+      <dt>Banco de ruido</dt><dd>Procesos internos de Windows que se ignoran.</dd>
+      <dt>Encargado</dt><dd>Cuenta de operación diaria. Atiende la sala, no configura el sistema.</dd>
+      <dt>Superadmin</dt><dd>Cuenta con acceso total, incluida la configuración.</dd>
+      <dt>WS</dt><dd>La conexión en vivo entre el panel y el servidor. Si está caída, no se pueden dar órdenes.</dd>
+      <dt>LAN</dt><dd>La red interna de la biblioteca. El sistema funciona sin internet.</dd>
+    </dl>
+  </section>
+
+  <footer>
+    <p style="max-width:68ch;margin:0 0 10px">
+      <strong>Documentación de respaldo:</strong> el manual completo para el personal
+      (<span class="num">MANUAL_DE_USUARIO.txt</span>), los 100 casos de uso agrupados por módulo
+      (<span class="num">CASOS_DE_USO_POR_MODULO.txt</span>) y el catálogo por actor con
+      evidencia línea por línea (<span class="num">CATALOGO_CASOS_DE_USO.txt</span>).
+    </p>
+    <p style="margin:0">
+      Sistema de Control de Acceso · Biblioteca Central UNASAM · Versión 4.x · Julio 2026.
+      Precios comerciales relevados el 18/07/2026; los marcados
+      <span class="pill p-est">Estimado</span> no son cifras verificadas.
+    </p>
+  </footer>
+
+  </main>
+</div>
+</div>
+
+<script>
+(function(){
+  var r=document.documentElement,b=document.getElementById('tt');
+  b.addEventListener('click',function(){
+    var dark=r.getAttribute('data-theme')==='dark'||
+      (!r.getAttribute('data-theme')&&matchMedia('(prefers-color-scheme:dark)').matches);
+    r.setAttribute('data-theme',dark?'light':'dark');
+  });
+  var links=[].slice.call(document.querySelectorAll('.toc a')),
+      secs=links.map(function(a){return document.getElementById(a.getAttribute('href').slice(1))});
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(es){
+      es.forEach(function(e){
+        if(e.isIntersecting){
+          var i=secs.indexOf(e.target);
+          links.forEach(function(l,j){l.classList.toggle('on',i===j)});
+        }
+      });
+    },{rootMargin:'-15% 0px -75% 0px'});
+    secs.forEach(function(s){if(s)io.observe(s)});
+  }
+})();
+</script>

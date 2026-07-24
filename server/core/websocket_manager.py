@@ -13,6 +13,10 @@ class ConnectionManager:
         self.conexiones_activas: Dict[str, WebSocket] = {}
         self.terminal_ips: Dict[str, str] = {}
         self._admins: List[WebSocket] = []
+        # Programa en foco por terminal (nombre_red -> exe). Estado EFÍMERO en
+        # memoria: qué mira el alumno AHORA, para pintarlo en vivo en el mapa.
+        # No se persiste. Se limpia al cerrarse la sesión o caer la terminal.
+        self.foco_terminales: Dict[str, str] = {}
 
     # ── Terminales ────────────────────────────────────────────────────
 
@@ -160,11 +164,37 @@ class ConnectionManager:
             "timestamp": datetime.now().strftime("%H:%M:%S")
         })
 
+    # ── Programa en foco (estado en vivo del mapa) ────────────────────
+
+    async def set_foco(self, nombre_terminal: str, exe: str):
+        """Registra el programa en foco de una terminal y lo difunde a los
+        admins. Llamar solo con exe ya validado (app conocida)."""
+        self.foco_terminales[nombre_terminal] = exe
+        await self._broadcast_admins({
+            "tipo": "foco",
+            "nombre_terminal": nombre_terminal,
+            "proceso_exe": exe,
+        })
+
+    async def limpiar_foco(self, nombre_terminal: str):
+        """Olvida el foco de una terminal (fin de sesión / desconexión) y avisa
+        al panel para que borre la línea de la tarjeta."""
+        if nombre_terminal in self.foco_terminales:
+            self.foco_terminales.pop(nombre_terminal, None)
+            await self._broadcast_admins({
+                "tipo": "foco",
+                "nombre_terminal": nombre_terminal,
+                "proceso_exe": "",
+            })
+
     def _estado_actual(self) -> dict:
         return {
             "tipo": "status_update",
             "terminales": list(self.conexiones_activas.keys()),
-            "total": len(self.conexiones_activas)
+            "total": len(self.conexiones_activas),
+            # Foco vigente, para que un admin recién conectado pinte el estado
+            # actual sin esperar al próximo cambio de foco.
+            "focos": dict(self.foco_terminales),
         }
 
     async def _enviar_estado(self, ws: WebSocket):

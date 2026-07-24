@@ -1,0 +1,180 @@
+---
+name: "[Legacy SG] material-dark-inspiration"
+slug: legacy-style-guide-style_0be81d06d42e
+modes: [light]
+color:
+  palette:
+    canvas: "#ffffff"
+    ink: "#1a1a1a"
+    ink-2: "#555555"
+    ink-3: "#8a8a8a"
+    line: "#e2e2e2"
+    primary: "#007AFF"
+    on-primary: "#FFFFFF"
+    surface: "#1A1A24"
+    surface-card: "#252533"
+    surface-well: "rgba(31,41,55,0.4)"
+    on-surface: "#FFFFFF"
+    on-surface-secondary: "#9CA3AF"
+    on-surface-muted: "#6B7280"
+    hairline: "#1F2937"
+    danger: "#EF4444"
+    success: "#22C55E"
+  semantic:
+    background.canvas: "{color.palette.canvas}"
+    surface.default: "{color.palette.canvas}"
+    surface.raised: "{color.palette.canvas}"
+    text.primary: "{color.palette.ink}"
+    text.secondary: "{color.palette.ink-2}"
+    text.tertiary: "{color.palette.ink-3}"
+    text.link: "{color.palette.primary}"
+    border.default: "{color.palette.line}"
+    border.focus: "{color.palette.primary}"
+    primary.bg: "{color.palette.primary}"
+    primary.fg: "{color.palette.on-primary}"
+typography:
+  family: { primary: "\"Inter\", sans-serif" }
+  textStyle:
+    heading-lg: { fontFamily: "\"Inter\", sans-serif", fontSize: "24px", fontWeight: 600, lineHeight: 1.2 }
+    body-md: { fontFamily: "\"Inter\", sans-serif", fontSize: "15px", fontWeight: 400, lineHeight: 1.5 }
+spacing:
+  sm: "16px"
+  md: "24px"
+  lg: "40px"
+radius:
+  md: "12px"
+  lg: "16px"
+  xl: "24px"
+  xxl: "32px"
+  full: "9999px"
+---
+
+> Migrated from a legacy style guide.
+> The palette above is mapped from the original tokens, which are also preserved below.
+
+## Legacy style-guide tokens
+
+### Colors
+
+- `primary`: `#007AFF`
+- `on-primary`: `#FFFFFF`
+- `surface`: `#1A1A24`
+- `surface-card`: `#252533`
+- `surface-well`: `rgba(31,41,55,0.4)`
+- `on-surface`: `#FFFFFF`
+- `on-surface-secondary`: `#9CA3AF`
+- `on-surface-muted`: `#6B7280`
+- `hairline`: `#1F2937`
+- `danger`: `#EF4444`
+- `success`: `#22C55E`
+
+### Typography
+
+- `display`: `{"family":"\"Inter\", sans-serif","size":"36px","url":""}`
+- `metric`: `{"family":"\"Inter\", sans-serif","size":"72px","url":""}`
+- `headline`: `{"family":"\"Inter\", sans-serif","size":"20px","url":""}`
+- `body`: `{"family":"\"DM Sans\", sans-serif","size":"14px","url":""}`
+- `label`: `{"family":"\"DM Sans\", sans-serif","size":"10px","url":""}`
+
+### Spacing
+
+- `sm`: `16px`
+- `md`: `24px`
+- `lg`: `40px`
+
+### Radius
+
+- `md`: `12px`
+- `lg`: `16px`
+- `xl`: `24px`
+- `xxl`: `32px`
+- `full`: `9999px`
+
+## Design instructions
+
+## Token Instructions
+
+- `surface` (#1A1A24) -> deep indigo-charcoal app canvas; keep dark with white text
+- `surface-card` (#252533) -> "glass cards"; `surface-well` -> inner wells and calendar
+- `primary` (#007AFF iOS blue) -> only accent: active chart bars, highlights, selected calendar days, deltas, and the single hydration accent tile; one blue highlight per chart
+- `hairline` (#1F2937) -> borders and dividers
+- `danger` (#EF4444) -> pulse card accent and notification dot; `success` (#22C55E) -> "Optimal Range" badge
+- `radius.xl` (24px) -> glass cards; `radius.xxl` (32px) -> hydration accent tile
+- `radius.full` -> avatars, pills, icon buttons, chart bars
+- `metric` -> Inter 72px tracking-tight big stat numbers
+- `display`/`headline` -> Inter; `body`/`label` -> DM Sans
+- `label` -> 10px uppercase eyebrows with 0.1em tracking
+- spacing -> 4px base on a 12-col grid with gap-6 (24px)
+
+# Material Dark — "VitalFlow"
+
+> Design spec — version alpha. Source: static HTML (`material-dark.html`); tokens read from `:root` and component CSS. Fictional health-tracking dashboard; described factually.
+
+## Overview
+
+A **calm, modern dark dashboard** for personal health. Surfaces are deep indigo-charcoal — `{colors.surface}` `#1A1A24` canvas, `{colors.surface-card}` `#252533` "glass cards" — with white text and a single **iOS-blue** voltage `{colors.primary}` `#007AFF`. Blue is rationed: it lights the active chart bar, the selected/available calendar days, key metric deltas, and exactly one fully-blue **hydration accent tile**; everything else is neutral. Type pairs **Inter** (big stat numbers, titles) with **DM Sans** (body/labels). The layout is a 12-column grid of generously **rounded glass cards** (24px) carrying soft ambient shadows, populated by flat CSS data viz — bar charts, a dot/line blood-tracking plot, a calendar, and a progress mini-chart. It is screen-native and spacious: no skeuomorphism, restrained color, clear hierarchy.
+
+## Colors
+
+**Brand.** Blue `{colors.primary}` `#007AFF` is the only accent — active bars (with a glow + white dot marker), selected calendar/queue states, the hydration tile, and positive deltas. Discipline: one blue highlight per chart; neutrals carry the rest.
+
+**Surfaces.** Cards `{colors.surface-card}` `#252533` on canvas `{colors.surface}` `#1A1A24`; inner wells use `{colors.surface-well}` `rgba(31,41,55,0.4)`. Borders/dividers use `{colors.hairline}` `#1F2937`.
+
+**Text.** White `{colors.on-surface}`, `{colors.on-surface-secondary}` `#9CA3AF` for captions, `{colors.on-surface-muted}` `#6B7280` for labels.
+
+**Semantic.** Red `{colors.danger}` `#EF4444` accents the pulse card and notification dot; green `{colors.success}` `#22C55E` marks "Optimal Range." 
+
+## Typography
+
+**Inter** for headings and the large tracking-tight stat numbers; **DM Sans** for body and tiny uppercase labels.
+
+| Token    | Family   | Size | Weight | Tracking | Usage                       |
+| -------- | -------- | ---- | ------ | -------- | --------------------------- |
+| display  | Inter    | 36px | 700    | -0.02em  | Page title                  |
+| metric   | Inter    | 72px | 700    | -0.03em  | Big stat numbers (73, 86%)  |
+| headline | Inter    | 20px | 700    | normal   | Card titles                 |
+| body     | DM Sans  | 14px | 400    | normal   | Body, descriptions          |
+| label    | DM Sans  | 10px | 700    | 0.1em    | Uppercase eyebrows          |
+
+## Layout
+
+Base 4px on a 12-col grid (`gap-6` = 24px). A transparent top nav (logo + search field + notifications + profile) over a two-pane body: a 400px **left aside** (a tall glass card with calendar, doctor, patient queue, action buttons) and a flexible **main** of stacked card rows — stat + pulse chart, sleep bar chart + hydration accent tile, and a wide blood-tracking dot plot. Cards are uniform rounded glass panels.
+
+## Elevation & Depth
+
+Soft and modern. Glass cards carry `0 10px 30px -5px rgba(0,0,0,0.3)`; the blue accent tile and primary button carry colored blue elevation (`rgba(0,122,255,0.2–0.3)`). Hover adds a faint blue border glow. No hard shadows or borders — depth is gentle ambient shadow on rounded surfaces.
+
+## Shapes
+
+Generous radii: `{rounded.md}` 12px (small wells/buttons), `{rounded.lg}` 16px (wells/rows), `{rounded.xl}` 24px (glass cards), `{rounded.xxl}` 32px (hydration tile), `{rounded.full}` (avatars, pills, icon buttons, chart bars). Soft, friendly, fully-rounded.
+
+## Components
+
+- **glass-card** — `#252533` rounded-3xl panel, soft shadow, blue border-glow on hover.
+- **accent-tile** — solid blue 32px-radius tile with white stats and blue elevation (hydration).
+- **button-primary** — blue pill with blue shadow, scales on press.
+- **icon-button** — 48px round gray-800 well with a tinted icon.
+- **bar-chart** — flex bars on a blue opacity ladder; the active bar is solid blue + glow + white dot, growing with a spring overshoot.
+- **calendar** — gray well; available days blue, selected day white-on-black, both rounded-xl.
+
+## Motion
+
+`{motion.easing-spring}` `cubic-bezier(0.34,1.56,0.64,1)` gives bars a `600ms` overshoot grow; hovers transition `300–500ms`; press states scale to 0.95. Motion is functional and subtle. (Transitions are globally disabled in the capture source, so timings are authored intent.)
+
+## Iconography
+
+**Tabler** icons, line + filled mix (`ti-scale`, `ti-heart-rate-monitor`, `ti-droplet-filled`, `ti-moon-stars`), shown in tinted blue/red icon tiles or gray for inline UI; ~20–24px.
+
+## Do's and Don'ts
+
+- **Do** keep the deep indigo-charcoal canvas with white text.
+- **Do** reserve blue for active data, selected states, deltas and the single accent tile.
+- **Do** use uniform rounded glass cards with soft ambient shadows on a 12-col grid.
+- **Do** render data with flat CSS charts (bars/dots/rings), Inter for numbers.
+- **Don't** add hard borders/shadows or skeuomorphic textures.
+- **Don't** over-saturate — only one blue highlight per chart, mostly neutral surfaces.
+- **Don't** shrink the radii; the friendly, rounded geometry is core.
+
+## Known Gaps
+
+- Values read from the implementation's resolved `:root`. Charts are static CSS mock-ups (Chart.js is loaded but unused). Copy/imagery are sample content; the source disables transitions globally.

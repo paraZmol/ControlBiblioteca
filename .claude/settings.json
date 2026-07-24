@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.sec.gov)",
+      "WebFetch(domain:www2.congreso.gob.pe)",
+      "WebFetch(domain:knowledge.exlibrisgroup.com)",
+      "WebFetch(domain:cclibrarians.org)",
+      "WebFetch(domain:www.esfaronics.com)",
+      "WebFetch(domain:www.academicsuperstore.com)",
+      "WebFetch(domain:www.learningservicesus.com)",
+      "Bash(pdftotext -layout marion.pdf marion.txt)",
+      "WebFetch(domain:www.contractsfinder.service.gov.uk)",
+      "WebFetch(domain:www.carli.illinois.edu)",
+      "WebFetch(domain:investors.riministreet.com)",
+      "WebFetch(domain:www.riministreet.com)"
+    ]
+  }
+}
