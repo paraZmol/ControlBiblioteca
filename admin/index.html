@@ -27,7 +27,7 @@
         }
     </script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link rel="stylesheet" href="static/css/style.css?v=84">
+    <link rel="stylesheet" href="static/css/style.css?v=86">
     <style>
         ::-webkit-scrollbar { width:6px; height:6px; }
         .dark ::-webkit-scrollbar-track { background:transparent; }
@@ -1319,52 +1319,26 @@
 
                     <!-- Panel: Credenciales -->
                     <div id="subtab-cfg-credenciales" style="display:none">
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:960px">
 
-                            <!-- Tarjeta Admin -->
-                            <section class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm">
-                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2 mb-1">
-                                    <i class="ph ph-user-circle text-indigo-500"></i> Usuario Admin
+                        <!-- Encargados (usuarios adicionales) — solo superadmin.
+                             display:none inline = fail-closed: oculto hasta que el JS
+                             confirme el rol superadmin (evita el flash para un admin). -->
+                        <section class="bd-solo-superadmin bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm mt-5" style="display:none;max-width:960px">
+                            <div class="flex items-center justify-between gap-3 mb-1 flex-wrap">
+                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                                    <i class="ph ph-users-three text-indigo-500"></i> Encargados del centro de cómputo
                                 </h3>
-                                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">Cuenta con acceso básico al panel.</p>
-                                <div class="flex flex-col gap-3">
-                                    <div>
-                                        <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nuevo username <span class="text-zinc-400">(dejar vacío para no cambiar)</span></label>
-                                        <input id="cfg-admin-username" type="text" placeholder="Ej: admin"
-                                            class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
-                                    </div>
-                                    <div>
-                                        <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nueva contraseña <span class="text-zinc-400">(dejar vacío para no cambiar)</span></label>
-                                        <input id="cfg-admin-nueva" type="password" placeholder="••••••••"
-                                            class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
-                                    </div>
-                                    <p id="cfg-admin-error" class="text-rose-500 text-xs min-h-4"></p>
-                                    <button onclick="guardarUsuario('admin')" class="db-btn db-btn-new self-end">
-                                        <i class="ph ph-floppy-disk"></i> Guardar
-                                    </button>
-                                </div>
-                            </section>
-
-                            <!-- Tarjeta Superadmin -->
-                            <section class="bg-white dark:bg-zinc-900 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-6 shadow-sm">
-                                <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2 mb-1">
-                                    <i class="ph ph-shield-check text-amber-500"></i> Usuario Superadmin
-                                </h3>
-                                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">Cuenta con acceso total al panel.</p>
-                                <div class="flex flex-col gap-3">
-                                    <div>
-                                        <label class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nueva contraseña <span class="text-zinc-400">(dejar vacío para no cambiar)</span></label>
-                                        <input id="cfg-superadmin-nueva" type="password" placeholder="••••••••"
-                                            class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-amber-200 dark:border-amber-800/50 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500 transition-colors">
-                                    </div>
-                                    <p id="cfg-superadmin-error" class="text-rose-500 text-xs min-h-4"></p>
-                                    <button onclick="guardarUsuario('superadmin')" class="db-btn db-btn-export self-end" style="background:oklch(0.65 0.17 70);border-color:oklch(0.60 0.17 70)">
-                                        <i class="ph ph-floppy-disk"></i> Guardar
-                                    </button>
-                                </div>
-                            </section>
-
-                        </div>
+                                <button onclick="abrirModalEncargado()" class="db-btn db-btn-new">
+                                    <i class="ph ph-user-plus"></i> Nuevo encargado
+                                </button>
+                            </div>
+                            <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-5">
+                                Todas las cuentas del panel. Crea encargados si hay más de una persona a cargo. Al superadmin se le puede cambiar la contraseña, pero no dar de baja.
+                            </p>
+                            <div id="encargados-lista" class="encargados-lista">
+                                <p class="empty-msg">Cargando…</p>
+                            </div>
+                        </section>
                     </div>
 
                     <!-- Panel: Aplicación -->
@@ -1875,6 +1849,40 @@
     </div>
 </div>
 
+<div id="modal-encargado" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <div class="flex items-center justify-between mb-1">
+            <h3 id="modal-encargado-titulo" class="text-base font-bold text-zinc-900 dark:text-white">Nuevo encargado</h3>
+            <button onclick="cerrarModalEncargado()" aria-label="Cerrar" class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"><i class="ph ph-x"></i></button>
+        </div>
+        <p id="modal-encargado-sub" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Cuenta con permisos de administrador para operar la sala.</p>
+        <div class="flex flex-col gap-3">
+            <div>
+                <label for="enc-nombre" class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nombre completo <span class="text-zinc-400">(opcional)</span></label>
+                <input id="enc-nombre" type="text" placeholder="Ej: María Rojas"
+                    class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
+            </div>
+            <div>
+                <label for="enc-username" class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Usuario <span class="text-rose-400">*</span></label>
+                <input id="enc-username" type="text" placeholder="Ej: mrojas" autocomplete="off"
+                    class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
+            </div>
+            <div>
+                <label for="enc-password" class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Contraseña <span id="enc-password-hint" class="text-rose-400">*</span></label>
+                <input id="enc-password" type="password" placeholder="Mínimo 8, una mayúscula y un número" autocomplete="new-password"
+                    class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
+            </div>
+            <p id="enc-error" class="text-rose-500 text-xs min-h-4" role="alert"></p>
+            <div class="flex gap-3 justify-end">
+                <button onclick="cerrarModalEncargado()" class="text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+                <button id="btn-encargado-guardar" onclick="guardarEncargado()" class="db-btn db-btn-new">
+                    <i class="ph ph-floppy-disk"></i> Guardar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="modal-bloqueo" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content modal-bloqueo-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
         <h3 class="modal-bloqueo-titulo text-base font-bold text-zinc-900 dark:text-white mb-3">Confirmar Bloqueo</h3>
@@ -2063,7 +2071,7 @@
 </div>
 
 
-<script src="static/js/app.js?v=60"></script>
+<script src="static/js/app.js?v=62"></script>
 <script>
 // Tema
 (function() {
@@ -2208,6 +2216,7 @@ function switchSubtabCfg(sub) {
     if (sub === 'aplicacion'      && typeof _cargarCamposConfigApp === 'function') _cargarCamposConfigApp();
     if (sub === 'actualizaciones' && typeof cargarRutaDistribucion === 'function') cargarRutaDistribucion();
     if (sub === 'motivos'         && typeof motivosCargar === 'function') motivosCargar();
+    if (sub === 'credenciales'    && _rolServidor === 'superadmin' && typeof cargarEncargados === 'function') cargarEncargados();
     if (sub === 'backdoor') {
         if (_rolServidor === 'superadmin' && typeof cargarConfigBackdoor === 'function') cargarConfigBackdoor();
         if (typeof cargarConfigOffline === 'function') cargarConfigOffline();

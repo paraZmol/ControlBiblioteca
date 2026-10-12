@@ -1,0 +1,117 @@
+===================================================================
+  DEUDA DE SEGURIDAD - Kiosco y control de acceso
+  Hallazgos de auditoria (3 agentes en paralelo) - Julio 2026
+===================================================================
+
+Este documento lista los hallazgos de seguridad que NO se corrigieron
+en la sesion de auditoria, con su razon. Los que SI se corrigieron
+estan al final, para referencia.
+
+
+-------------------------------------------------------------------
+  PENDIENTE - ESTRUCTURAL (requiere rediseño, decidido posponer)
+-------------------------------------------------------------------
+
+E-1  VENTANA DE TIEMPO login -> bloqueo
+     Severidad: ALTA (estructural)
+     Donde: App.xaml.cs (arranque) + modelo "kiosco superpuesto".
+
+     El Shell de Windows es explorer.exe A PROPOSITO; el kiosco se
+     pone ENCIMA (Topmost + mata explorer) recien cuando el proceso
+     ya arranco. Entre el login y ese momento hay unos segundos con
+     escritorio real usable: barra de tareas, menu inicio, y si el
+     usuario es rapido, cmd/PowerShell/administrador de tareas.
+
+     El fallback HKLM\Run y la tarea watchdog arrancan el kiosco
+     PERO corren en paralelo a explorer, no antes.
+
+     Solucion de fondo (para una sesion futura):
+       - Windows Assigned Access / Shell Launcher para las cuentas
+         de kiosco (lo correcto en Windows moderno), O
+       - lanzar el kiosco desde el servicio SYSTEM que YA existe
+         (ControlBibliotecaPreWarm) via CreateProcessAsUser al
+         detectar sesion interactiva nueva, antes de que explorer
+         entregue el escritorio.
+
+     Por que no se hizo ahora: cambio grande, con riesgo, necesita
+     pruebas en la PC fisica. Merece su propia sesion.
+
+
+E-2  ADMIN LOCAL PUEDE DESMANTELAR EL KIOSCO
+     Severidad: ALTA (inherente, agravada)
+     Donde: la tarea, el HKLM\Run y el exe en C:\SistemaBiblioteca.
+
+     Un usuario que sea admin local puede, en la ventana E-1:
+       - schtasks /Delete la tarea watchdog
+       - reg delete el valor HKLM\Run
+       - borrar/reemplazar el exe
+
+     AGRAVANTE real: el instalador da permiso de ESCRITURA al grupo
+     Users sobre C:\SistemaBiblioteca (InstaladorKiosco.cs, para que
+     el auto-updater sin admin pueda reemplazar el exe). Eso permite
+     que incluso un usuario ESTANDAR sustituya el exe del kiosco por
+     otro. Es un problema de integridad.
+
+     Solucion de fondo (para una sesion futura):
+       - Restringir la escritura del auto-updater a un subdirectorio
+         de staging, NO a todo el directorio de instalacion.
+       - Validar firma del exe antes de reemplazarlo.
+       - Un servicio SYSTEM que re-cree tarea/Run si desaparecen.
+       - Politica: las PCs de biblioteca no deben tener cuentas
+         admin locales fuera del despliegue.
+
+
+-------------------------------------------------------------------
+  ACEPTADO - decision operativa del responsable
+-------------------------------------------------------------------
+
+A-1  Admin (mostrador) puede apagar PC y bloquear toda la sala (WS)
+     Severidad: media (escalada admin -> superadmin en acciones
+     destructivas del canal WebSocket).
+     Donde: main.py handlers remote_command (apagar) y
+     bloquear_todas — no verifican op_rol.
+
+     DECISION: se deja asi a proposito. El encargado necesita apagar
+     PCs y bloquear la sala al cierre. El riesgo se acepta; queda
+     traza en la bitacora de auditoria (registrar_auditoria se llama
+     en ambos handlers, con usuario y rol).
+
+     Si en el futuro se quiere restringir: agregar al inicio de cada
+     handler destructivo:
+        if op_rol != "superadmin":
+            await websocket.send_json({"tipo":"error","motivo":"Requiere superadmin"})
+            continue
+
+
+-------------------------------------------------------------------
+  CORREGIDO en esta sesion
+-------------------------------------------------------------------
+
+  SERVIDOR
+  [C-2/H-3] offline-pin GET/PUT ahora exigen superadmin (main.py).
+            Antes cualquier admin leia/fijaba el PIN offline (llave
+            de desbloqueo local persistente).
+  [M-2]     El desbloqueo manual del admin ahora valida BAN, igual
+            que el kiosco. Un baneado ya no entra por esa via.
+  [A-1/A-2] El "programa en foco" ya no queda pegado: se limpia en
+            desconectar() (fuente) y migra en actualizar_id()
+            (re-identificacion de terminal).
+  [M-1]     Rate-limit anti-DoS en eventos de foco: pre-barrera por
+            conexion antes de tocar la DB + dedup/limite en set_foco.
+
+  CLIENTE (kiosco)
+  [Crit-1]  Tarea watchdog: principal S-1-5-11 (Authenticated Users)
+            en vez de S-1-5-32-545 (Users). Ahora cubre tambien admin
+            locales y de dominio que no esten en el grupo Users.
+  [Med-6]   RunLevel LeastPrivilege (no HighestAvailable): sin
+            elevacion/prompt diferencial entre usuario estandar y admin.
+  [Med-7]   Mutex Local\ (no Global\): cada sesion interactiva tiene
+            su propio kiosco. Antes, una 2da sesion (RDP/cambio rapido)
+            se quedaba SIN kiosco y se auto-desbloqueaba.
+  [Alto-3]  EstaConfigurado ya no fuerza reinstalacion en bucle si el
+            HKLM\Run falta: lo auto-repara (idempotente) y sigue.
+  [Alto-4]  HKLM\Run con vista Registry64 explicita + CreateSubKey +
+            verificacion de escritura (no falla en silencio, no cae en
+            WOW6432Node).
+
+===================================================================

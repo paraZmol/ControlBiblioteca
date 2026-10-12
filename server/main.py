@@ -897,6 +897,10 @@ async def obtener_config_offline(
     admin: Usuario = Depends(obtener_usuario_actual),
     db: AsyncSession = Depends(get_db)
 ):
+    # El PIN offline es una credencial de desbloqueo local persistente: solo el
+    # superadmin puede verla, igual que el backdoor de mantenimiento (H-3).
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede ver el PIN offline.")
     from models import ConfiguracionKiosco
     res = await db.execute(select(ConfiguracionKiosco).limit(1))
     cfg = res.scalar_one_or_none()
@@ -917,6 +921,10 @@ async def actualizar_config_offline(
     admin: Usuario = Depends(obtener_usuario_actual),
     db: AsyncSession = Depends(get_db)
 ):
+    # Fijar el PIN offline equivale a fijar una llave de acceso físico en todos
+    # los kioscos: reservado a superadmin (H-3).
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede modificar el PIN offline.")
     from models import ConfiguracionKiosco
     res = await db.execute(select(ConfiguracionKiosco).limit(1))
     cfg = res.scalar_one_or_none()
@@ -1391,6 +1399,10 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 exe = re.sub(r"[^\w.\- ]", "", exe)[:120]
                 if not exe:
                     continue
+                # Pre-barrera anti-ráfaga ANTES de tocar la DB (M1): un cliente
+                # falso no puede forzar una query por cada mensaje spameado.
+                if not manager.foco_permitido_por_conn(terminal_id):
+                    continue
                 nombre_red_foco = None
                 async with async_session() as db:
                     t = await _buscar_terminal(db, terminal_id, terminal_ip)
@@ -1701,6 +1713,27 @@ async def websocket_admin(websocket: WebSocket):
 
                     if alumno is None:
                         await websocket.send_json({"tipo": "error", "motivo": f"Error: El DNI {dni_param} no existe"})
+                        continue
+
+                    # BLOQUEO POR BAN: un alumno sancionado no puede entrar por
+                    # NINGUNA vía. El kiosco ya lo bloquea en login_request; aquí
+                    # se replica para que el desbloqueo manual del admin tampoco
+                    # evada la sanción (M-2).
+                    res_ban_adm = await db.execute(
+                        select(Ban).where(
+                            Ban.dni_alumno == alumno.dni,
+                            (Ban.fecha_fin == None) | (Ban.fecha_fin > datetime.now())
+                        )
+                    )
+                    ban_adm = res_ban_adm.scalar_one_or_none()
+                    if ban_adm:
+                        motivo_ban = ban_adm.motivo or "Acceso restringido"
+                        fecha_fin_ban = ban_adm.fecha_fin.strftime("%d/%m/%Y") if ban_adm.fecha_fin else "indefinido"
+                        logger.warning(f"[WS-Admin] DNI={_mask_dni(alumno.dni)} BANEADO — desbloqueo denegado ({motivo_ban})")
+                        await websocket.send_json({
+                            "tipo": "error",
+                            "motivo": f"{alumno.nombre} tiene un ban activo: {motivo_ban}. Expira: {fecha_fin_ban}. No puede usar las PCs.",
+                        })
                         continue
 
                     # BLOQUEO POR VIGENCIA: una credencial vencida NO puede

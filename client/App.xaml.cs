@@ -75,14 +75,18 @@ namespace ControlBiblioteca.Client
             Security.Bloquear();
             AppLog("Security.Bloquear() OK");
 
-            // ── Instancia única ───────────────────────────────────────────────────
-            _mutex = new Mutex(true, "Global\\UNASAM_Biblioteca_Kiosco", out bool createdNew);
+            // ── Instancia única POR SESIÓN ────────────────────────────────────────
+            // Namespace Local\ (no Global\): cada sesión interactiva tiene su
+            // propio kiosco. Con Global\ una segunda sesión (RDP entrante o
+            // cambio rápido de usuario) veía createdNew=false, se desbloqueaba y
+            // salía → esa sesión quedaba SIN kiosco. Con Local\ tarea+Run siguen
+            // deduplicados dentro de la misma sesión, que es lo que se busca.
+            _mutex = new Mutex(true, "Local\\UNASAM_Biblioteca_Kiosco", out bool createdNew);
             _esDuenoMutex = createdNew;
             AppLog($"Mutex createdNew={createdNew}");
             if (!createdNew)
             {
-                AppLog("Segunda instancia detectada — saliendo.");
-                Security.Desbloquear();
+                AppLog("Segunda instancia en esta sesión — saliendo (la otra ya bloquea).");
                 Current.Shutdown();
                 return;
             }
@@ -98,27 +102,28 @@ namespace ControlBiblioteca.Client
 
                 if (!esAdmin)
                 {
-                    AppLog("No es admin — relanzando con runas y saliendo.");
-                    try
-                    {
-                        Process.Start(new ProcessStartInfo(
-                            Process.GetCurrentProcess().MainModule!.FileName)
-                        {
-                            Verb            = "runas",
-                            UseShellExecute = true
-                        });
-                    }
-                    catch (Exception ex) { AppLog($"runas falló: {ex.Message}"); }
-
+                    // NO pedir elevación (UAC) en una sesión de usuario estándar.
+                    //
+                    // Antes se lanzaba `runas` aquí: al alumno le aparecía el
+                    // cuadro "¿Permitir que esta app haga cambios?" y, si pulsaba
+                    // "No" (lo normal si no sabe de qué se trata), este proceso
+                    // salía y la PC quedaba SIN kiosco, sin nadie a quien bloquear.
+                    //
+                    // Regla: la instalación/reparación es tarea del ADMINISTRADOR.
+                    // Un usuario estándar nunca la intenta: simplemente bloquea la
+                    // pantalla con lo que haya. Ante la duda, bloquear.
+                    AppLog("Sesión sin privilegios: NO se pide UAC. " +
+                           "Se continúa en modo kiosco (la reparación la hará el administrador).");
+                    Security.Bloquear();   // revertir el Desbloquear() de arriba
+                    // Se cae hacia el modo kiosco normal, más abajo.
+                }
+                else
+                {
+                    InstaladorKiosco.Ejecutar();
                     LiberarMutex();
                     Environment.Exit(0);
                     return;
                 }
-
-                InstaladorKiosco.Ejecutar();
-                LiberarMutex();
-                Environment.Exit(0);
-                return;
             }
 
             // ── Modo kiosco normal ────────────────────────────────────────────────
@@ -132,6 +137,19 @@ namespace ControlBiblioteca.Client
             AppLog($"Config leída: ServerIp={config.ServerIp} ServerPort={config.ServerPort} TerminalName='{config.TerminalName}'");
             if (string.IsNullOrWhiteSpace(config.TerminalName))
             {
+                // Pedir el nombre del equipo implica desbloquear la pantalla y
+                // reiniciar: eso es tarea del ADMINISTRADOR durante la instalación.
+                // A un usuario estándar (alumno) NO se le muestra este diálogo; si
+                // cancelara, la PC quedaría desbloqueada y sin kiosco.
+                if (!EsAdministrador())
+                {
+                    AppLog("Falta TerminalName pero la sesión no es admin: " +
+                           "no se pide el nombre. Se sigue bloqueando la pantalla.");
+                    // Continúa el arranque normal: la pantalla queda bloqueada y el
+                    // administrador completará la configuración con su cuenta.
+                }
+                else
+                {
                 Security.Desbloquear(); // Permitir interacción con el diálogo
                 var dialog = new NombrePcWindow();
                 if (dialog.ShowDialog() == true)
@@ -151,6 +169,7 @@ namespace ControlBiblioteca.Client
                     LiberarMutex();
                     Environment.Exit(0);
                     return;
+                }
                 }
             }
 

@@ -19,6 +19,10 @@
     <!-- Reducir tamaño: eliminar código sin usar -->
     <PublishTrimmed>false</PublishTrimmed>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- ReadyToRun: pre-compila el codigo a nativo. El kiosco arranca
+         notablemente mas rapido (no compila JIT en cada inicio). El exe
+         crece algo, pero la descarga sigue comprimida. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

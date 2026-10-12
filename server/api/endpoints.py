@@ -660,6 +660,201 @@ async def quitar_motivo(
     return {"mensaje": f"Motivo «{m.descripcion}» desactivado (ya no aparece en las PCs)"}
 
 
+# ── Gestión de usuarios del panel (encargados) ──────────────────────
+# Permite crear/editar/desactivar MÚLTIPLES cuentas de rol "admin" cuando
+# el centro de cómputo tiene más de un encargado. El superadmin sigue
+# siendo único y se administra en su propia tarjeta (solo contraseña).
+# Todo aquí es SOLO superadmin. El borrado es LÓGICO (activo=False) para
+# no romper el vínculo de la bitácora de auditoría con cada username.
+
+def _validar_password_panel(pwd: str):
+    """Misma política que main._validar_complejidad_password. Duplicada aquí
+    para no crear import circular con main.py."""
+    if not pwd or len(pwd) < 8:
+        return "La contraseña debe tener al menos 8 caracteres"
+    if not any(c.isupper() for c in pwd):
+        return "La contraseña debe incluir al menos una letra mayúscula"
+    if not any(c.isdigit() for c in pwd):
+        return "La contraseña debe incluir al menos un número"
+    return None
+
+
+class _UsuarioPanelCrear(BaseModel):
+    username: str
+    password: str
+    nombre_completo: str | None = None
+
+
+class _UsuarioPanelEditar(BaseModel):
+    username: str | None = None
+    nombre_completo: str | None = None
+    password: str | None = None   # vacío/None = no cambiar
+
+
+@router.get("/admin/usuarios")
+async def listar_usuarios_panel(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Lista TODAS las cuentas del panel (activas e inactivas). Solo superadmin."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede gestionar usuarios")
+    res = await db.execute(select(Usuario).order_by(Usuario.rol.desc(), Usuario.username))
+    usuarios = res.scalars().all()
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "nombre_completo": u.nombre_completo or "",
+            "rol": u.rol,
+            "activo": u.activo,
+            "es_actual": u.id == admin.id,   # el que está logueado ahora
+        }
+        for u in usuarios
+    ]
+
+
+@router.post("/admin/usuarios")
+async def crear_usuario_panel(
+    datos: _UsuarioPanelCrear,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Crea un nuevo ENCARGADO (rol admin). Solo superadmin.
+    El rol es fijo 'admin': no se crean superadmins desde aquí."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede crear usuarios")
+    username = (datos.username or "").strip()
+    if len(username) < 3:
+        raise HTTPException(status_code=422, detail="El username debe tener al menos 3 caracteres")
+    err = _validar_password_panel(datos.password)
+    if err:
+        raise HTTPException(status_code=422, detail=err)
+    existe = await db.execute(select(Usuario).where(Usuario.username == username))
+    if existe.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Ese username ya está en uso")
+    nuevo = Usuario(
+        username=username,
+        hashed_password=hashear_password(datos.password),
+        nombre_completo=(datos.nombre_completo or "").strip() or None,
+        rol="admin",
+        activo=True,
+    )
+    db.add(nuevo)
+    await registrar_auditoria(admin.username, "crear_usuario", rol=admin.rol,
+                              objetivo=f"{username} (rol=admin)", db=db)
+    await db.commit()
+    return {"mensaje": f"Encargado «{username}» creado"}
+
+
+@router.put("/admin/usuarios/{usuario_id}")
+async def editar_usuario_panel(
+    usuario_id: int,
+    datos: _UsuarioPanelEditar,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Edita nombre, username y/o contraseña de una cuenta del panel.
+    Solo superadmin.
+
+    La cuenta superadmin SÍ se puede editar aquí (contraseña y nombre), porque
+    esta sección es el único lugar de gestión de cuentas. Lo que NO se permite
+    es cambiarle el username: 'superadmin' es un identificador fijo del sistema
+    (el arranque lo busca por ese nombre para sembrarlo/renombrarlo)."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede editar usuarios")
+    u = (await db.execute(select(Usuario).where(Usuario.id == usuario_id))).scalar_one_or_none()
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    cambios = []
+    nuevo_username = (datos.username or "").strip()
+    if nuevo_username and nuevo_username != u.username and u.rol == "superadmin":
+        raise HTTPException(status_code=400,
+            detail="No se puede cambiar el nombre de usuario del superadmin")
+    if nuevo_username and nuevo_username != u.username:
+        if len(nuevo_username) < 3:
+            raise HTTPException(status_code=422, detail="El username debe tener al menos 3 caracteres")
+        dup = await db.execute(select(Usuario).where(
+            Usuario.username == nuevo_username, Usuario.id != usuario_id))
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Ese username ya está en uso")
+        u.username = nuevo_username
+        cambios.append("username")
+
+    if datos.nombre_completo is not None:
+        nuevo_nombre = datos.nombre_completo.strip() or None
+        if nuevo_nombre != u.nombre_completo:
+            u.nombre_completo = nuevo_nombre
+            cambios.append("nombre")
+
+    if datos.password:
+        err = _validar_password_panel(datos.password)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+        u.hashed_password = hashear_password(datos.password)
+        cambios.append("contraseña")
+
+    if not cambios:
+        raise HTTPException(status_code=400, detail="Nada que actualizar")
+    await registrar_auditoria(admin.username, "editar_usuario", rol=admin.rol,
+                              objetivo=u.username, detalle="cambió " + " y ".join(cambios), db=db)
+    await db.commit()
+    return {"mensaje": f"Usuario «{u.username}» actualizado"}
+
+
+@router.delete("/admin/usuarios/{usuario_id}")
+async def desactivar_usuario_panel(
+    usuario_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Desactiva un encargado (activo=False): deja de poder iniciar sesión pero
+    se conserva la fila para que la bitácora de auditoría siga vinculada a su
+    username. Solo superadmin. Salvaguardas: no desactivar la cuenta propia ni
+    la última cuenta superadmin activa."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede desactivar usuarios")
+    u = (await db.execute(select(Usuario).where(Usuario.id == usuario_id))).scalar_one_or_none()
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    if u.id == admin.id:
+        raise HTTPException(status_code=400, detail="No puedes desactivar tu propia cuenta")
+    if u.rol == "superadmin":
+        # La cuenta superadmin NUNCA se da de baja: es la llave maestra del
+        # sistema. Sin ella no se puede configurar nada ni recuperar el acceso.
+        raise HTTPException(status_code=400,
+            detail="La cuenta superadmin no se puede dar de baja")
+    if not u.activo:
+        raise HTTPException(status_code=400, detail="El usuario ya está desactivado")
+    u.activo = False
+    await registrar_auditoria(admin.username, "desactivar_usuario", rol=admin.rol,
+                              objetivo=u.username, db=db)
+    await db.commit()
+    return {"mensaje": f"Usuario «{u.username}» desactivado"}
+
+
+@router.post("/admin/usuarios/{usuario_id}/reactivar")
+async def reactivar_usuario_panel(
+    usuario_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(obtener_usuario_actual),
+):
+    """Reactiva un encargado desactivado (activo=True). Solo superadmin."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede reactivar usuarios")
+    u = (await db.execute(select(Usuario).where(Usuario.id == usuario_id))).scalar_one_or_none()
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    if u.activo:
+        raise HTTPException(status_code=400, detail="El usuario ya está activo")
+    u.activo = True
+    await registrar_auditoria(admin.username, "reactivar_usuario", rol=admin.rol,
+                              objetivo=u.username, db=db)
+    await db.commit()
+    return {"mensaje": f"Usuario «{u.username}» reactivado"}
+
+
 # Mapeo columna -> campos ORM para ORDER BY.
 # "escuela" y "estudiante" usan Alumno para agrupación real con JOIN.
 _SORT_MAP = {

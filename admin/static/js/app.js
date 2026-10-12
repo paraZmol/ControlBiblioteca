@@ -3844,46 +3844,193 @@ function abrirBanDesdeIncidencia(dni, nombre) {
 
 // ── Configuración — gestión de usuarios ──────────────────────────
 
-async function guardarUsuario(rol) {
-    const esSuperadmin = rol === 'superadmin';
-    const username = esSuperadmin ? '' : (document.getElementById('cfg-admin-username')?.value.trim() || '');
-    const password = document.getElementById(esSuperadmin ? 'cfg-superadmin-nueva' : 'cfg-admin-nueva')?.value || '';
-    const errEl    = document.getElementById(esSuperadmin ? 'cfg-superadmin-error' : 'cfg-admin-error');
+// guardarUsuario() eliminada: las tarjetas Admin/Superadmin se reemplazaron
+// por la seccion "Encargados", que gestiona TODAS las cuentas por ID.
 
-    errEl.textContent = '';
 
-    if (!username && !password) {
-        errEl.textContent = 'Ingresa al menos un campo para actualizar';
-        return;
-    }
-    if (username && username.length < 3) {
-        errEl.textContent = 'El username debe tener al menos 3 caracteres';
-        return;
-    }
-    // BUG-3: la validación debe coincidir con la del servidor
-    // (_validar_complejidad_password: 8+ caracteres, 1 mayúscula y 1 número).
-    if (password && (password.length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password))) {
-        errEl.textContent = 'La contraseña debe tener al menos 8 caracteres, una mayúscula y un número';
-        return;
-    }
+// ── Gestión de encargados (usuarios adicionales, rol admin) ───────────────────
+// Solo superadmin. El borrado es lógico (desactivar) para conservar auditoría.
 
+let _encargadosCache = [];
+let _encEditandoId = null;   // null = modo crear; id = modo editar
+
+async function cargarEncargados() {
+    const cont = document.getElementById('encargados-lista');
+    if (!cont) return;
     try {
-        const res  = await fetch(`${API_BASE}/config/usuario`, {
-            method: 'PUT',
-            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rol_objetivo: rol, nuevo_username: username, nueva_password: password }),
-        });
+        const res = await fetch(`${API_BASE}/admin/usuarios`, { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok) { cont.innerHTML = '<p class="empty-msg">No se pudieron cargar los usuarios.</p>'; return; }
+        _encargadosCache = await res.json();
+        _renderEncargados();
+    } catch (e) {
+        cont.innerHTML = '<p class="empty-msg">Error de conexión.</p>';
+    }
+}
+
+function _renderEncargados() {
+    const cont = document.getElementById('encargados-lista');
+    if (!cont) return;
+    if (!_encargadosCache.length) {
+        cont.innerHTML = '<p class="empty-msg">No hay usuarios registrados.</p>';
+        return;
+    }
+    cont.innerHTML = _encargadosCache.map(u => {
+        const esSuper = u.rol === 'superadmin';
+        const inactivo = !u.activo;
+        const nombre = u.nombre_completo || u.username;
+        // Etiqueta de rol
+        let tag = esSuper
+            ? '<span class="enc-tag enc-tag-super">Superadmin</span>'
+            : '<span class="enc-tag enc-tag-admin">Encargado</span>';
+        if (u.es_actual) tag += '<span class="enc-tag enc-tag-yo">Tú</span>';
+        if (inactivo)    tag += '<span class="enc-tag enc-tag-admin" style="opacity:.7">Inactivo</span>';
+
+        // Acciones por fila:
+        //  · Editar: disponible para TODAS las cuentas activas, incluido el
+        //    superadmin (para cambiar su contraseña). Al superadmin el modal le
+        //    bloquea el username, que es un identificador fijo del sistema.
+        //  · Dar de baja: nunca para el superadmin (es la llave maestra) ni para
+        //    la cuenta con la que estás logueado ahora.
+        let acciones = '';
+        if (inactivo) {
+            acciones = `<button class="enc-btn" title="Reactivar" aria-label="Reactivar" onclick="reactivarEncargado(${u.id})"><i class="ph ph-arrow-counter-clockwise"></i></button>`;
+        } else {
+            acciones = `<button class="enc-btn" title="${esSuper ? 'Cambiar contraseña' : 'Editar'}" aria-label="${esSuper ? 'Cambiar contraseña' : 'Editar'}" onclick="abrirModalEncargado(${u.id})"><i class="ph ph-pencil-simple"></i></button>`;
+            if (!u.es_actual && !esSuper) {
+                acciones += `<button class="enc-btn enc-btn-danger" title="Dar de baja" aria-label="Dar de baja" onclick="desactivarEncargado(${u.id}, '${escapeHtml(u.username)}')"><i class="ph ph-user-minus"></i></button>`;
+            }
+        }
+        const ico = esSuper ? 'ph-shield-check' : 'ph-user';
+        return `
+            <div class="enc-item ${inactivo ? 'enc-item-off' : ''}">
+                <div class="enc-avatar"><i class="ph ${ico}"></i></div>
+                <div class="enc-info">
+                    <span class="enc-nombre">${escapeHtml(nombre)}</span>
+                    <span class="enc-user">@${escapeHtml(u.username)}</span>
+                </div>
+                <div class="enc-badges">${tag}<span class="enc-acciones">${acciones}</span></div>
+            </div>`;
+    }).join('');
+}
+
+function abrirModalEncargado(id = null) {
+    _encEditandoId = id;
+    const modal = document.getElementById('modal-encargado');
+    const titulo = document.getElementById('modal-encargado-titulo');
+    const sub    = document.getElementById('modal-encargado-sub');
+    const hint   = document.getElementById('enc-password-hint');
+    const fNombre = document.getElementById('enc-nombre');
+    const fUser   = document.getElementById('enc-username');
+    const fPass   = document.getElementById('enc-password');
+    const err     = document.getElementById('enc-error');
+    err.textContent = '';
+    fPass.value = '';
+
+    if (id) {
+        const u = _encargadosCache.find(x => x.id === id);
+        if (!u) return;
+        const esSuper = u.rol === 'superadmin';
+        titulo.textContent = esSuper ? 'Cuenta superadmin' : 'Editar encargado';
+        sub.textContent = esSuper
+            ? 'Puedes cambiar su contraseña. El nombre de usuario es fijo y la cuenta no se puede dar de baja.'
+            : 'Deja la contraseña vacía para no cambiarla.';
+        fNombre.value = u.nombre_completo || '';
+        fUser.value   = u.username;
+        // El username del superadmin es un identificador fijo del sistema.
+        fUser.disabled = esSuper;
+        fUser.title = esSuper ? 'El usuario del superadmin no se puede cambiar' : '';
+        fPass.placeholder = 'Dejar vacío para no cambiar';
+        hint.style.display = 'none';   // password opcional al editar
+    } else {
+        titulo.textContent = 'Nuevo encargado';
+        sub.textContent = 'Cuenta con permisos de administrador para operar la sala.';
+        fNombre.value = '';
+        fUser.value   = '';
+        fUser.disabled = false;
+        fUser.title = '';
+        fPass.placeholder = 'Mínimo 8, una mayúscula y un número';
+        hint.style.display = '';
+    }
+    modal.style.display = 'flex';
+    fUser.focus();
+}
+
+function cerrarModalEncargado() {
+    const modal = document.getElementById('modal-encargado');
+    if (modal) modal.style.display = 'none';
+    _encEditandoId = null;
+}
+
+async function guardarEncargado() {
+    const err   = document.getElementById('enc-error');
+    const btn   = document.getElementById('btn-encargado-guardar');
+    const nombre = document.getElementById('enc-nombre').value.trim();
+    const user   = document.getElementById('enc-username').value.trim();
+    const pass   = document.getElementById('enc-password').value;
+    err.textContent = '';
+
+    const editando = _encEditandoId !== null;
+    const objetivo = editando ? _encargadosCache.find(x => x.id === _encEditandoId) : null;
+    const editandoSuper = !!objetivo && objetivo.rol === 'superadmin';
+    if (user.length < 3) { err.textContent = 'El usuario debe tener al menos 3 caracteres'; return; }
+    // En el superadmin lo único editable es la contraseña: exigirla.
+    if (editandoSuper && !pass) {
+        err.textContent = 'Escribe la nueva contraseña del superadmin';
+        return;
+    }
+    // Password: obligatoria al crear; opcional al editar (vacía = no cambia).
+    const validaPass = pass.length >= 8 && /[A-Z]/.test(pass) && /[0-9]/.test(pass);
+    if (!editando && !validaPass) { err.textContent = 'La contraseña debe tener al menos 8 caracteres, una mayúscula y un número'; return; }
+    if (editando && pass && !validaPass) { err.textContent = 'La contraseña debe tener al menos 8 caracteres, una mayúscula y un número'; return; }
+
+    btn.disabled = true;
+    try {
+        let res;
+        if (editando) {
+            // Al superadmin no se le envía username: es fijo y el backend lo rechaza.
+            const body = editandoSuper ? { nombre_completo: nombre } : { username: user, nombre_completo: nombre };
+            if (pass) body.password = pass;
+            res = await fetch(`${API_BASE}/admin/usuarios/${_encEditandoId}`, {
+                method: 'PUT', headers: authHeaders(), body: JSON.stringify(body),
+            });
+        } else {
+            res = await fetch(`${API_BASE}/admin/usuarios`, {
+                method: 'POST', headers: authHeaders(),
+                body: JSON.stringify({ username: user, password: pass, nombre_completo: nombre }),
+            });
+        }
         const data = await res.json();
         if (res.ok) {
             mostrarNotificacion(data.mensaje, 'ok');
-            if (!esSuperadmin) document.getElementById('cfg-admin-username').value = '';
-            document.getElementById(esSuperadmin ? 'cfg-superadmin-nueva' : 'cfg-admin-nueva').value = '';
+            cerrarModalEncargado();
+            cargarEncargados();
         } else {
-            errEl.textContent = data.detail || 'Error al guardar';
+            err.textContent = data.detail || 'Error al guardar';
         }
     } catch (e) {
-        errEl.textContent = 'Error de conexión';
+        err.textContent = 'Error de conexión';
+    } finally {
+        btn.disabled = false;
     }
+}
+
+async function desactivarEncargado(id, username) {
+    if (!confirm(`¿Desactivar a «${username}»? No podrá iniciar sesión, pero su historial se conserva. Podrás reactivarlo luego.`)) return;
+    try {
+        const res = await fetch(`${API_BASE}/admin/usuarios/${id}`, { method: 'DELETE', headers: authHeaders() });
+        const data = await res.json();
+        if (res.ok) { mostrarNotificacion(data.mensaje, 'ok'); cargarEncargados(); }
+        else mostrarNotificacion(data.detail || 'No se pudo desactivar', 'error');
+    } catch (e) { mostrarNotificacion('Error de conexión', 'error'); }
+}
+
+async function reactivarEncargado(id) {
+    try {
+        const res = await fetch(`${API_BASE}/admin/usuarios/${id}/reactivar`, { method: 'POST', headers: authHeaders() });
+        const data = await res.json();
+        if (res.ok) { mostrarNotificacion(data.mensaje, 'ok'); cargarEncargados(); }
+        else mostrarNotificacion(data.detail || 'No se pudo reactivar', 'error');
+    } catch (e) { mostrarNotificacion('Error de conexión', 'error'); }
 }
 
 // ── Configuración de Aplicación (logo + textos login) ─────────────────────────

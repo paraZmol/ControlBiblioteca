@@ -2215,6 +2215,56 @@ html.dark .hc-row--active { background: oklch(0.25 0.04 200 / 0.25); }
     .motivo-acciones { grid-column: 2; justify-self: start; }
 }
 
+/* Lista de encargados (usuarios adicionales del panel) */
+.encargados-lista { display: flex; flex-direction: column; gap: 8px; }
+.enc-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center; gap: 12px;
+    padding: 11px 14px;
+    background: var(--sur2); border: 1px solid var(--bdr);
+    border-radius: var(--r-sm);
+    transition: border-color .15s;
+}
+.enc-item:hover { border-color: var(--bdr2); }
+.enc-avatar {
+    width: 34px; height: 34px; border-radius: 50%;
+    display: grid; place-items: center; flex: none;
+    background: var(--a-dim); color: var(--a); font-size: 17px;
+}
+.enc-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.enc-nombre {
+    font-size: 13.5px; font-weight: 600; color: var(--t1);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.enc-user { font-size: 11.5px; color: var(--t3); font-family: var(--mono); }
+.enc-badges { display: flex; align-items: center; gap: 6px; }
+/* Etiqueta de rol / estado */
+.enc-tag {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 2px 8px; border-radius: 999px; border: 1px solid;
+}
+.enc-tag-super { background: var(--wrn-dim); color: var(--wrn); border-color: var(--wrn-bdr); }
+.enc-tag-admin { background: var(--a-dim);  color: var(--a);   border-color: var(--a-bdr); }
+.enc-tag-yo    { background: var(--ok-dim); color: var(--ok);  border-color: var(--ok-bdr); }
+.enc-acciones { display: flex; gap: 5px; }
+.enc-btn {
+    background: transparent; border: none; cursor: pointer; padding: 5px;
+    color: var(--t3); font-size: 16px; border-radius: var(--r-xs);
+    transition: color .15s, background .15s;
+}
+.enc-btn:hover { color: var(--a); background: var(--a-dim); }
+.enc-btn-danger:hover { color: var(--err); background: var(--err-dim); }
+/* Encargado desactivado: atenuado */
+.enc-item-off { opacity: .6; border-style: dashed; }
+.enc-item-off .enc-avatar { background: var(--sur3); color: var(--t3); }
+.enc-item-off .enc-nombre { text-decoration: line-through; color: var(--t2); }
+
+@media (max-width: 640px) {
+    .enc-item { grid-template-columns: auto 1fr; row-gap: 8px; }
+    .enc-acciones, .enc-badges { grid-column: 2; justify-self: start; }
+}
+
 /* Botón de filtro toggle (ej. "Solo vencidas") */
 .db-btn-filtro {
     display: inline-flex; align-items: center; gap: 6px;
@@ -3111,4 +3161,12 @@ html.dark .act-row-crit:hover { background: oklch(0.16 0.03 20 / 0.45); }
 .kpi-bar-rval {
     font: 700 13px var(--font); color: var(--t1);
     min-width: 24px;
+}
+
+/* Campo deshabilitado dentro de un modal (ej: username fijo del superadmin) */
+.modal-input:disabled {
+    opacity: .62;
+    cursor: not-allowed;
+    background: var(--sur3);
+    color: var(--t3);
 }

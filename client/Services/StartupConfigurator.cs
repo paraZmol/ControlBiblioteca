@@ -47,6 +47,22 @@ namespace ControlBiblioteca.Client.Services
         }
 
         /// <summary>
+        /// True si el proceso actual corre con privilegios de administrador.
+        /// Se usa para NO intentar escrituras en HKLM desde una sesión de usuario
+        /// estándar (esos fallos provocaban un prompt de UAC innecesario).
+        /// </summary>
+        public static bool ProcesoEsAdministrador()
+        {
+            try
+            {
+                using var id = System.Security.Principal.WindowsIdentity.GetCurrent();
+                var principal = new System.Security.Principal.WindowsPrincipal(id);
+                return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
         /// True si el sistema está correctamente configurado:
         ///   1. La tarea watchdog existe en el Programador de Tareas.
         ///   2. El Shell de Winlogon es explorer.exe (NO nuestro exe).
@@ -65,8 +81,33 @@ namespace ControlBiblioteca.Client.Services
                 using RegistryKey? k = Registry.LocalMachine.OpenSubKey(WinlogonKey);
                 string shell = (k?.GetValue("Shell")?.ToString() ?? "").Trim('"', ' ');
                 bool shellEsExplorer = shell.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase);
+                if (!shellEsExplorer) return false;
 
-                return shellEsExplorer;
+                // El fallback HKLM\Run debe existir y apuntar a este exe. Si NO,
+                // NO forzamos una reinstalación completa (eso causaba un bucle de
+                // UAC/reinstalación si el Run fallaba silenciosamente, ALTO 3):
+                // lo re-registramos aquí mismo, que es barato e idempotente, y si
+                // la reparación funciona, damos la instalación por buena.
+                if (!RunGlobalApuntaA(exePath))
+                {
+                    // OJO: escribir en HKLM requiere admin. Un usuario ESTÁNDAR
+                    // (p. ej. un alumno con su propia cuenta de Windows) no puede,
+                    // y el intento fallido hacía que esto devolviera false ->
+                    // EsNecesario()=true -> prompt de UAC en su sesión. Si el
+                    // alumno pulsaba "No", la PC quedaba SIN kiosco.
+                    // Por eso: solo el admin repara. El usuario estándar da la
+                    // instalación por buena y sigue a bloquear la pantalla.
+                    if (!ProcesoEsAdministrador())
+                    {
+                        Debug.WriteLine("[StartupConfigurator] Run global ausente pero " +
+                                        "sin permisos de admin: se omite la reparación.");
+                        return true;   // no forzar instalación en sesión estándar
+                    }
+                    RegistrarRunGlobal(exePath);          // auto-reparación (solo admin)
+                    return RunGlobalApuntaA(exePath);     // true si quedó sano
+                }
+
+                return true;
             }
             catch { return false; }
         }
@@ -130,6 +171,25 @@ namespace ControlBiblioteca.Client.Services
             try { RestaurarShell(baseDir); } catch { }
             try { EliminarClaveSerialize(); } catch { }
             try { EliminarTareaWatchdog(); } catch { }
+            try { EliminarRunGlobal(); } catch { }
+        }
+
+        /// <summary>
+        /// Quita el fallback de HKLM\Run. Se usa en el rollback/desinstalación.
+        /// </summary>
+        public static void EliminarRunGlobal()
+        {
+            try
+            {
+                using RegistryKey baseKey = RegistryKey.OpenBaseKey(
+                    RegistryHive.LocalMachine, RegistryView.Registry64);
+                using RegistryKey? run = baseKey.OpenSubKey(RunKey, writable: true);
+                run?.DeleteValue(RunValueName, throwOnMissingValue: false);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[StartupConfigurator] EliminarRunGlobal falló: {ex.Message}");
+            }
         }
 
         // ── Servicio de pre-calentamiento ────────────────────────────────────────
@@ -193,7 +253,22 @@ namespace ControlBiblioteca.Client.Services
             // Escapar caracteres XML en la ruta del ejecutable
             string exeXml = SecurityEscape(exePath);
 
-            // XML de la tarea — LogonTrigger + Repetition de 1 minuto
+            // XML de la tarea. Cobertura POR MÁQUINA, no por usuario:
+            //   · Principal = GroupId "Authenticated Users" (S-1-5-11): la tarea
+            //     corre para CUALQUIER usuario que inicie sesión, incluidos los
+            //     admin locales y de dominio que pueden NO estar en el grupo
+            //     Users (S-1-5-32-545). Cierra el agujero del "perfil nuevo sin
+            //     bloqueo" también para esos casos.
+            //   · GroupId implica LogonType InteractiveToken: corre en la sesión
+            //     interactiva del usuario real (ve la pantalla y escribe su
+            //     propio HKCU). SYSTEM NO serviría: correría invisible en la
+            //     sesión 0.
+            //   · RunLevel LeastPrivilege: el kiosco no necesita admin para
+            //     taparse; así se evita cualquier elevación/prompt diferencial
+            //     entre usuarios estándar y admin.
+            //   · LogonTrigger (todos) + SessionStateChangeTrigger (unlock y
+            //     reconexión de consola/remota): cubre login, cambio de usuario
+            //     y desbloqueo. La Repetition de 1 min es la red de respaldo.
             string xml = $"""
                 <?xml version="1.0" encoding="UTF-16"?>
                 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -208,6 +283,18 @@ namespace ControlBiblioteca.Client.Services
                         <StopAtDurationEnd>false</StopAtDurationEnd>
                       </Repetition>
                     </LogonTrigger>
+                    <SessionStateChangeTrigger>
+                      <Enabled>true</Enabled>
+                      <StateChange>SessionUnlock</StateChange>
+                    </SessionStateChangeTrigger>
+                    <SessionStateChangeTrigger>
+                      <Enabled>true</Enabled>
+                      <StateChange>ConsoleConnect</StateChange>
+                    </SessionStateChangeTrigger>
+                    <SessionStateChangeTrigger>
+                      <Enabled>true</Enabled>
+                      <StateChange>RemoteConnect</StateChange>
+                    </SessionStateChangeTrigger>
                   </Triggers>
                   <Settings>
                     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
@@ -225,8 +312,8 @@ namespace ControlBiblioteca.Client.Services
                   </Actions>
                   <Principals>
                     <Principal id="Author">
-                      <LogonType>InteractiveToken</LogonType>
-                      <RunLevel>HighestAvailable</RunLevel>
+                      <GroupId>S-1-5-11</GroupId>
+                      <RunLevel>LeastPrivilege</RunLevel>
                     </Principal>
                   </Principals>
                 </Task>
@@ -250,6 +337,65 @@ namespace ControlBiblioteca.Client.Services
             {
                 try { File.Delete(xmlPath); } catch { }
             }
+
+            // Segunda red: fallback en HKLM\Run. La tarea watchdog puede tardar
+            // hasta 1 min en su primer disparo tras un login; este Run arranca
+            // el kiosco de inmediato y para TODOS los usuarios (HKLM, no HKCU).
+            // Es idempotente (se sobrescribe) y el Mutex Global evita duplicados
+            // si tarea y Run disparan a la vez.
+            RegistrarRunGlobal(exePath);
+        }
+
+        private const string RunKey =
+            @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+        private const string RunValueName = "ControlBibliotecaKiosco";
+
+        // El valor Run del exe, entre comillas por si la ruta tiene espacios.
+        private static string ValorRun(string exePath) => $"\"{exePath}\"";
+
+        /// <summary>
+        /// Registra el kiosco en HKLM\...\Run para que arranque en el login de
+        /// CUALQUIER usuario, de inmediato. Requiere admin (HKLM).
+        /// Devuelve true si el valor quedó escrito y verificado.
+        /// Usa la vista Registry64 explícita para no caer en WOW6432Node si el
+        /// proceso fuese de 32 bits (ALTO 4), y CreateSubKey para no ser no-op
+        /// si la clave no existiera.
+        /// </summary>
+        public static bool RegistrarRunGlobal(string exePath)
+        {
+            try
+            {
+                using RegistryKey baseKey = RegistryKey.OpenBaseKey(
+                    RegistryHive.LocalMachine, RegistryView.Registry64);
+                using RegistryKey run = baseKey.CreateSubKey(RunKey, writable: true)
+                    ?? throw new InvalidOperationException("No se pudo abrir HKLM\\...\\Run");
+                run.SetValue(RunValueName, ValorRun(exePath), RegistryValueKind.String);
+                // Verificar que quedó escrito (evita fallos silenciosos, ALTO 3/4).
+                return (run.GetValue(RunValueName)?.ToString() ?? "")
+                    .Equals(ValorRun(exePath), StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[StartupConfigurator] RegistrarRunGlobal falló: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// True si el valor Run existe Y apunta al exe indicado. Usado por
+        /// EstaConfigurado para decidir si el fallback está sano.
+        /// </summary>
+        private static bool RunGlobalApuntaA(string exePath)
+        {
+            try
+            {
+                using RegistryKey baseKey = RegistryKey.OpenBaseKey(
+                    RegistryHive.LocalMachine, RegistryView.Registry64);
+                using RegistryKey? run = baseKey.OpenSubKey(RunKey);
+                string actual = run?.GetValue(RunValueName)?.ToString() ?? "";
+                return actual.Equals(ValorRun(exePath), StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
         }
 
         private static void EliminarTareaWatchdog()

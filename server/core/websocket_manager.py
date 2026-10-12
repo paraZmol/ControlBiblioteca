@@ -1,7 +1,12 @@
 import logging
+import time
 from datetime import datetime
 from fastapi import WebSocket
 from typing import Dict, List
+
+# Ventana mínima entre eventos de foco aceptados por terminal (segundos). El
+# cliente honesto emite cada 30s; esto solo frena ráfagas de un cliente falso.
+_FOCO_MIN_INTERVALO = 5.0
 
 logger = logging.getLogger("control.ws")
 
@@ -17,6 +22,9 @@ class ConnectionManager:
         # memoria: qué mira el alumno AHORA, para pintarlo en vivo en el mapa.
         # No se persiste. Se limpia al cerrarse la sesión o caer la terminal.
         self.foco_terminales: Dict[str, str] = {}
+        # Marca de tiempo del último evento de foco aceptado por terminal, para
+        # descartar ráfagas (rate-limit anti-DoS, M1).
+        self._foco_last_ts: Dict[str, float] = {}
 
     # ── Terminales ────────────────────────────────────────────────────
 
@@ -36,11 +44,21 @@ class ConnectionManager:
         self.terminal_ips.pop(old_id, None)
         if ip:
             self.terminal_ips[new_id] = ip
+        # Migrar el foco a la clave nueva; si no, queda huérfano bajo la clave
+        # vieja para siempre (A1). El próximo tick del cliente lo re-emitirá.
+        foco = self.foco_terminales.pop(old_id, None)
+        if foco is not None:
+            self.foco_terminales[new_id] = foco
         logger.info(f"Terminal re-identificada: {old_id} -> {new_id}")
 
     def desconectar(self, terminal_id: str):
         self.conexiones_activas.pop(terminal_id, None)
         self.terminal_ips.pop(terminal_id, None)
+        # Limpiar el foco en la FUENTE: todo camino de desconexión pasa por aquí
+        # (finally del handler, broadcast a sockets muertos, desconectar_todo),
+        # así el foco nunca queda pegado mostrando a un alumno que ya se fue (A2).
+        self.foco_terminales.pop(terminal_id, None)
+        self._foco_last_ts.pop(terminal_id, None)
         logger.info(f"Terminal desconectada: {terminal_id}")
 
     async def enviar_comando(self, terminal_ip: str, comando: dict) -> bool:
@@ -168,13 +186,39 @@ class ConnectionManager:
 
     async def set_foco(self, nombre_terminal: str, exe: str):
         """Registra el programa en foco de una terminal y lo difunde a los
-        admins. Llamar solo con exe ya validado (app conocida)."""
+        admins. Llamar solo con exe ya validado (app conocida).
+
+        Devuelve False si el evento se descartó (rate-limit o sin cambio), True
+        si se difundió. Protege contra un cliente falso que spamee foco (M1):
+        cada evento aceptado hace un broadcast a TODOS los admins."""
+        # Dedup: si el foco no cambió, no re-difundir (evita fan-out inútil).
+        if self.foco_terminales.get(nombre_terminal) == exe:
+            return False
+        # Rate-limit: descartar si llegó demasiado pronto tras el anterior.
+        ahora = time.monotonic()
+        ultimo = self._foco_last_ts.get(nombre_terminal, 0.0)
+        if ahora - ultimo < _FOCO_MIN_INTERVALO:
+            return False
+        self._foco_last_ts[nombre_terminal] = ahora
         self.foco_terminales[nombre_terminal] = exe
         await self._broadcast_admins({
             "tipo": "foco",
             "nombre_terminal": nombre_terminal,
             "proceso_exe": exe,
         })
+        return True
+
+    def foco_permitido_por_conn(self, terminal_id: str) -> bool:
+        """Pre-barrera barata por conexión (terminal_id), para cortar ráfagas de
+        foco ANTES de abrir sesión de DB (M1). Registra el timestamp de forma
+        optimista: dos eventos casi simultáneos se colapsan a uno. El gate fino
+        por nombre_red (dedup + límite) sigue en set_foco."""
+        ahora = time.monotonic()
+        clave = f"__conn__{terminal_id}"
+        if ahora - self._foco_last_ts.get(clave, 0.0) < _FOCO_MIN_INTERVALO:
+            return False
+        self._foco_last_ts[clave] = ahora
+        return True
 
     async def limpiar_foco(self, nombre_terminal: str):
         """Olvida el foco de una terminal (fin de sesión / desconexión) y avisa
