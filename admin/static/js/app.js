@@ -69,7 +69,7 @@ function _aplicarRol() {
     if (navBD) navBD.style.display = '';
 
     // BD — botones y secciones solo para superadmin
-    ['btnExportarMaestro', 'btnImportarMaestro', 'subtab-btn-personal'].forEach(id => {
+    ['btnExportarMaestro', 'btnImportarMaestro', 'subtab-btn-egresados', 'subtab-btn-docentes', 'subtab-btn-autoridad', 'subtab-btn-incidencias-bans'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = esSuperAdmin ? '' : 'none';
     });
@@ -81,7 +81,7 @@ function _aplicarRol() {
     const navCfg = document.getElementById('nav-configuracion');
     if (navCfg) navCfg.style.display = '';
 
-    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones', 'auditoria'].forEach(s => {
+    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones', 'auditoria', 'ciclos', 'sedes'].forEach(s => {
         const btn = document.getElementById('subtab-btn-cfg-' + s);
         if (btn) btn.style.display = esSuperAdmin ? '' : 'none';
     });
@@ -262,7 +262,21 @@ function descargarLog(id) {
     URL.revokeObjectURL(a.href);
 }
 
-function escapeHtml(text) { const d = document.createElement('div'); d.textContent = String(text ?? ''); return d.innerHTML; }
+function escapeHtml(text) {
+    // Escapa tambien comillas: el texto se interpola dentro de atributos
+    // (title="...", value="..."). Sin esto, un nombre de .exe o de alumno con
+    // comillas podia romper el atributo e inyectar HTML (XSS).
+    return String(text ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+// Para argumentos de texto dentro de onclick="fn('...')": primero se escapa
+// como string JS (comilla y barra) y luego como atributo HTML. Con escapeHtml
+// solo, "D'Angelo" se decodifica a ' dentro del JS y rompe (o inyecta) el handler.
+function escJs(text) {
+    return escapeHtml(String(text ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+        .replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\u2028|\u2029/g, ' '));
+}
 
 function esc(s) { return escapeHtml(s); }
 
@@ -647,7 +661,13 @@ async function aplicarFiltros(resetOffset = true) {
 
         const res = await fetch(_sesionesUrl(), { headers: authHeaders(), cache: 'no-store' });
 
-        if (!res.ok) return;
+        if (!res.ok) {
+            // p.ej. rango invertido o mes invalido: el servidor responde 422 con el motivo
+            let detalle = 'No se pudo cargar el historial';
+            try { const e = await res.json(); if (typeof e.detail === 'string') detalle = e.detail; } catch (_) {}
+            mostrarNotificacion(detalle, 'error');
+            return;
+        }
 
         const data = await res.json();
 
@@ -797,6 +817,8 @@ function exportarPdfFiltrado() {
 
 
 
+let _monTerminalesUlt = null;   // ultimo listado de PCs (para refiltrar al elegir sede)
+
 async function cargarDashboard() {
 
     try {
@@ -860,6 +882,12 @@ async function cargarDashboard() {
 
 
 
+        // Sedes: tarjetas de estado por centro de computo y filtro del mapa.
+        _monTerminalesUlt = { terminales, sesiones };
+        if (typeof monSedesActualizar === 'function') {
+            monSedesActualizar();
+            terminales = monSedesFiltrar(terminales);
+        }
         renderTerminales(terminales, sesiones);
 
         renderSesiones(sesiones);
@@ -1327,15 +1355,24 @@ function mostrarModalDesbloqueo(ip, nombrePc) {
 
 function bloquearTodas() {
 
+    // Multi-sede: si en Monitoreo hay una sede elegida, se bloquea solo esa.
+    // Un encargado con sede fija bloquea siempre la suya (lo impone el servidor).
+    const sedeSel = (typeof _monSedeSel !== 'undefined' && /^\d+$/.test(_monSedeSel)) ? _monSedeSel : '';
+    const sedeInfo = sedeSel && typeof _monSedesData !== 'undefined' ? _monSedesData.find(s => String(s.id) === sedeSel) : null;
+    const variasSedes = typeof _monSedesData !== 'undefined' && _monSedesData.length > 1;
+    const alcance = sedeInfo
+        ? `todos los equipos conectados de <strong>${escapeHtml(sedeInfo.nombre)}</strong>`
+        : (variasSedes ? 'todos los equipos conectados de <strong>TODAS las sedes</strong>' : 'todos los equipos conectados');
+
     mostrarConfirmacion(
 
-        'Esta acción enviará una orden de bloqueo inmediato a todos los equipos conectados. Los alumnos no podrán usar las PCs hasta que sean desbloqueadas manualmente o por el administrador.',
+        `Esta acción enviará una orden de bloqueo inmediato a ${alcance}. Los alumnos no podrán usar las PCs hasta que sean desbloqueadas manualmente o por el administrador.`,
 
         () => {
 
             addLog('activity', 'Botón BLOQUEAR TODAS las terminales');
 
-            wsEnviar({ tipo: 'bloquear_todas' });
+            wsEnviar(sedeSel ? { tipo: 'bloquear_todas', id_sede: parseInt(sedeSel, 10) } : { tipo: 'bloquear_todas' });
 
         },
 
@@ -1475,9 +1512,9 @@ async function cerrarSesion(sesionId, motivo = 'admin', silent = false, nombrePc
 
     } else {
 
-        const pcPart = nombrePc ? ` en [${nombrePc}]` : '';
+        const pcPart = nombrePc ? ` en [${escapeHtml(nombrePc)}]` : '';
 
-        const alumnoPart = nombreAlumno ? ` de ${nombreAlumno}` : '';
+        const alumnoPart = nombreAlumno ? ` de ${escapeHtml(nombreAlumno)}` : '';
 
         mostrarConfirmacion(`¿Estás seguro de finalizar la sesión${alumnoPart}${pcPart}? Esta acción es irreversible.`, async () => {
 
@@ -1542,9 +1579,9 @@ async function apagarPc(ip, sesionId = null, nombrePc = null, nombreAlumno = nul
 
     const pcLabel = nombrePc || ip;
 
-    const alumnoLine = nombreAlumno ? `\nSe cerrará la sesión de: ${nombreAlumno}` : '';
+    const alumnoLine = nombreAlumno ? `<br>Se cerrará la sesión de: ${escapeHtml(nombreAlumno)}` : '';
 
-    mostrarConfirmacion(`¿Confirmas el apagado de [${pcLabel}]?${alumnoLine}`, async () => {
+    mostrarConfirmacion(`¿Confirmas el apagado de [${escapeHtml(pcLabel)}]?${alumnoLine}`, async () => {
 
         addLog('activity', `Botón APAGAR PC: ${ip}`);
 
@@ -1625,9 +1662,10 @@ function renderTerminales(terminales, sesiones = []) {
 
     const grid = document.getElementById('terminalesGrid');
 
+    const filtroSede = typeof _monSedeSel !== 'undefined' && _monSedeSel;
     if (!terminales.length) {
 
-        grid.innerHTML = '<p class="empty-msg" style="grid-column:1/-1">No hay equipos registrados</p>';
+        grid.innerHTML = `<p class="empty-msg" style="grid-column:1/-1">${filtroSede ? 'Ninguna PC de esta sede está encendida en este momento' : 'No hay equipos registrados'}</p>`;
 
         return;
 
@@ -1666,9 +1704,9 @@ function renderTerminales(terminales, sesiones = []) {
 
         let botonesPrimarios = '';
 
-        const pcNombre = esc(t.nombre || t.ip);
+        const pcNombre = escJs(t.nombre || t.ip);
 
-        const alumnoNombre = sesion ? esc(sesion.alumno_nombre) : '';
+        const alumnoNombre = sesion ? escJs(sesion.alumno_nombre) : '';
 
 
 
@@ -1684,7 +1722,7 @@ function renderTerminales(terminales, sesiones = []) {
 
             botonesPrimarios = `
 
-                <button class="btn-card-apagar" aria-label="Apagar PC" title="Apagar PC" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> <span class="btn-card-txt">Apagar PC</span></button>
+                <button class="btn-card-apagar" aria-label="Apagar PC" title="Apagar PC" onclick="apagarPc('${escJs(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> <span class="btn-card-txt">Apagar PC</span></button>
                 ${btnEliminar}
 
             `;
@@ -1693,9 +1731,9 @@ function renderTerminales(terminales, sesiones = []) {
 
             botonesPrimarios = `
 
-                <button class="btn-card-desbloquear" aria-label="Desbloquear" title="Desbloquear" onclick="mostrarModalDesbloqueo('${esc(t.ip)}', '${pcNombre}')"><i class="ph ph-lock-open"></i> <span class="btn-card-txt">Desbloquear</span></button>
+                <button class="btn-card-desbloquear" aria-label="Desbloquear" title="Desbloquear" onclick="mostrarModalDesbloqueo('${escJs(t.ip)}', '${pcNombre}')"><i class="ph ph-lock-open"></i> <span class="btn-card-txt">Desbloquear</span></button>
 
-                <button class="btn-card-apagar" aria-label="Apagar PC" title="Apagar PC" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> <span class="btn-card-txt">Apagar PC</span></button>
+                <button class="btn-card-apagar" aria-label="Apagar PC" title="Apagar PC" onclick="apagarPc('${escJs(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> <span class="btn-card-txt">Apagar PC</span></button>
 
             `;
 
@@ -1703,9 +1741,9 @@ function renderTerminales(terminales, sesiones = []) {
 
             botonesPrimarios = `
 
-                <button class="btn-card-bloquear" aria-label="Bloquear" title="Bloquear" onclick="bloquearTerminal('${esc(t.ip)}', '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-lock"></i> <span class="btn-card-txt">Bloquear</span></button>
+                <button class="btn-card-bloquear" aria-label="Bloquear" title="Bloquear" onclick="bloquearTerminal('${escJs(t.ip)}', '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-lock"></i> <span class="btn-card-txt">Bloquear</span></button>
 
-                <button class="btn-card-apagar" aria-label="Apagar PC" title="Apagar PC" onclick="apagarPc('${esc(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> <span class="btn-card-txt">Apagar PC</span></button>
+                <button class="btn-card-apagar" aria-label="Apagar PC" title="Apagar PC" onclick="apagarPc('${escJs(t.ip)}', ${sesion ? sesion.id : 'null'}, '${pcNombre}', '${alumnoNombre}')"><i class="ph ph-power"></i> <span class="btn-card-txt">Apagar PC</span></button>
 
             `;
 
@@ -1840,7 +1878,12 @@ function _descargarArchivo(url, logMsg, fallbackName) {
 
         .then(r => {
 
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            if (!r.ok) {
+                // Mostrar el motivo real (p.ej. 422 por rango de fechas invalido)
+                return r.json().catch(() => ({})).then(e => {
+                    throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`);
+                });
+            }
 
             const disp = r.headers.get('Content-Disposition') || '';
 
@@ -1874,7 +1917,7 @@ function _descargarArchivo(url, logMsg, fallbackName) {
 
             addLog('error', `Error al exportar: ${e.message}`);
 
-            mostrarNotificacion('Error al exportar archivo', 'error');
+            mostrarNotificacion(e.message && !e.message.startsWith('HTTP') ? e.message : 'Error al exportar archivo', 'error');
 
         });
 
@@ -1884,7 +1927,7 @@ function _descargarArchivo(url, logMsg, fallbackName) {
 
 function exportarExcel() {
 
-    _descargarArchivo(`${API_BASE}/admin/exportar-excel`, 'Descargando historial Excel...', 'historial.xlsx');
+    _descargarArchivo(`${API_BASE}/admin/exportar-excel?${_buildParams()}`, 'Descargando historial Excel...', 'historial.xlsx');
 
 }
 
@@ -2022,7 +2065,8 @@ function mostrarConfirmacion(mensaje, onConfirm, { titulo = 'Advertencia', texto
 
     if (tituloEl)  tituloEl.textContent  = titulo;
 
-    if (mensajeEl) mensajeEl.textContent  = mensaje;
+    // El mensaje es HTML: cada llamador escapa los datos con escapeHtml.
+    if (mensajeEl) mensajeEl.innerHTML  = mensaje;
 
     if (btnConfirm) {
 
@@ -2217,7 +2261,7 @@ function renderMaestro(data) {
         // Botón Renovar: solo si está vencida (admin o superadmin).
         const btnRenovar = a.vencido
             ? `<button title="Renovar credencial (otros ${data.vigencia_meses || 24} meses)" class="tbl-btn tbl-btn-ok"
-                 onclick="renovarCredencial('${esc(a.dni)}','${esc(a.nombre)}')"><i class="ph ph-arrow-clockwise"></i></button>`
+                 onclick="renovarCredencial('${escJs(a.dni)}','${escJs(a.nombre)}')"><i class="ph ph-arrow-clockwise"></i></button>`
             : '';
         return `
         <tr${a.vencido ? ' class="fila-vencida"' : ''}>
@@ -2231,11 +2275,11 @@ function renderMaestro(data) {
                 <div style="display:flex;gap:4px;align-items:center">
                     ${btnRenovar}
                     ${esSuperAdmin ? `<button title="Editar" class="tbl-btn tbl-btn-edit"
-                        onclick="abrirEditarMaestro('${esc(a.dni)}','${esc(a.nombre)}','${esc(a.codigo||'')}','${esc(a.facultad||'')}','${esc(a.escuela||'')}')"><i class="ph ph-pencil-simple"></i></button>` : ''}
+                        onclick="abrirEditarMaestro('${escJs(a.dni)}','${escJs(a.nombre)}','${escJs(a.codigo||'')}','${escJs(a.facultad||'')}','${escJs(a.escuela||'')}')"><i class="ph ph-pencil-simple"></i></button>` : ''}
                     <button title="Registrar incidencia" class="tbl-btn tbl-btn-warn"
-                        onclick="abrirNuevaIncidencia('${esc(a.dni)}')"><i class="ph ph-warning-circle"></i></button>
+                        onclick="abrirNuevaIncidencia('${escJs(a.dni)}')"><i class="ph ph-warning-circle"></i></button>
                     ${esSuperAdmin ? `<button title="Banear" class="tbl-btn tbl-btn-ban"
-                        onclick="abrirBanearUsuario('${esc(a.dni)}','${esc(a.nombre)}')"><i class="ph ph-prohibit"></i></button>` : ''}
+                        onclick="abrirBanearUsuario('${escJs(a.dni)}','${escJs(a.nombre)}')"><i class="ph ph-prohibit"></i></button>` : ''}
                 </div>
             </td>
         </tr>`;
@@ -2762,7 +2806,7 @@ function renderBans(bans) {
             <td style="font-size:12px;color:var(--t3)">${esc(b.baneado_por || '—')}</td>
             <td>
                 <button title="Levantar ban" style="padding:4px 10px;font-size:12px;background:var(--err-dim);border:1px solid var(--err-bdr);border-radius:6px;cursor:pointer;color:var(--err);font-weight:600"
-                    onclick="levantarBan(${b.id},'${esc(b.nombre)}')">Levantar</button>
+                    onclick="levantarBan(${b.id},'${escJs(b.nombre)}')">Levantar</button>
             </td>
         </tr>`;
     }).join('');
@@ -2826,9 +2870,9 @@ function renderPersonal(data) {
             <td>
                 <div style="display:flex;gap:4px;align-items:center">
                     <button title="Editar" class="tbl-btn tbl-btn-edit"
-                        onclick="abrirEditarPersonal('${esc(p.dni)}','${esc(p.nombre)}','${esc(p.cargo||'')}','${esc(p.area||'')}','${esc(p.correo||'')}','${esc(p.telefono||'')}')"><i class="ph ph-pencil-simple"></i></button>
+                        onclick="abrirEditarPersonal('${escJs(p.dni)}','${escJs(p.nombre)}','${escJs(p.cargo||'')}','${escJs(p.area||'')}','${escJs(p.correo||'')}','${escJs(p.telefono||'')}')"><i class="ph ph-pencil-simple"></i></button>
                     <button title="Eliminar" class="tbl-btn tbl-btn-delete"
-                        onclick="eliminarPersonal('${esc(p.dni)}','${esc(p.nombre)}')"><i class="ph ph-trash"></i></button>
+                        onclick="eliminarPersonal('${escJs(p.dni)}','${escJs(p.nombre)}')"><i class="ph ph-trash"></i></button>
                 </div>
             </td>
         </tr>`).join('');
@@ -3068,7 +3112,7 @@ function _renderGrupo(grupo, data) {
     if (empty) empty.style.display = 'none';
 
     body.innerHTML = data.items.map(r => {
-        const json = encodeURIComponent(JSON.stringify(r));
+        const json = encodeURIComponent(JSON.stringify(r)).replace(/'/g, '%27');
         return `
         <tr>
             <td><code>${esc(r.dni)}</code></td>
@@ -3077,7 +3121,7 @@ function _renderGrupo(grupo, data) {
             <td>
                 <div style="display:flex;gap:4px;align-items:center">
                     <button title="Editar" class="tbl-btn tbl-btn-edit" onclick="abrirEditarGrupo('${grupo}','${json}')"><i class="ph ph-pencil-simple"></i></button>
-                    <button title="Eliminar" class="tbl-btn tbl-btn-delete" onclick="eliminarGrupo('${grupo}','${esc(r.dni)}','${esc(r.nombre)}')"><i class="ph ph-trash"></i></button>
+                    <button title="Eliminar" class="tbl-btn tbl-btn-delete" onclick="eliminarGrupo('${grupo}','${escJs(r.dni)}','${escJs(r.nombre)}')"><i class="ph ph-trash"></i></button>
                 </div>
             </td>
         </tr>`;
@@ -3503,22 +3547,32 @@ function audCambiarPag(dir) {
 // ── Incidencias ──────────────────────────────────────────────────────
 
 let _incidenciasCache = [];
+let _incPuedeEliminar = false;
+let _incSoloActivasCargado = null;
 
 async function cargarIncidencias() {
     const soloActivas = document.getElementById('incidenciasSoloActivas')?.checked ?? true;
     const params = new URLSearchParams({ limit: 200, offset: 0 });
     if (soloActivas) params.set('solo_activas', 'true');
+    const totalEl = document.getElementById('incidenciasTotal');
     try {
-        const res  = await fetch(`${API_BASE}/admin/incidencias?${params}`, { headers: authHeaders() });
+        const res  = await fetch(`${API_BASE}/admin/incidencias?${params}`, { headers: authHeaders(), cache: 'no-store' });
         const data = await res.json();
-        if (!res.ok) return;
+        if (!res.ok) {
+            // Antes se ignoraba en silencio y la incidencia recien creada "no aparecia".
+            if (totalEl) totalEl.textContent = '';
+            mostrarNotificacion(data.detail || 'No se pudieron cargar las incidencias', 'error');
+            return;
+        }
         _incidenciasCache = data.items || [];
-        const totalEl = document.getElementById('incidenciasTotal');
+        _incPuedeEliminar = !!data.puede_eliminar;
+        _incSoloActivasCargado = soloActivas;
         if (totalEl) totalEl.textContent = `${data.total} registro(s)`;
         _renderIncidencias(_incidenciasCache);
         await _cargarResumenIncidencias();
     } catch (e) {
-        // silencioso
+        if (totalEl) totalEl.textContent = '';
+        mostrarNotificacion('Error de conexión al cargar incidencias', 'error');
     }
 }
 
@@ -3564,7 +3618,7 @@ async function _cargarResumenIncidencias() {
                 alertasDiv.style.display = '';
                 alertasList.innerHTML = alertas.map(r =>
                     `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-900/40 border border-amber-300 dark:border-amber-700/60 text-xs font-semibold text-amber-800 dark:text-amber-300 cursor-pointer hover:bg-amber-200 dark:hover:bg-amber-800/50 transition-colors"
-                        onclick="abrirBanDesdeIncidencia('${escapeHtml(r.dni)}','${escapeHtml(r.nombre)}')">
+                        onclick="abrirBanDesdeIncidencia('${escJs(r.dni)}','${escJs(r.nombre)}')">
                         <i class="ph ph-warning-circle"></i> ${escapeHtml(r.nombre)} — ${r.total} inc.
                     </span>`
                 ).join('');
@@ -3719,8 +3773,8 @@ function _renderIncidencias(items) {
             <td class="px-3 py-3">${estadoBadge}</td>
             <td class="px-3 py-3">
                 <div class="flex items-center gap-2">
-                    ${i.activa && i.tipo === 'grave' ? `<button onclick="abrirBanearUsuario('${escapeHtml(i.dni)}','${escapeHtml(i.nombre_alumno)}')" class="text-amber-500 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-200 transition-colors" title="Banear alumno"><i class="ph ph-prohibit text-base"></i></button>` : ''}
-                    ${i.activa ? `<button onclick="eliminarIncidencia(${i.id},'${escapeHtml(i.nombre_alumno)}')" class="text-rose-400 hover:text-rose-600 dark:text-rose-500 dark:hover:text-rose-300 transition-colors" title="Eliminar incidencia"><i class="ph ph-trash text-base"></i></button>` : ''}
+                    ${i.activa && i.tipo === 'grave' && _rolServidor === 'superadmin' ? `<button onclick="abrirBanearUsuario('${escJs(i.dni)}','${escJs(i.nombre_alumno)}')" class="text-amber-500 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-200 transition-colors" title="Banear alumno"><i class="ph ph-prohibit text-base"></i></button>` : ''}
+                    ${i.activa && _incPuedeEliminar ? `<button onclick="eliminarIncidencia(${i.id},'${escJs(i.nombre_alumno)}')" class="text-rose-400 hover:text-rose-600 dark:text-rose-500 dark:hover:text-rose-300 transition-colors" title="Eliminar incidencia"><i class="ph ph-trash text-base"></i></button>` : ''}
                 </div>
             </td>
         </tr>`;
@@ -3730,7 +3784,7 @@ function _renderIncidencias(items) {
 function filtrarIncidencias() {
     _renderIncidencias(_incidenciasCache);
     const soloActivas = document.getElementById('incidenciasSoloActivas')?.checked ?? true;
-    if (soloActivas !== _incidenciasCache._soloActivas) cargarIncidencias();
+    if (soloActivas !== _incSoloActivasCargado) cargarIncidencias();
 }
 
 let _incDni = null;
@@ -3746,6 +3800,16 @@ async function abrirNuevaIncidencia(dni = null) {
     document.getElementById('inc-descripcion').value = '';
     document.getElementById('modal-incidencia-error').textContent = '';
     document.getElementById('inc-advertencia-ban').style.display = 'none';
+    // Sede: solo se pregunta si el encargado no tiene sede fija y hay varias.
+    const sedeCampo = document.getElementById('inc-sede-campo');
+    if (sedeCampo && typeof orgCargarSedes === 'function') {
+        sedeCampo.style.display = 'none';
+        orgCargarSedes().then(sedes => {
+            if (_orgMiSede || sedes.length < 2) return;
+            _orgOpcionesSede(document.getElementById('inc-sede'), { incluirTodas: 'Elige la sede…' });
+            sedeCampo.style.display = '';
+        });
+    }
     const nombreEl = document.getElementById('modal-incidencia-nombre');
     if (dni) {
         // Buscar nombre en cache de maestro si está disponible
@@ -3760,14 +3824,14 @@ async function abrirNuevaIncidencia(dni = null) {
     document.getElementById('btn-inc-guardar').onclick = guardarIncidencia;
     // Actualizar contador si cambia el DNI manualmente
     document.getElementById('inc-dni').oninput = async function() {
-        if (this.value.length === 8) await _actualizarContadorIncidencia(this.value);
+        if (/^\d{8}$/.test(this.value.trim())) await _actualizarContadorIncidencia(this.value.trim());
         else document.getElementById('inc-advertencia-ban').style.display = 'none';
     };
 }
 
 async function _actualizarContadorIncidencia(dni) {
     try {
-        const res  = await fetch(`${API_BASE}/admin/incidencias?dni=${dni}&solo_activas=true&limit=10`, { headers: authHeaders() });
+        const res  = await fetch(`${API_BASE}/admin/incidencias?dni=${encodeURIComponent(dni)}&solo_activas=true&limit=10`, { headers: authHeaders() });
         const data = await res.json();
         if (res.ok && data.total >= 2) {
             document.getElementById('inc-contador').textContent = `${data.total}`;
@@ -3785,8 +3849,11 @@ async function guardarIncidencia() {
     const tipo        = document.getElementById('inc-tipo').value;
     const motivo      = document.getElementById('inc-motivo').value.trim();
     const descripcion = document.getElementById('inc-descripcion').value.trim();
-    if (!dni || dni.length !== 8 || !/^\d+$/.test(dni)) { errEl.textContent = 'DNI debe tener 8 dígitos numéricos'; return; }
+    if (!dni) { errEl.textContent = 'Ingresa el DNI o el código del alumno'; return; }
     if (!motivo) { errEl.textContent = 'El motivo es obligatorio'; return; }
+    const sedeCampo = document.getElementById('inc-sede-campo');
+    const sedeVal = sedeCampo && sedeCampo.style.display !== 'none' ? document.getElementById('inc-sede').value : '';
+    if (sedeCampo && sedeCampo.style.display !== 'none' && !sedeVal) { errEl.textContent = 'Elige la sede donde ocurrió'; return; }
     const btn = document.getElementById('btn-inc-guardar');
     btn.disabled = true;
     btn.textContent = 'Guardando...';
@@ -3794,13 +3861,18 @@ async function guardarIncidencia() {
         const res  = await fetch(`${API_BASE}/admin/incidencias`, {
             method: 'POST',
             headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ dni, tipo, motivo, descripcion: descripcion || null }),
+            body: JSON.stringify({ dni, tipo, motivo, descripcion: descripcion || null, id_sede: sedeVal ? parseInt(sedeVal, 10) : null }),
         });
         const data = await res.json();
         if (res.ok) {
             document.getElementById('modal-incidencia').style.display = 'none';
             mostrarNotificacion(data.mensaje, 'ok');
-            addLog('activity', `Incidencia ${tipo} registrada para DNI ${dni}: ${motivo}`);
+            addLog('activity', `Incidencia ${tipo} registrada para DNI ${data.dni || dni}: ${motivo}`);
+            // Mostrar la incidencia recien creada aunque haya filtros activos.
+            const buscar = document.getElementById('incidenciasBuscar');
+            if (buscar) buscar.value = '';
+            const ftipo = document.getElementById('incidenciasFiltroTipo');
+            if (ftipo) ftipo.value = '';
             cargarIncidencias();
             if (data.total_activas >= 3) {
                 mostrarNotificacion(`Atención: ${data.total_activas} incidencias activas para este alumno`, 'warning');
@@ -3838,6 +3910,14 @@ function eliminarIncidencia(id, nombre) {
 }
 
 function abrirBanDesdeIncidencia(dni, nombre) {
+    // Banear es solo del superadmin: el encargado ve las incidencias del alumno.
+    if (_rolServidor !== 'superadmin') {
+        switchSubtabInc('inc');
+        const buscar = document.getElementById('incidenciasBuscar');
+        if (buscar) { buscar.value = dni; filtrarIncidencias(); }
+        mostrarNotificacion('Solo el superadmin puede banear. Avísale si el caso lo amerita.', 'warning');
+        return;
+    }
     switchTab('incidencias');
     setTimeout(() => { switchSubtabInc('bans'); abrirBanearUsuario(dni, nombre); }, 300);
 }
@@ -3858,6 +3938,7 @@ async function cargarEncargados() {
     const cont = document.getElementById('encargados-lista');
     if (!cont) return;
     try {
+        if (typeof orgCargarSedes === 'function') await orgCargarSedes(true);
         const res = await fetch(`${API_BASE}/admin/usuarios`, { headers: authHeaders(), cache: 'no-store' });
         if (!res.ok) { cont.innerHTML = '<p class="empty-msg">No se pudieron cargar los usuarios.</p>'; return; }
         _encargadosCache = await res.json();
@@ -3897,8 +3978,11 @@ function _renderEncargados() {
         } else {
             acciones = `<button class="enc-btn" title="${esSuper ? 'Cambiar contraseña' : 'Editar'}" aria-label="${esSuper ? 'Cambiar contraseña' : 'Editar'}" onclick="abrirModalEncargado(${u.id})"><i class="ph ph-pencil-simple"></i></button>`;
             if (!u.es_actual && !esSuper) {
-                acciones += `<button class="enc-btn enc-btn-danger" title="Dar de baja" aria-label="Dar de baja" onclick="desactivarEncargado(${u.id}, '${escapeHtml(u.username)}')"><i class="ph ph-user-minus"></i></button>`;
+                acciones += `<button class="enc-btn enc-btn-danger" title="Dar de baja" aria-label="Dar de baja" onclick="desactivarEncargado(${u.id}, '${escJs(u.username)}')"><i class="ph ph-user-minus"></i></button>`;
             }
+        }
+        if (!esSuper && typeof _orgNombreSede === 'function' && _orgSedes.length > 1) {
+            tag += `<span class="enc-tag enc-tag-admin" title="Sede que administra">${escapeHtml(u.id_sede ? _orgNombreSede(u.id_sede) : 'Todas las sedes')}</span>`;
         }
         const ico = esSuper ? 'ph-shield-check' : 'ph-user';
         return `
@@ -3925,6 +4009,20 @@ function abrirModalEncargado(id = null) {
     const err     = document.getElementById('enc-error');
     err.textContent = '';
     fPass.value = '';
+
+    // Sede: el superadmin siempre ve todas; para encargados solo tiene sentido
+    // elegirla si existe mas de una sede.
+    const objetivoSede = id ? _encargadosCache.find(x => x.id === id) : null;
+    const sedeCampo = document.getElementById('enc-sede-campo');
+    const mostrarSede = typeof _orgOpcionesSede === 'function'
+        && (_orgSedes.length > 1 || !!(objetivoSede && objetivoSede.id_sede))
+        && !(objetivoSede && objetivoSede.rol === 'superadmin');
+    if (sedeCampo) sedeCampo.style.display = mostrarSede ? '' : 'none';
+    if (mostrarSede) {
+        _orgOpcionesSede(document.getElementById('enc-sede'), {
+            incluirTodas: 'Todas las sedes', valor: objetivoSede && objetivoSede.id_sede ? objetivoSede.id_sede : '',
+        });
+    }
 
     if (id) {
         const u = _encargadosCache.find(x => x.id === id);
@@ -3953,6 +4051,15 @@ function abrirModalEncargado(id = null) {
     }
     modal.style.display = 'flex';
     fUser.focus();
+}
+
+function _encSedeVisible() {
+    const c = document.getElementById('enc-sede-campo');
+    return !!c && c.style.display !== 'none';
+}
+function _encSedeValor() {
+    const v = document.getElementById('enc-sede').value;
+    return v ? parseInt(v, 10) : null;
 }
 
 function cerrarModalEncargado() {
@@ -3990,13 +4097,15 @@ async function guardarEncargado() {
             // Al superadmin no se le envía username: es fijo y el backend lo rechaza.
             const body = editandoSuper ? { nombre_completo: nombre } : { username: user, nombre_completo: nombre };
             if (pass) body.password = pass;
+            if (!editandoSuper && _encSedeVisible()) body.id_sede = _encSedeValor();
             res = await fetch(`${API_BASE}/admin/usuarios/${_encEditandoId}`, {
                 method: 'PUT', headers: authHeaders(), body: JSON.stringify(body),
             });
         } else {
             res = await fetch(`${API_BASE}/admin/usuarios`, {
                 method: 'POST', headers: authHeaders(),
-                body: JSON.stringify({ username: user, password: pass, nombre_completo: nombre }),
+                body: JSON.stringify({ username: user, password: pass, nombre_completo: nombre,
+                                       id_sede: _encSedeVisible() ? _encSedeValor() : null }),
             });
         }
         const data = await res.json();
@@ -4488,7 +4597,7 @@ function _actRenderTabla(items) {
         // Marca ese ejecutable como ruido para que no se vuelva a registrar.
         const btnIgnorar = (!isCrit && r.proceso_exe)
             ? `<button class="act-btn-ignorar" title="No registrar más este proceso"
-                 onclick="ignorarProceso('${escapeHtml(r.proceso_exe)}')">
+                 onclick="ignorarProceso('${escJs(r.proceso_exe)}')">
                  <i class="ph ph-eye-slash"></i> Ignorar
                </button>`
             : '';
@@ -4499,7 +4608,7 @@ function _actRenderTabla(items) {
         const esSuper = _rolServidor === 'superadmin';
         const btnClasificar = (isCrit && r.proceso_exe && esSuper)
             ? `<button class="act-btn-clasificar" title="Clasificar este programa (banco de apps o de ruido)"
-                 onclick="bancoClasificarDesdeFlujo('${escapeHtml(r.proceso_exe)}', '${escapeHtml(r.descripcion || '')}')">
+                 onclick="bancoClasificarDesdeFlujo('${escJs(r.proceso_exe)}', '${escJs(r.descripcion || '')}')">
                  <i class="ph ph-check-square"></i> Clasificar
                </button>`
             : '';
@@ -4608,7 +4717,7 @@ async function abrirProcesosIgnorados() {
             <div class="proc-ign-row">
                 <code class="proc-ign-exe">${escapeHtml(p.nombre_exe)}</code>
                 <span class="proc-ign-meta">${escapeHtml(p.agregado_por || '—')}</span>
-                <button class="proc-ign-quitar" onclick="quitarProcesoIgnorado(${p.id}, '${escapeHtml(p.nombre_exe)}')">
+                <button class="proc-ign-quitar" onclick="quitarProcesoIgnorado(${p.id}, '${escJs(p.nombre_exe)}')">
                     <i class="ph ph-trash"></i> Quitar
                 </button>
             </div>`).join('');
@@ -4837,7 +4946,7 @@ async function bancoCargarApps() {
                 <td class="act-td"><code class="proc-ign-exe">${esc(a.nombre_exe)}</code></td>
                 <td class="act-td">${esc(a.categoria || '—')}</td>
                 <td class="act-td act-td-desc">${esc(a.descripcion || '—')}</td>
-                <td class="act-td">${esSuper ? `<button class="tbl-btn tbl-btn-ban" title="Quitar del banco" onclick="bancoEliminar('app','${esc(a.nombre_exe)}')"><i class="ph ph-trash"></i></button>` : ''}</td>
+                <td class="act-td">${esSuper ? `<button class="tbl-btn tbl-btn-ban" title="Quitar del banco" onclick="bancoEliminar('app','${escJs(a.nombre_exe)}')"><i class="ph ph-trash"></i></button>` : ''}</td>
             </tr>`).join('');
     } catch (e) {
         tbody.innerHTML = '<tr><td colspan="5" class="act-empty-msg" style="color:var(--err)">Error al cargar</td></tr>';
@@ -4865,7 +4974,7 @@ async function bancoCargarRuido() {
                 <td class="act-td"><code class="proc-ign-exe">${esc(r.nombre_exe)}</code></td>
                 <td class="act-td">${esc(r.dueno_legible || '—')}</td>
                 <td class="act-td act-td-desc">${esc(r.descripcion || '—')}</td>
-                <td class="act-td">${esSuper ? `<button class="tbl-btn tbl-btn-ban" title="Quitar del banco de ruido" onclick="bancoEliminar('ruido','${esc(r.nombre_exe)}')"><i class="ph ph-trash"></i></button>` : ''}</td>
+                <td class="act-td">${esSuper ? `<button class="tbl-btn tbl-btn-ban" title="Quitar del banco de ruido" onclick="bancoEliminar('ruido','${escJs(r.nombre_exe)}')"><i class="ph ph-trash"></i></button>` : ''}</td>
             </tr>`).join('');
     } catch (e) {
         tbody.innerHTML = '<tr><td colspan="5" class="act-empty-msg" style="color:var(--err)">Error al cargar</td></tr>';
@@ -5151,6 +5260,7 @@ async function guardarConfigBackdoor() {
 // ═══════════════════════════════════════════════════════════════════
 
 async function cargarConfigOffline() {
+    if (_rolServidor !== 'superadmin') return;
     try {
         const res = await fetch(`${API_BASE}/config/offline-pin`, { headers: authHeaders() });
         if (!res.ok) return;
@@ -5599,7 +5709,7 @@ function _kpiRenderRanking(items) {
             : (it.categoria ? `<span class="prog-badge prog-badge-cat">${escapeHtml(it.categoria)}</span>` : '');
         // Botón Clasificar: solo superadmin y solo en filas sin clasificar.
         const accion = (sinClasif && esSuper)
-            ? `<button class="prog-clasificar" onclick="bancoClasificarDesdeRanking('${escapeHtml(it.exe)}')" title="Clasificar este programa">
+            ? `<button class="prog-clasificar" onclick="bancoClasificarDesdeRanking('${escJs(it.exe)}')" title="Clasificar este programa">
                  <i class="ph ph-tag"></i> Clasificar
                </button>`
             : '';

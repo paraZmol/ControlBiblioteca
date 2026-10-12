@@ -5,6 +5,38 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
 
 
+class Sede(Base):
+    """Centro de computo / sede donde hay PCs controladas (Biblioteca Central,
+    Facultad de Ciencias, ...). Un mismo servidor central atiende a todas."""
+    __tablename__ = "sedes"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:          Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nombre:      Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
+    descripcion: Mapped[str] = mapped_column(String(300), nullable=True)
+    # Prefijos de red separados por coma ("10.21.1., 10.21.2."): una PC nueva cuya
+    # IP empiece por uno de ellos se asigna sola a esta sede.
+    redes:       Mapped[str] = mapped_column(String(300), nullable=True)
+    activo:      Mapped[bool] = mapped_column(Boolean, default=True)
+
+    def __repr__(self): return f"<Sede {self.id}: {self.nombre}>"
+
+
+class CicloAcademico(Base):
+    """Ciclo academico de la UNASAM (2026-0, 2026-I, 2026-II...) con fechas
+    exactas. Lo configura el superadmin; los reportes por ciclo lo usan."""
+    __tablename__ = "ciclos_academicos"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id:           Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nombre:       Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
+    fecha_inicio: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    fecha_fin:    Mapped[date] = mapped_column(Date, nullable=False)
+    activo:       Mapped[bool] = mapped_column(Boolean, default=True)
+
+    def __repr__(self): return f"<Ciclo {self.nombre} {self.fecha_inicio}..{self.fecha_fin}>"
+
+
 class Facultad(Base):
     __tablename__ = "facultades"
     __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
@@ -69,6 +101,8 @@ class Terminal(Base):
     ultima_conexion:  Mapped[datetime] = mapped_column(DateTime, nullable=True)
     intentos_fallidos: Mapped[int] = mapped_column(Integer, default=0)
     bloqueada_hasta:  Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    # Sede / centro de computo al que pertenece la PC (multi-sede). NULL = sin asignar.
+    id_sede:          Mapped[int] = mapped_column(ForeignKey("sedes.id", ondelete="SET NULL"), nullable=True, index=True)
 
     sesiones: Mapped[list["Sesion"]] = relationship(back_populates="terminal")
 
@@ -174,6 +208,8 @@ class Usuario(Base):
     activo:           Mapped[bool]= mapped_column(Boolean, default=True)
     intentos_fallidos: Mapped[int] = mapped_column(Integer, default=0)
     bloqueado_hasta:  Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    # Sede que administra este encargado. NULL = todas las sedes (siempre NULL en superadmin).
+    id_sede:          Mapped[int] = mapped_column(ForeignKey("sedes.id", ondelete="SET NULL"), nullable=True)
 
     def __repr__(self): return f"<Usuario {self.username} ({self.rol})>"
 
@@ -209,6 +245,8 @@ class Incidencia(Base):
     fecha:           Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     registrado_por:  Mapped[str] = mapped_column(String(50),  nullable=False)
     activa:          Mapped[bool] = mapped_column(Boolean, default=True)  # False = reseteada por ban levantado
+    # Sede donde ocurrio (la del encargado que la registra). NULL = sin sede / historico.
+    id_sede:         Mapped[int] = mapped_column(ForeignKey("sedes.id", ondelete="SET NULL"), nullable=True, index=True)
 
     alumno: Mapped["AlumnoMaestro"] = relationship()
 

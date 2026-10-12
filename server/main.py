@@ -20,7 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from pydantic import BaseModel as _BaseModel, Field as _Field
 from auth_service import hashear_password, obtener_usuario_actual
-from api.endpoints import router as api_router
+from api.endpoints import router as api_router, _ban_activo, _sesion_activa_de_terminal
+from api.organizacion import router as organizacion_router
 from core.websocket_manager import manager
 from core.auditoria import registrar_auditoria
 from core import rate_limit
@@ -317,6 +318,21 @@ async def _scheduler_mensajes():
             break
 
 
+async def _indice_existe(db, tabla: str, columnas: tuple) -> bool:
+    """True si la tabla ya tiene un índice cuyas primeras columnas son `columnas`
+    (en orden). Así no se duplica uno creado por create_all con otro nombre."""
+    from sqlalchemy import text
+    filas = (await db.execute(text(
+        "SELECT index_name, column_name FROM information_schema.statistics "
+        "WHERE table_schema = DATABASE() AND table_name = :t "
+        "ORDER BY index_name, seq_in_index"), {"t": tabla})).all()
+    por_indice: dict = {}
+    for nombre, col in filas:
+        por_indice.setdefault(nombre, []).append(str(col).lower())
+    buscadas = [c.lower() for c in columnas]
+    return any(cols[:len(buscadas)] == buscadas for cols in por_indice.values())
+
+
 async def _migrar_columnas():
     """Migra el esquema para agregar columnas de fuerza bruta si faltan."""
     from sqlalchemy import text
@@ -478,12 +494,86 @@ async def _migrar_columnas():
                     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
                 """))
             except Exception: pass
+            # ── Multi-sede (biblioteca central + centros de computo de facultades) ──
+            # Las tablas sedes/ciclos_academicos las crea create_all. Aqui solo las
+            # columnas nuevas en tablas existentes (sin FK fisica: idempotente y
+            # tolerante a datos viejos).
+            try:
+                await db.execute(text("ALTER TABLE sedes ADD COLUMN redes VARCHAR(300) NULL"))
+            except Exception: pass
+            for _tabla in ("terminales", "usuarios", "incidencias"):
+                try:
+                    await db.execute(text(f"ALTER TABLE {_tabla} ADD COLUMN id_sede INT NULL"))
+                except Exception: pass
+            for _sql in (
+                "ALTER TABLE terminales ADD INDEX idx_terminal_sede (id_sede)",
+                "ALTER TABLE incidencias ADD INDEX idx_incidencia_sede (id_sede)",
+                # Reportes por mes/ciclo/año filtran por fecha: sin estos indices
+                # cada reporte recorre la tabla completa.
+                "ALTER TABLE sesiones ADD INDEX idx_sesion_entrada (hora_entrada)",
+                "ALTER TABLE incidencias ADD INDEX idx_incidencia_fecha (fecha)",
+            ):
+                try:
+                    await db.execute(text(_sql))
+                except Exception: pass
+            # Sede inicial: todo lo existente pertenece a la Biblioteca Central.
+            try:
+                n_sedes = (await db.execute(text("SELECT COUNT(*) FROM sedes"))).scalar() or 0
+                if n_sedes == 0:
+                    await db.execute(text(
+                        "INSERT INTO sedes (nombre, descripcion, activo) "
+                        "VALUES ('Biblioteca Central', 'Sede inicial del sistema', 1)"))
+                    sede_id = (await db.execute(text("SELECT id FROM sedes ORDER BY id LIMIT 1"))).scalar()
+                    await db.execute(text("UPDATE terminales SET id_sede = :s WHERE id_sede IS NULL"), {"s": sede_id})
+                    await db.execute(text("UPDATE incidencias SET id_sede = :s WHERE id_sede IS NULL"), {"s": sede_id})
+                    logger.info("[SEDES] Sede inicial 'Biblioteca Central' creada y asignada a las PCs existentes.")
+            except Exception as e:
+                logger.error(f"[SEDES] Error creando la sede inicial: {e}")
+            # ── Índices de rendimiento (servidor central, tablas grandes) ──
+            # sesiones(estado, confirmada): el limpiador de fantasmas corre cada 10s.
+            # sesiones(fecha_uso): filtros del historial / exportes.
+            # actividad_logs(proceso_exe, nivel): banco de pendientes y rankings.
+            # Idempotente: se crea solo si no hay ya un índice que EMPIECE por esas
+            # columnas (create_all ya pudo crear ix_actividad_logs_fecha_hora).
+            try:
+                for _tabla, _nombre, _cols in (
+                    ("sesiones", "idx_sesion_estado_conf", ("estado", "confirmada")),
+                    ("sesiones", "idx_sesion_fecha_uso", ("fecha_uso",)),
+                    ("actividad_logs", "idx_act_fecha_hora", ("fecha_hora",)),
+                    ("actividad_logs", "idx_act_exe_nivel", ("proceso_exe", "nivel")),
+                ):
+                    if not await _indice_existe(db, _tabla, _cols):
+                        try:
+                            await db.execute(text(
+                                f"ALTER TABLE {_tabla} ADD INDEX {_nombre} ({', '.join(_cols)})"))
+                            logger.info(f"[MIGRACION] Índice {_nombre} creado en {_tabla}")
+                        except Exception as e_idx:
+                            logger.warning(f"[MIGRACION] No se pudo crear {_nombre}: {e_idx}")
+            except Exception as e:
+                logger.error(f"[MIGRACION] Error revisando índices: {e}")
             await db.commit()
             # Pre-carga (seed) de ambos bancos — solo si están vacíos, para no
             # pisar lo que el superadmin haya editado a mano.
             await _seed_bancos(db)
     except Exception as e:
         logger.error(f"Error en migraciones: {e}")
+
+
+async def _sede_para_ip(db, ip: str):
+    """Sede que corresponde a una PC nueva: la primera sede activa cuyo prefijo
+    de red coincide con la IP; si no hay coincidencia y existe UNA sola sede
+    activa, esa. Si no, None (queda 'sin sede' hasta que el superadmin la asigne)."""
+    from models import Sede
+    try:
+        sedes = (await db.execute(select(Sede).where(Sede.activo == True).order_by(Sede.id))).scalars().all()
+    except Exception:
+        return None
+    for sd in sedes:
+        for pref in (sd.redes or "").split(","):
+            pref = pref.strip()
+            if pref and ip and ip.startswith(pref):
+                return sd.id
+    return sedes[0].id if len(sedes) == 1 else None
 
 
 async def _seed_bancos(db):
@@ -530,8 +620,8 @@ async def _limpiar_sesiones_fantasma():
                     sesion_id, terminal_id_db = row
                     res_s = await db.execute(select(Sesion).where(Sesion.id == sesion_id))
                     s = res_s.scalar_one_or_none()
-                    if s:
-                        s.activa = False
+                    if s and s.estado == "activa":   # pudo cerrarse entre la consulta y aquí
+                        s.estado = "cerrada"   # Sesion no tiene columna 'activa' (es una propiedad legacy)
                         s.motivo_cierre = "sin_confirmacion"
                         s.hora_salida = datetime.now().replace(tzinfo=None)
                         res_t = await db.execute(select(Terminal).where(Terminal.id == s.id_terminal))
@@ -555,13 +645,18 @@ async def _limpiar_sesiones_arranque():
         res = await db.execute(select(Sesion).where(Sesion.estado == 'activa'))
         sesiones = res.scalars().all()
         cerradas = 0
+        # hora_salida = ahora (no hora_entrada: eso dejaba sesiones de 0 min) y
+        # motivo propio 'reinicio_servidor': si el servidor solo se reinició, el
+        # kiosco que reconecte en < 3 min reanuda la sesión (período de gracia).
+        # Tras un apagón largo la gracia ya venció y la PC se bloquea igual.
+        ahora_arranque = datetime.now()
         for s in sesiones:
             s.estado = 'cerrada'
-            s.hora_salida = s.hora_entrada
-            s.motivo_cierre = 'cierre_apagón'
+            s.hora_salida = ahora_arranque
+            s.motivo_cierre = 'reinicio_servidor'
             cerradas += 1
         if cerradas > 0:
-            logger.warning(f"[STARTUP] Se cerraron {cerradas} sesiones fantasma que quedaron abiertas por un apagón.")
+            logger.warning(f"[STARTUP] Se cerraron {cerradas} sesión(es) que quedaron abiertas (reinicio/apagón); reanudables por {GRACIA_RECONEXION_SEG}s.")
 
         # Poner TODAS las terminales en offline al arrancar — ninguna puede estar
         # "bloqueada" o "disponible" sin haber establecido primero una nueva conexión WS.
@@ -648,8 +743,11 @@ async def lifespan(_app: FastAPI):
     # Garantizar usuarios por defecto con username correcto según rol
     async with async_session() as db:
         # Superadmin: si existe con username 'admin', renombrarlo a 'superadmin'
-        res_sa = await db.execute(select(Usuario).where(Usuario.rol == "superadmin"))
-        usuario_sa = res_sa.scalar_one_or_none()
+        # Puede haber varias cuentas por rol (gestion de encargados): nunca
+        # scalar_one_or_none aqui, o el servidor no arranca.
+        res_sa = await db.execute(
+            select(Usuario).where(Usuario.rol == "superadmin").order_by(Usuario.id).limit(1))
+        usuario_sa = res_sa.scalars().first()
         if usuario_sa:
             if usuario_sa.username != "superadmin":
                 usuario_sa.username = "superadmin"
@@ -671,8 +769,8 @@ async def lifespan(_app: FastAPI):
             )
 
         # Admin: crear si no existe con rol 'admin'
-        res_a = await db.execute(select(Usuario).where(Usuario.rol == "admin"))
-        if not res_a.scalar_one_or_none():
+        res_a = await db.execute(select(Usuario.id).where(Usuario.rol == "admin").limit(1))
+        if res_a.scalars().first() is None:
             db.add(Usuario(
                 username="admin",
                 hashed_password=hashear_password(_DEFAULT_ADMIN_PASSWORD),
@@ -733,6 +831,7 @@ async def agregar_headers_seguridad(request, call_next):
 
 # Registrar rutas API
 app.include_router(api_router)
+app.include_router(organizacion_router)
 
 # Servir archivos estáticos del panel admin
 admin_path = os.path.join(os.path.dirname(__file__), "..", "admin")
@@ -785,51 +884,15 @@ class _ActualizarUsuario(_BaseModel):
 
 @app.put("/api/config/usuario")
 async def actualizar_usuario(
-    datos: _ActualizarUsuario,
+    datos: Optional[_ActualizarUsuario] = None,   # se ignora: endpoint retirado
     superadmin: Usuario = Depends(obtener_usuario_actual),
-    db: AsyncSession = Depends(get_db),
 ):
-    """Solo superadmin puede editar usuarios. Admin: username+password. Superadmin: solo password."""
-    if superadmin.rol != "superadmin":
-        raise HTTPException(status_code=403, detail="Solo superadmin puede editar usuarios")
-    if datos.rol_objetivo not in ("admin", "superadmin"):
-        raise HTTPException(status_code=400, detail="rol_objetivo inválido")
-
-    res = await db.execute(select(Usuario).where(Usuario.rol == datos.rol_objetivo))
-    usuario = res.scalar_one_or_none()
-    if not usuario:
-        raise HTTPException(status_code=404, detail=f"No se encontró usuario con rol '{datos.rol_objetivo}'")
-
-    # Cambio de username solo para admin
-    if datos.nuevo_username:
-        if datos.rol_objetivo == "superadmin":
-            raise HTTPException(status_code=400, detail="No se puede cambiar el username del superadmin")
-        if len(datos.nuevo_username) < 3:
-            raise HTTPException(status_code=422, detail="El username debe tener al menos 3 caracteres")
-        existe = await db.execute(select(Usuario).where(Usuario.username == datos.nuevo_username))
-        if existe.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="Ese username ya está en uso")
-        usuario.username = datos.nuevo_username
-
-    # Cambio de contraseña para ambos roles
-    if datos.nueva_password:
-        error_pwd = _validar_complejidad_password(datos.nueva_password)
-        if error_pwd:
-            raise HTTPException(status_code=422, detail=error_pwd)
-        usuario.hashed_password = hashear_password(datos.nueva_password)
-
-    if not datos.nuevo_username and not datos.nueva_password:
-        raise HTTPException(status_code=400, detail="Nada que actualizar")
-
-    # Auditoría SIN registrar la contraseña, solo el hecho del cambio
-    cambios = []
-    if datos.nuevo_username: cambios.append("username")
-    if datos.nueva_password: cambios.append("contraseña")
-    await registrar_auditoria(superadmin.username, "editar_usuario", rol=superadmin.rol,
-                              objetivo=f"usuario rol={datos.rol_objetivo}",
-                              detalle="cambió " + " y ".join(cambios), db=db)
-    await db.commit()
-    return {"mensaje": "Usuario actualizado correctamente"}
+    """OBSOLETO. Buscaba "el" usuario por rol, lo que falla con varios encargados.
+    La gestión de cuentas vive en /api/admin/usuarios. Responde 410 sin tocar la BD."""
+    raise HTTPException(
+        status_code=410,
+        detail="Esta opción fue reemplazada. Use Configuración > Credenciales > Encargados.",
+    )
 
 
 class _ConfiguracionKioscoReq(_BaseModel):
@@ -1004,8 +1067,8 @@ async def _buscar_terminal(db, nombre: str, ip: str):
     res = await db.execute(select(Terminal).where(Terminal.nombre_red == nombre))
     t = res.scalar_one_or_none()
     if not t:
-        res2 = await db.execute(select(Terminal).where(Terminal.ip == ip))
-        t = res2.scalar_one_or_none()
+        res2 = await db.execute(select(Terminal).where(Terminal.ip == ip).order_by(Terminal.ultima_conexion.desc()))
+        t = res2.scalars().first()  # la IP no es única (DHCP)
     return t
 
 
@@ -1013,9 +1076,96 @@ def _cerrar_sesion(sesion: Sesion, motivo: str):
     """Marca una sesión como cerrada con la hora actual del servidor."""
     ahora = datetime.now().replace(tzinfo=None)
     sesion.hora_salida   = ahora
-    sesion.activa        = False
+    sesion.estado        = "cerrada"
     sesion.motivo_cierre = motivo
     return ahora
+
+
+async def _aplicar_sesion_unica(db, dni: str, terminal_destino_id: Optional[int] = None):
+    """Sesión única por alumno: cierra sus sesiones activas en otras PCs y les
+    ordena volver al login. Sin commit (lo hace el llamador). Si la sesión previa
+    está en la misma PC que se va a desbloquear, no se le manda el cierre (le
+    llega enseguida el 'desbloquear')."""
+    res_dup = await db.execute(
+        select(Sesion).where(Sesion.dni_alumno == dni, Sesion.estado == "activa"))
+    for sp in res_dup.scalars().all():
+        _cerrar_sesion(sp, "desplazado_por_nuevo_login")
+        t_prev = await db.get(Terminal, sp.id_terminal)
+        if t_prev and t_prev.id != terminal_destino_id:
+            t_prev.estado = "bloqueado"
+            await manager.forzar_cierre_sesion(t_prev.nombre_red)
+            await manager.limpiar_foco(t_prev.nombre_red)
+            logger.warning(f"[WS] Sesión duplicada cerrada: alumno {_mask_dni(dni)} en {t_prev.nombre_red}")
+
+
+async def _cerrar_activas_de_terminal(db, id_terminal: int, motivo: str) -> int:
+    """Cierra toda sesión que siga activa en una PC (sin commit)."""
+    res = await db.execute(
+        select(Sesion).where(Sesion.id_terminal == id_terminal, Sesion.estado == "activa"))
+    n = 0
+    for s in res.scalars().all():
+        _cerrar_sesion(s, motivo)
+        n += 1
+    if n:
+        logger.warning(f"[WS] {n} sesión(es) previa(s) cerrada(s) en terminal id={id_terminal} ({motivo})")
+    return n
+
+
+# Período de gracia de reconexión (segundos) y motivos de cierre que se pueden
+# revertir: solo cortes involuntarios, nunca logout/bloqueo/desplazamiento.
+GRACIA_RECONEXION_SEG = 180
+_MOTIVOS_REANUDABLES = ("desconexion_red", "reinicio_servidor")
+
+
+def _datos_alumno_kiosco(alumno: AlumnoMaestro) -> dict:
+    """Payload 'alumno' del comando desbloquear (mismo corte de nombre que el login)."""
+    partes = (alumno.nombre or "").split()
+    if len(partes) >= 3:
+        nombres, apellidos = " ".join(partes[:-2]), " ".join(partes[-2:])
+    elif len(partes) == 2:
+        nombres, apellidos = partes[0], partes[1]
+    else:
+        nombres, apellidos = alumno.nombre or "", ""
+    return {"codigo": alumno.codigo or alumno.dni, "nombres": nombres, "apellidos": apellidos}
+
+
+async def _reanudar_sesion_con_gracia(db, t: Terminal):
+    """Reabre la ÚLTIMA sesión de la terminal si se cerró por corte de red o
+    reinicio del servidor hace menos de GRACIA_RECONEXION_SEG. Devuelve la
+    sesión reabierta (sin commit) o None. Conservador: cualquier condición
+    dudosa -> None (el llamador bloquea la PC)."""
+    ultima = (await db.execute(
+        select(Sesion).where(Sesion.id_terminal == t.id)
+        .order_by(Sesion.id.desc()).limit(1))).scalars().first()
+    if (ultima is None or ultima.estado != "cerrada" or not ultima.confirmada
+            or ultima.motivo_cierre not in _MOTIVOS_REANUDABLES or ultima.hora_salida is None):
+        return None
+    transcurrido = (datetime.now() - ultima.hora_salida).total_seconds()
+    if transcurrido < 0 or transcurrido > GRACIA_RECONEXION_SEG:
+        return None
+    # Baneado mientras estaba desconectado -> no se reanuda.
+    if await _ban_activo(db, ultima.dni_alumno):
+        return None
+    # Tiene otra sesión activa, o abrió alguna después del corte (aunque ya la
+    # haya cerrado: se movió de PC) -> no se reanuda (sesión única).
+    otra = (await db.execute(
+        select(Sesion.id).where(
+            Sesion.dni_alumno == ultima.dni_alumno,
+            (Sesion.estado == "activa") | (Sesion.id > ultima.id))
+        .limit(1))).scalars().first()
+    if otra is not None:
+        return None
+    alumno = await db.get(AlumnoMaestro, ultima.dni_alumno)
+    if alumno is None:
+        return None
+    from api.endpoints import _vigencia_meses, _vencido_efectivo
+    if _vencido_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, await _vigencia_meses(db)):
+        return None
+    ultima.estado        = "activa"
+    ultima.hora_salida   = None
+    ultima.motivo_cierre = None
+    t.estado = "activo"
+    return ultima
 
 
 # ── WebSocket para terminales ───────────────────────────────────────
@@ -1049,18 +1199,19 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
 
     # ── Registro automático: INSERT si no existe, UPDATE si ya existe ─
     async with async_session() as db:
-        res = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
-        terminal_db = res.scalar_one_or_none()
+        res = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip).order_by(Terminal.ultima_conexion.desc()))
+        terminal_db = res.scalars().first()  # la IP no es única (DHCP)
         if terminal_db:
             terminal_db.estado = "bloqueado"
-            terminal_db.ultima_conexion = datetime.utcnow()
+            terminal_db.ultima_conexion = datetime.now()
             logger.info(f"[WS] Terminal conocida actualizada: {terminal_ip}")
         else:
             terminal_db = Terminal(
                 nombre_red=f"Terminal-{terminal_ip}",
                 ip=terminal_ip,
                 estado="bloqueado",
-                ultima_conexion=datetime.utcnow()
+                ultima_conexion=datetime.now(),
+                id_sede=await _sede_para_ip(db, terminal_ip),
             )
             db.add(terminal_db)
             logger.info(f"[WS] Nueva terminal registrada en DB: {terminal_ip}")
@@ -1122,8 +1273,8 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     res = await db.execute(select(Terminal).where(Terminal.nombre_red == hostname))
                     t = res.scalar_one_or_none()
 
-                    res2 = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip))
-                    t_by_ip = res2.scalar_one_or_none()
+                    res2 = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip).order_by(Terminal.ultima_conexion.desc()))
+                    t_by_ip = res2.scalars().first()  # la IP no es única (DHCP)
 
                     # En modo offline el cliente ya tiene sesión activa — no pisar estado.
                     # Terminal usa "activo" (masculino); "activa" es de Sesion.
@@ -1133,7 +1284,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         t.ip = terminal_ip
                         if not cliente_modo_offline:
                             t.estado = estado_inicial
-                        t.ultima_conexion = datetime.utcnow()
+                        t.ultima_conexion = datetime.now()
                         if t_by_ip and t_by_ip.id != t.id:
                             await db.delete(t_by_ip)
                             logger.info(f"[WS] Registro temporal '{t_by_ip.nombre_red}' eliminado (duplicado de '{hostname}')")
@@ -1142,14 +1293,15 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         t_by_ip.nombre_red = hostname
                         if not cliente_modo_offline:
                             t_by_ip.estado = estado_inicial
-                        t_by_ip.ultima_conexion = datetime.utcnow()
+                        t_by_ip.ultima_conexion = datetime.now()
                         logger.info(f"[WS] Terminal IP={terminal_ip} sincronizada con nombre '{hostname}'")
                     else:
                         db.add(Terminal(
                             nombre_red=hostname,
                             ip=terminal_ip,
                             estado=estado_inicial,
-                            ultima_conexion=datetime.utcnow()
+                            ultima_conexion=datetime.now(),
+                            id_sede=await _sede_para_ip(db, terminal_ip),
                         ))
                         logger.info(f"[WS] Nueva terminal '{hostname}' registrada con IP={terminal_ip}")
                     await db.commit()
@@ -1181,23 +1333,48 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 })
 
                 # ── Si el cliente dice estar desbloqueado, verificar que haya sesión activa ──
-                # En modo offline el cliente maneja su propia sincronización — no forzar bloqueo
+                # En modo offline el cliente maneja su propia sincronización — no forzar bloqueo.
+                # Período de gracia: si la sesión de esta PC se cerró hace < 3 min
+                # por un corte de red o un reinicio del servidor, se REANUDA en vez
+                # de sacar al alumno (con un servidor central, un microcorte
+                # bloquearía todas las PCs de todas las sedes). Ante cualquier
+                # duda se bloquea (seguridad primero).
                 if cliente_desbloqueado and not cliente_modo_offline:
-                    async with async_session() as db:
-                        res_t = await db.execute(select(Terminal).where(Terminal.nombre_red == hostname))
-                        t_check = res_t.scalar_one_or_none()
-                        sesion_valida = False
-                        if t_check:
-                            res_s = await db.execute(
-                                select(Sesion).where(
-                                    Sesion.id_terminal == t_check.id,
-                                    Sesion.estado == "activa"
-                                )
-                            )
-                            sesion_valida = res_s.scalar_one_or_none() is not None
-                        if not sesion_valida:
-                            logger.warning(f"[WS] {hostname} reporta desbloqueado pero sin sesión activa — forzando bloqueo")
-                            await manager.bloquear_terminal(terminal_id)
+                    datos_reanudar = None
+                    try:
+                        async with async_session() as db:
+                            t_check = (await db.execute(
+                                select(Terminal).where(Terminal.nombre_red == hostname))).scalars().first()
+                            if t_check:
+                                sesion_viva = await _sesion_activa_de_terminal(db, t_check.id)
+                                reanudada = False
+                                if sesion_viva is None:
+                                    sesion_viva = await _reanudar_sesion_con_gracia(db, t_check)
+                                    reanudada = sesion_viva is not None
+                                if sesion_viva is not None:
+                                    alumno_v = await db.get(AlumnoMaestro, sesion_viva.dni_alumno)
+                                    if alumno_v is not None:
+                                        # La PC sigue en uso: el hello la había dejado en "bloqueado".
+                                        t_check.estado = "activo"
+                                        datos_reanudar = (_datos_alumno_kiosco(alumno_v), reanudada,
+                                                          alumno_v.nombre, sesion_viva.id)
+                                await db.commit()
+                    except Exception as e_gracia:
+                        logger.error(f"[WS] Error verificando sesión de {hostname} en hello: {e_gracia}", exc_info=True)
+                        datos_reanudar = None
+                    if datos_reanudar is None:
+                        logger.warning(f"[WS] {hostname} reporta desbloqueado pero sin sesión activa — forzando bloqueo")
+                        await manager.bloquear_terminal(terminal_id)
+                    else:
+                        datos_k, reanudada, nombre_v, sesion_id_v = datos_reanudar
+                        # El kiosco que notó el corte se bloquea solo al reconectar;
+                        # re-enviar 'desbloquear' lo deja coherente con la sesión
+                        # viva del servidor (no cierra programas: el bloqueo es un overlay).
+                        await manager.desbloquear_terminal(terminal_id, datos_k)
+                        if reanudada:
+                            logger.info(f"[WS] Sesión #{sesion_id_v} reanudada con gracia en {hostname}")
+                            await manager.notificar_evento(f"Sesión reanudada tras reconexión: {nombre_v} en {hostname}", "login")
+                            await manager.enviar_log("activity", f"Sesión reanudada: {nombre_v} en {hostname}")
 
                 await manager.notificar_admins()
 
@@ -1235,13 +1412,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             continue
 
                         # ── Verificar ban activo ──
-                        res_ban = await db.execute(
-                            select(Ban).where(
-                                Ban.dni_alumno == codigo,
-                                (Ban.fecha_fin == None) | (Ban.fecha_fin > datetime.now())
-                            )
-                        )
-                        ban_activo = res_ban.scalar_one_or_none()
+                        ban_activo = await _ban_activo(db, codigo)
                         if ban_activo:
                             motivo_ban = ban_activo.motivo or "Acceso restringido"
                             fecha_fin_ban = ban_activo.fecha_fin.strftime("%d/%m/%Y") if ban_activo.fecha_fin else "indefinido"
@@ -1308,25 +1479,13 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         logger.info(f"[WS] {terminal_id} alumno OK: {_mask_nombre(datos_alumno['nombres'] + ' ' + datos_alumno['apellidos'])} | DNI={_mask_dni(codigo)}")
 
                         # ── Sesión única: cerrar sesión activa previa del mismo alumno ──
-                        res_dup = await db.execute(
-                            select(Sesion).where(
-                                Sesion.dni_alumno == alumno.dni,
-                                Sesion.estado     == "activa",
-                            )
-                        )
-                        sesiones_previas = res_dup.scalars().all()
-                        for sp in sesiones_previas:
-                            _cerrar_sesion(sp, "desplazado_por_nuevo_login")
-                            # Notificar la terminal anterior que fue desplazada
-                            res_t_prev = await db.execute(select(Terminal).where(Terminal.id == sp.id_terminal))
-                            t_prev = res_t_prev.scalar_one_or_none()
-                            if t_prev:
-                                t_prev.estado = "bloqueado"
-                                await manager.forzar_cierre_sesion(t_prev.nombre_red)
-                                await manager.limpiar_foco(t_prev.nombre_red)
-                                logger.warning(f"[WS] Sesión duplicada cerrada: alumno {_mask_dni(alumno.dni)} en {t_prev.nombre_red}")
+                        await _aplicar_sesion_unica(db, alumno.dni)
 
                         t = await _buscar_terminal(db, terminal_id, terminal_ip)
+                        if t:
+                            # Una PC en la pantalla de login no puede tener sesión viva:
+                            # si quedó alguna (fantasma), se cierra antes de crear la nueva.
+                            await _cerrar_activas_de_terminal(db, t.id, "reemplazada_en_terminal")
 
                         if t:
                             t.intentos_fallidos = 0
@@ -1373,10 +1532,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     async with async_session() as db:
                         t = await _buscar_terminal(db, terminal_id, terminal_ip)
                         if t:
-                            res_s = await db.execute(
-                                select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa", Sesion.confirmada == False)
-                            )
-                            sesion = res_s.scalar_one_or_none()
+                            sesion = await _sesion_activa_de_terminal(db, t.id, solo_sin_confirmar=True)
                             if sesion:
                                 sesion.confirmada = True
                                 await db.commit()
@@ -1408,10 +1564,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     t = await _buscar_terminal(db, terminal_id, terminal_ip)
                     if not t:
                         continue
-                    res_s = await db.execute(
-                        select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
-                    )
-                    if not res_s.scalar_one_or_none():
+                    if not await _sesion_activa_de_terminal(db, t.id):
                         continue  # sin sesión activa, no hay foco que mostrar
                     # Leer el nombre DENTRO de la sesión: fuera, el objeto queda
                     # detached y acceder a sus atributos lanzaría DetachedInstanceError.
@@ -1430,10 +1583,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     if not t:
                         continue
                     # Buscar sesión activa para obtener el alumno
-                    res_s = await db.execute(
-                        select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
-                    )
-                    sesion = res_s.scalar_one_or_none()
+                    sesion = await _sesion_activa_de_terminal(db, t.id)
                     if not sesion:
                         continue  # sin sesión activa, ignorar
 
@@ -1533,10 +1683,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 async with async_session() as db:
                     t = await _buscar_terminal(db, terminal_id, terminal_ip)
                     if t:
-                        res_s = await db.execute(
-                            select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
-                        )
-                        sesion = res_s.scalar_one_or_none()
+                        sesion = await _sesion_activa_de_terminal(db, t.id)
                         if sesion:
                             ahora_logout = _cerrar_sesion(sesion, "logout")
                             await db.commit()
@@ -1552,30 +1699,66 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
     except Exception as exc:
         logger.error(f"[WS] Error inesperado en {terminal_id}: {exc}", exc_info=True)
     finally:
-        # Limpieza garantizada: se ejecuta en desconexión normal, timeout, apagado o error
-        manager.desconectar(terminal_id)
-        try:
-            async with async_session() as db:
-                t = await _buscar_terminal(db, terminal_id, terminal_ip)
-                if t:
-                    t.estado = "offline"
-                    res_s = await db.execute(
-                        select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
-                    )
-                    sesion = res_s.scalar_one_or_none()
-                    if sesion:
-                        ahora = _cerrar_sesion(sesion, "desconexion_red")
-                        logger.info(f"[WS] Sesión cerrada por desconexión en {terminal_id}: {ahora.strftime('%I:%M:%S %p')}")
-                    await db.commit()
-                    # Terminal caída: borrar su programa en foco del mapa en vivo.
-                    await manager.limpiar_foco(t.nombre_red)
-            await manager.notificar_evento(f"Terminal '{terminal_id}' perdió conexión", "offline")
-            await manager.notificar_admins()
-        except Exception as cleanup_exc:
-            logger.error(f"[WS] Error en cleanup de {terminal_id}: {cleanup_exc}")
+        # Limpieza garantizada: se ejecuta en desconexión normal, timeout, apagado o error.
+        # Si la PC ya reconectó por OTRO socket (el viejo tardó en morir, p.ej.
+        # timeout de 60s tras un microcorte), el manager apunta a la conexión
+        # nueva: no se toca nada, o se sacaría de la lista a la conexión viva y
+        # se cerraría la sesión que el alumno sigue usando.
+        _actual = manager.conexiones_activas.get(terminal_id)
+        if _actual is not None and _actual is not websocket:
+            logger.info(f"[WS] Socket viejo de {terminal_id} cerrado; ya hay una conexión nueva — sin limpieza")
+        else:
+            manager.desconectar(terminal_id)
+            try:
+                async with async_session() as db:
+                    t = await _buscar_terminal(db, terminal_id, terminal_ip)
+                    if t:
+                        t.estado = "offline"
+                        t.ultima_conexion = datetime.now()   # "visto por última vez"
+                        res_s = await db.execute(
+                            select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
+                        )
+                        for sesion in res_s.scalars().all():
+                            # 'desconexion_red' es reanudable dentro del período de gracia.
+                            ahora = _cerrar_sesion(sesion, "desconexion_red")
+                            logger.info(f"[WS] Sesión cerrada por desconexión en {terminal_id}: {ahora.strftime('%I:%M:%S %p')}")
+                        await db.commit()
+                        # Terminal caída: borrar su programa en foco del mapa en vivo.
+                        await manager.limpiar_foco(t.nombre_red)
+                await manager.notificar_evento(f"Terminal '{terminal_id}' perdió conexión", "offline")
+                await manager.notificar_admins()
+            except Exception as cleanup_exc:
+                logger.error(f"[WS] Error en cleanup de {terminal_id}: {cleanup_exc}")
 
 
 # ── WebSocket para panel admin ──────────────────────────────────────
+
+async def _sede_de_terminal(tid: str, target: str):
+    """id_sede de la PC por hostname o, si no, por IP. (False si no existe)."""
+    async with async_session() as db:
+        t = (await db.execute(select(Terminal).where(Terminal.nombre_red == tid))).scalars().first()
+        if not t and target:
+            t = (await db.execute(select(Terminal).where(Terminal.ip == target)
+                                  .order_by(Terminal.ultima_conexion.desc()))).scalars().first()
+        return t.id_sede if t else False
+
+
+async def _fuera_de_sede(op_sede, tid: str, target: str) -> bool:
+    """True si un encargado limitado a una sede intenta operar una PC de otra."""
+    if not op_sede:
+        return False
+    return (await _sede_de_terminal(tid, target)) != op_sede
+
+
+def _resolver_tid(target: str) -> str:
+    """El panel identifica la PC por hostname o IP; devuelve el id de conexion."""
+    if target in manager.conexiones_activas:
+        return target
+    for k, v in manager.terminal_ips.items():
+        if v == target:
+            return k
+    return target
+
 
 @app.websocket("/ws/admin")
 async def websocket_admin(websocket: WebSocket):
@@ -1625,6 +1808,8 @@ async def websocket_admin(websocket: WebSocket):
     # restringir las acciones más destructivas a superadmin.
     op_username = user.username
     op_rol      = user.rol
+    # Encargado con sede fija: solo puede operar las PCs de su sede (multi-sede).
+    op_sede     = user.id_sede if user.rol != "superadmin" else None
     manager._admins.append(websocket)
     logger.info(f"Panel admin conectado (autenticado): {op_username} [{op_rol}]")
     await manager._enviar_estado(websocket)
@@ -1638,231 +1823,281 @@ async def websocket_admin(websocket: WebSocket):
                 await websocket.send_json({"tipo": "error", "motivo": "JSON inválido"})
                 continue
 
-            tipo = data.get("tipo")
+            tipo = data.get("tipo") if isinstance(data, dict) else None
+            # Cada comando va aislado: un error de BD (u otro) en uno NO debe
+            # cerrar el socket del panel; se registra y se responde con 'error'
+            # (tipo que el panel ya muestra) y se sigue atendiendo.
+            try:
+                if tipo == "get_status":
+                    await manager._enviar_estado(websocket)
 
-            if tipo == "get_status":
-                await manager._enviar_estado(websocket)
-
-            elif tipo == "bloquear_terminal":
-                target = str(data.get("ip", "")).strip()
-                if not target:
-                    await websocket.send_json({"tipo": "error", "motivo": "Identificador de terminal requerido"})
-                    continue
-                # target puede ser hostname o IP — buscar en conexiones
-                tid = target
-                if tid not in manager.conexiones_activas:
-                    for k, v in manager.terminal_ips.items():
-                        if v == target:
-                            tid = k
-                            break
-                ok = await manager.bloquear_terminal(tid)
-                # Acción atómica: bloquear terminal + cerrar sesión activa en una transacción
-                async with async_session() as db:
-                    res = await db.execute(select(Terminal).where(Terminal.nombre_red == tid))
-                    t = res.scalar_one_or_none()
-                    if not t:
-                        res2 = await db.execute(select(Terminal).where(Terminal.ip == target))
-                        t = res2.scalar_one_or_none()
-                    if t:
-                        t.estado = "bloqueado"
-                        res_s = await db.execute(
-                            select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
-                        )
-                        sesion_activa = res_s.scalar_one_or_none()
-                        if sesion_activa:
-                            ahora_bloqueo = datetime.now().replace(tzinfo=None)
-                            sesion_activa.hora_salida   = ahora_bloqueo
-                            sesion_activa.activa        = False
-                            sesion_activa.motivo_cierre = "bloqueo_admin"
-                            logger.info(f"[WS-Admin] Sesión cerrada por bloqueo admin en {tid}: {ahora_bloqueo.strftime('%I:%M:%S %p')}")
-                        await registrar_auditoria(op_username, "bloquear_terminal", rol=op_rol,
-                                                  objetivo=tid, db=db)
-                        await db.commit()
-                        # Bloqueada: la tarjeta ya no muestra programa en foco.
-                        await manager.limpiar_foco(t.nombre_red)
-                msg = f"Terminal {tid} bloqueada" if ok else f"Terminal {tid} no conectada (BD actualizada)"
-                await websocket.send_json({"tipo": "ok", "mensaje": msg})
-                await manager.notificar_admins()
-
-            elif tipo == "desbloquear_terminal":
-                target    = str(data.get("ip", "")).strip()
-                dni_param = str(data.get("dni", "") or data.get("codigo", "")).strip()
-                razon_uso = str(data.get("razon_uso", "")).strip() or None
-                if not target or not dni_param:
-                    await websocket.send_json({"tipo": "error", "motivo": "Identificador o DNI inválido"})
-                    continue
-                # Resolver terminal_id desde IP o nombre
-                tid = target
-                if tid not in manager.conexiones_activas:
-                    for k, v in manager.terminal_ips.items():
-                        if v == target:
-                            tid = k
-                            break
-                async with async_session() as db:
-                    # PASO 1: Buscar alumno por DNI, luego por código de matrícula
-                    res_a = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni_param))
-                    alumno = res_a.scalar_one_or_none()
-                    if alumno is None:
-                        res_a2 = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.codigo == dni_param))
-                        alumno = res_a2.scalar_one_or_none()
-
-                    if alumno is None:
-                        logger.warning(f"[WS-Admin] DNI={_mask_dni(dni_param)} no en maestro — acceso denegado")
-                        await websocket.send_json({"tipo": "error", "motivo": f"El DNI {dni_param} no esta registrado en la base de datos local"})
+                elif tipo == "bloquear_terminal":
+                    target = str(data.get("ip", "")).strip()
+                    if not target:
+                        await websocket.send_json({"tipo": "error", "motivo": "Identificador de terminal requerido"})
                         continue
-
-                    if alumno is None:
-                        await websocket.send_json({"tipo": "error", "motivo": f"Error: El DNI {dni_param} no existe"})
+                    # target puede ser hostname o IP — buscar en conexiones
+                    tid = target
+                    if tid not in manager.conexiones_activas:
+                        for k, v in manager.terminal_ips.items():
+                            if v == target:
+                                tid = k
+                                break
+                    if await _fuera_de_sede(op_sede, tid, target):
+                        await websocket.send_json({"tipo": "error", "motivo": "Esa PC pertenece a otra sede"})
                         continue
-
-                    # BLOQUEO POR BAN: un alumno sancionado no puede entrar por
-                    # NINGUNA vía. El kiosco ya lo bloquea en login_request; aquí
-                    # se replica para que el desbloqueo manual del admin tampoco
-                    # evada la sanción (M-2).
-                    res_ban_adm = await db.execute(
-                        select(Ban).where(
-                            Ban.dni_alumno == alumno.dni,
-                            (Ban.fecha_fin == None) | (Ban.fecha_fin > datetime.now())
-                        )
-                    )
-                    ban_adm = res_ban_adm.scalar_one_or_none()
-                    if ban_adm:
-                        motivo_ban = ban_adm.motivo or "Acceso restringido"
-                        fecha_fin_ban = ban_adm.fecha_fin.strftime("%d/%m/%Y") if ban_adm.fecha_fin else "indefinido"
-                        logger.warning(f"[WS-Admin] DNI={_mask_dni(alumno.dni)} BANEADO — desbloqueo denegado ({motivo_ban})")
-                        await websocket.send_json({
-                            "tipo": "error",
-                            "motivo": f"{alumno.nombre} tiene un ban activo: {motivo_ban}. Expira: {fecha_fin_ban}. No puede usar las PCs.",
-                        })
-                        continue
-
-                    # BLOQUEO POR VIGENCIA: una credencial vencida NO puede
-                    # desbloquear la PC. Se avisa al operador que el carnet venció
-                    # y debe renovarse. (La renovación se hace desde Base de Datos.)
-                    from api.endpoints import _vigencia_meses, _vencido_efectivo, _venc_efectivo
-                    _meses_vig = await _vigencia_meses(db)
-                    if _vencido_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, _meses_vig):
-                        _venc = _venc_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, _meses_vig)
-                        _venc_txt = _venc.strftime("%d/%m/%Y") if _venc else ""
-                        logger.warning(f"[WS-Admin] DNI={_mask_dni(alumno.dni)} carnet VENCIDO ({_venc_txt}) — desbloqueo denegado")
-                        await websocket.send_json({
-                            "tipo": "error",
-                            "motivo": f"Carnet VENCIDO el {_venc_txt}. {alumno.nombre} debe renovar su carnet en biblioteca para poder usar las PCs.",
-                        })
-                        continue
-
-                    partes = alumno.nombre.split()
-                    nombres_a   = " ".join(partes[:max(1, len(partes)-2)])
-                    apellidos_a = " ".join(partes[max(1, len(partes)-2):])
-
-                    # PASO 1: Crear la sesión en la DB ANTES de enviar el desbloqueo.
-                    # Con clientes rápidos, el 'unlock_confirmed' puede llegar en
-                    # milisegundos; si la sesión aún no existe, su handler no la
-                    # encuentra y el limpiador la mata como fantasma. Creándola
-                    # primero garantizamos que ya esté disponible para confirmar.
-                    res_t = await db.execute(select(Terminal).where(Terminal.nombre_red == tid))
-                    terminal_db = res_t.scalar_one_or_none()
-                    if not terminal_db:
-                        res_t2 = await db.execute(select(Terminal).where(Terminal.ip == target))
-                        terminal_db = res_t2.scalar_one_or_none()
-                    if not terminal_db:
-                        await websocket.send_json({"tipo": "error", "motivo": f"Terminal '{tid}' no registrada"})
-                        continue
-
-                    sesion = Sesion(
-                        dni_alumno  = alumno.dni,
-                        id_terminal = terminal_db.id,
-                        fecha_uso   = datetime.now().date(),
-                        razon_uso   = razon_uso,
-                        confirmada  = False,
-                    )
-                    terminal_db.estado = "activo"
-                    db.add(sesion)
-                    await registrar_auditoria(op_username, "desbloquear_terminal", rol=op_rol,
-                                              objetivo=tid, detalle=f"DNI {alumno.dni}", db=db)
-                    await db.commit()
-                    logger.info(f"[WS-Admin] Sesión creada id={sesion.id} para {_mask_nombre(alumno.nombre)}")
-
-                    # PASO 2: Ahora sí, enviar el comando de desbloqueo a la PC.
-                    ok = await manager.desbloquear_terminal(tid, {
-                        "codigo":    alumno.codigo,
-                        "nombres":   nombres_a,
-                        "apellidos": apellidos_a,
-                    })
-                    if not ok:
-                        # La PC se desconectó entre crear la sesión y enviar: revertir.
-                        sesion.activa        = False
-                        sesion.motivo_cierre = "desbloqueo_fallido"
-                        sesion.hora_salida   = datetime.now().replace(tzinfo=None)
-                        terminal_db.estado   = "bloqueado"
-                        await db.commit()
-                        await websocket.send_json({"tipo": "error", "motivo": f"Terminal '{tid}' no está conectada"})
-                        await manager.notificar_admins()
-                        continue
-
-                    await websocket.send_json({"tipo": "ok", "mensaje": f"Terminal {tid} desbloqueada para {alumno.nombre}"})
-                await manager.notificar_admins()
-
-            elif tipo == "remote_command":
-                action = str(data.get("action", "")).strip()
-                target = str(data.get("ip", "")).strip()
-                if action not in ("shutdown",) or not target:
-                    await websocket.send_json({"tipo": "error", "motivo": "Comando remoto inválido"})
-                    continue
-                # Resolver terminal_id desde IP
-                tid = target
-                if tid not in manager.conexiones_activas:
-                    for k, v in manager.terminal_ips.items():
-                        if v == target:
-                            tid = k
-                            break
-                ok = await manager.enviar_comando(tid, {"tipo": "remote_command", "action": action})
-                if ok:
-                    await registrar_auditoria(op_username, "apagar_terminal", rol=op_rol, objetivo=tid)
-                    await websocket.send_json({"tipo": "ok", "mensaje": f"Comando '{action}' enviado a {tid}"})
-                else:
-                    await websocket.send_json({"tipo": "error", "motivo": f"Terminal {tid} no conectada"})
-
-            elif tipo == "bloquear_todas":
-                ahora_bloqueo_todas = datetime.now().replace(tzinfo=None)
-                # IPs y nombres de terminales con conexión WS activa en este momento
-                ids_conectados = set(manager.conexiones_activas.keys())
-                ips_conectadas = set(manager.terminal_ips.values())
-
-                async with async_session() as db:
-                    # Cerrar solo las sesiones de terminales actualmente conectadas
-                    res_todas = await db.execute(select(Sesion).where(Sesion.estado == "activa"))
-                    sesiones_activas = res_todas.scalars().all()
-                    cerradas = 0
-                    for sesion_activa in sesiones_activas:
-                        res_t = await db.execute(select(Terminal).where(Terminal.id == sesion_activa.id_terminal))
-                        t_sesion = res_t.scalar_one_or_none()
-                        if t_sesion and (t_sesion.nombre_red in ids_conectados or t_sesion.ip in ips_conectadas):
-                            sesion_activa.hora_salida   = ahora_bloqueo_todas
-                            sesion_activa.activa        = False
-                            sesion_activa.motivo_cierre = "bloqueo_admin"
-                            cerradas += 1
-                    logger.warning(f"[AUDIT] {op_username} [{op_rol}] ejecutó BLOQUEO GLOBAL: {cerradas} sesión(es) cerrada(s) (solo conectadas)")
-
-                    res_terms = await db.execute(select(Terminal))
-                    for t in res_terms.scalars().all():
-                        if t.nombre_red in ids_conectados or t.ip in ips_conectadas:
+                    ok = await manager.bloquear_terminal(tid)
+                    # Acción atómica: bloquear terminal + cerrar sesión activa en una transacción
+                    async with async_session() as db:
+                        res = await db.execute(select(Terminal).where(Terminal.nombre_red == tid))
+                        t = res.scalar_one_or_none()
+                        if not t:
+                            res2 = await db.execute(select(Terminal).where(Terminal.ip == target).order_by(Terminal.ultima_conexion.desc()))
+                            t = res2.scalars().first()  # la IP no es única (DHCP)
+                        if t:
                             t.estado = "bloqueado"
-                        # Las offline/desconectadas conservan su estado actual
-                    await registrar_auditoria(op_username, "bloquear_todas", rol=op_rol,
-                                              objetivo="toda la sala",
-                                              detalle=f"{cerradas} sesión(es) cerrada(s)", db=db)
-                    await db.commit()
+                            # Cerrar TODAS las activas de la PC (si quedaron duplicadas,
+                            # ninguna debe sobrevivir al bloqueo).
+                            res_s = await db.execute(
+                                select(Sesion).where(Sesion.id_terminal == t.id, Sesion.estado == "activa")
+                            )
+                            for sesion_activa in res_s.scalars().all():
+                                ahora_bloqueo = _cerrar_sesion(sesion_activa, "bloqueo_admin")
+                                logger.info(f"[WS-Admin] Sesión cerrada por bloqueo admin en {tid}: {ahora_bloqueo.strftime('%I:%M:%S %p')}")
+                            await registrar_auditoria(op_username, "bloquear_terminal", rol=op_rol,
+                                                      objetivo=tid, db=db)
+                            await db.commit()
+                            # Bloqueada: la tarjeta ya no muestra programa en foco.
+                            await manager.limpiar_foco(t.nombre_red)
+                    msg = f"Terminal {tid} bloqueada" if ok else f"Terminal {tid} no conectada (BD actualizada)"
+                    await websocket.send_json({"tipo": "ok", "mensaje": msg})
+                    await manager.notificar_admins()
 
-                # Enviar comando "bloquear" solo a los kioscos conectados
-                await manager.bloquear_todas()
-                await manager.notificar_evento(f"BLOQUEO GLOBAL: {cerradas} sesión(es) cerrada(s) ({len(ids_conectados)} terminal(es) conectada(s))", "warning")
-                await websocket.send_json({"tipo": "ok", "mensaje": f"Terminales conectadas bloqueadas ({cerradas} sesión(es) cerrada(s))"})
-                await manager.notificar_admins()
+                elif tipo == "desbloquear_terminal":
+                    target    = str(data.get("ip", "")).strip()
+                    dni_param = str(data.get("dni", "") or data.get("codigo", "")).strip()
+                    razon_uso = str(data.get("razon_uso", "")).strip() or None
+                    if not target or not dni_param:
+                        await websocket.send_json({"tipo": "error", "motivo": "Identificador o DNI inválido"})
+                        continue
+                    # Resolver terminal_id desde IP o nombre
+                    tid = target
+                    if tid not in manager.conexiones_activas:
+                        for k, v in manager.terminal_ips.items():
+                            if v == target:
+                                tid = k
+                                break
+                    if await _fuera_de_sede(op_sede, tid, target):
+                        await websocket.send_json({"tipo": "error", "motivo": "Esa PC pertenece a otra sede"})
+                        continue
+                    async with async_session() as db:
+                        # PASO 1: Buscar alumno por DNI, luego por código de matrícula
+                        res_a = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni_param))
+                        alumno = res_a.scalar_one_or_none()
+                        if alumno is None:
+                            res_a2 = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.codigo == dni_param))
+                            alumno = res_a2.scalars().first()   # el código no es único
 
-            logger.info(f"[WS-Admin] comando: {tipo}")
+                        if alumno is None:
+                            logger.warning(f"[WS-Admin] DNI={_mask_dni(dni_param)} no en maestro — acceso denegado")
+                            await websocket.send_json({"tipo": "error", "motivo": f"El DNI {dni_param} no esta registrado en la base de datos local"})
+                            continue
+
+                        if alumno is None:
+                            await websocket.send_json({"tipo": "error", "motivo": f"Error: El DNI {dni_param} no existe"})
+                            continue
+
+                        # BLOQUEO POR BAN: un alumno sancionado no puede entrar por
+                        # NINGUNA vía. El kiosco ya lo bloquea en login_request; aquí
+                        # se replica para que el desbloqueo manual del admin tampoco
+                        # evada la sanción (M-2).
+                        ban_adm = await _ban_activo(db, alumno.dni)
+                        if ban_adm:
+                            motivo_ban = ban_adm.motivo or "Acceso restringido"
+                            fecha_fin_ban = ban_adm.fecha_fin.strftime("%d/%m/%Y") if ban_adm.fecha_fin else "indefinido"
+                            logger.warning(f"[WS-Admin] DNI={_mask_dni(alumno.dni)} BANEADO — desbloqueo denegado ({motivo_ban})")
+                            await websocket.send_json({
+                                "tipo": "error",
+                                "motivo": f"{alumno.nombre} tiene un ban activo: {motivo_ban}. Expira: {fecha_fin_ban}. No puede usar las PCs.",
+                            })
+                            continue
+
+                        # BLOQUEO POR VIGENCIA: una credencial vencida NO puede
+                        # desbloquear la PC. Se avisa al operador que el carnet venció
+                        # y debe renovarse. (La renovación se hace desde Base de Datos.)
+                        from api.endpoints import _vigencia_meses, _vencido_efectivo, _venc_efectivo
+                        _meses_vig = await _vigencia_meses(db)
+                        if _vencido_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, _meses_vig):
+                            _venc = _venc_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, _meses_vig)
+                            _venc_txt = _venc.strftime("%d/%m/%Y") if _venc else ""
+                            logger.warning(f"[WS-Admin] DNI={_mask_dni(alumno.dni)} carnet VENCIDO ({_venc_txt}) — desbloqueo denegado")
+                            await websocket.send_json({
+                                "tipo": "error",
+                                "motivo": f"Carnet VENCIDO el {_venc_txt}. {alumno.nombre} debe renovar su carnet en biblioteca para poder usar las PCs.",
+                            })
+                            continue
+
+                        partes = alumno.nombre.split()
+                        nombres_a   = " ".join(partes[:max(1, len(partes)-2)])
+                        apellidos_a = " ".join(partes[max(1, len(partes)-2):])
+
+                        # PASO 1: Crear la sesión en la DB ANTES de enviar el desbloqueo.
+                        # Con clientes rápidos, el 'unlock_confirmed' puede llegar en
+                        # milisegundos; si la sesión aún no existe, su handler no la
+                        # encuentra y el limpiador la mata como fantasma. Creándola
+                        # primero garantizamos que ya esté disponible para confirmar.
+                        res_t = await db.execute(select(Terminal).where(Terminal.nombre_red == tid))
+                        terminal_db = res_t.scalar_one_or_none()
+                        if not terminal_db:
+                            res_t2 = await db.execute(select(Terminal).where(Terminal.ip == target).order_by(Terminal.ultima_conexion.desc()))
+                            terminal_db = res_t2.scalars().first()  # la IP no es única (DHCP)
+                        if not terminal_db:
+                            await websocket.send_json({"tipo": "error", "motivo": f"Terminal '{tid}' no registrada"})
+                            continue
+
+                        # Sesión única (misma regla que el login del kiosco): el alumno
+                        # sale de cualquier otra PC, y la PC destino no conserva
+                        # sesiones previas de otro alumno. Antes, comprobar que la PC
+                        # destino esté conectada: no sacar al alumno de su otra PC si
+                        # el desbloqueo no va a poder entregarse.
+                        if tid not in manager.conexiones_activas:
+                            await websocket.send_json({"tipo": "error", "motivo": f"Terminal '{tid}' no está conectada"})
+                            continue
+                        await _aplicar_sesion_unica(db, alumno.dni, terminal_destino_id=terminal_db.id)
+                        await _cerrar_activas_de_terminal(db, terminal_db.id, "reemplazada_en_terminal")
+
+                        sesion = Sesion(
+                            dni_alumno  = alumno.dni,
+                            id_terminal = terminal_db.id,
+                            fecha_uso   = datetime.now().date(),
+                            razon_uso   = razon_uso,
+                            confirmada  = False,
+                        )
+                        terminal_db.estado = "activo"
+                        db.add(sesion)
+                        await registrar_auditoria(op_username, "desbloquear_terminal", rol=op_rol,
+                                                  objetivo=tid, detalle=f"DNI {alumno.dni}", db=db)
+                        await db.commit()
+                        logger.info(f"[WS-Admin] Sesión creada id={sesion.id} para {_mask_nombre(alumno.nombre)}")
+
+                        # PASO 2: Ahora sí, enviar el comando de desbloqueo a la PC.
+                        ok = await manager.desbloquear_terminal(tid, {
+                            "codigo":    alumno.codigo,
+                            "nombres":   nombres_a,
+                            "apellidos": apellidos_a,
+                        })
+                        if not ok:
+                            # La PC se desconectó entre crear la sesión y enviar: revertir.
+                            sesion.activa        = False
+                            sesion.motivo_cierre = "desbloqueo_fallido"
+                            sesion.hora_salida   = datetime.now().replace(tzinfo=None)
+                            terminal_db.estado   = "bloqueado"
+                            await db.commit()
+                            await websocket.send_json({"tipo": "error", "motivo": f"Terminal '{tid}' no está conectada"})
+                            await manager.notificar_admins()
+                            continue
+
+                        await websocket.send_json({"tipo": "ok", "mensaje": f"Terminal {tid} desbloqueada para {alumno.nombre}"})
+                    await manager.notificar_admins()
+
+                elif tipo == "remote_command":
+                    action = str(data.get("action", "")).strip()
+                    target = str(data.get("ip", "")).strip()
+                    if action not in ("shutdown",) or not target:
+                        await websocket.send_json({"tipo": "error", "motivo": "Comando remoto inválido"})
+                        continue
+                    # Resolver terminal_id desde IP
+                    tid = target
+                    if tid not in manager.conexiones_activas:
+                        for k, v in manager.terminal_ips.items():
+                            if v == target:
+                                tid = k
+                                break
+                    if await _fuera_de_sede(op_sede, tid, target):
+                        await websocket.send_json({"tipo": "error", "motivo": "Esa PC pertenece a otra sede"})
+                        continue
+                    ok = await manager.enviar_comando(tid, {"tipo": "remote_command", "action": action})
+                    if ok:
+                        await registrar_auditoria(op_username, "apagar_terminal", rol=op_rol, objetivo=tid)
+                        await websocket.send_json({"tipo": "ok", "mensaje": f"Comando '{action}' enviado a {tid}"})
+                    else:
+                        await websocket.send_json({"tipo": "error", "motivo": f"Terminal {tid} no conectada"})
+
+                elif tipo == "bloquear_todas":
+                    ahora_bloqueo_todas = datetime.now().replace(tzinfo=None)
+                    # Con varias sedes, "Bloquear sala" bloquea UNA sede: la del
+                    # encargado, o la que el superadmin tiene elegida en Monitoreo.
+                    # Sin sede (instalacion de una sola sala) bloquea todo, como antes.
+                    sede_bloqueo = op_sede
+                    if not sede_bloqueo and op_rol == "superadmin":
+                        try:
+                            sede_bloqueo = int(data.get("id_sede") or 0) or None
+                        except (TypeError, ValueError):
+                            sede_bloqueo = None
+                    # IPs y nombres de terminales con conexión WS activa en este momento
+                    ids_conectados = set(manager.conexiones_activas.keys())
+                    ips_conectadas = set(manager.terminal_ips.values())
+                    if sede_bloqueo:
+                        async with async_session() as db:
+                            de_sede = (await db.execute(select(Terminal.nombre_red, Terminal.ip)
+                                                        .where(Terminal.id_sede == sede_bloqueo))).all()
+                        nombres_sede = {r[0] for r in de_sede}
+                        ips_sede = {r[1] for r in de_sede}
+                        ids_conectados = {k for k in ids_conectados
+                                          if k in nombres_sede or manager.terminal_ips.get(k) in ips_sede}
+                        ips_conectadas = {manager.terminal_ips.get(k) for k in ids_conectados} - {None}
+
+                    async with async_session() as db:
+                        # Cerrar solo las sesiones de terminales actualmente conectadas
+                        res_todas = await db.execute(select(Sesion).where(Sesion.estado == "activa"))
+                        sesiones_activas = res_todas.scalars().all()
+                        cerradas = 0
+                        for sesion_activa in sesiones_activas:
+                            res_t = await db.execute(select(Terminal).where(Terminal.id == sesion_activa.id_terminal))
+                            t_sesion = res_t.scalar_one_or_none()
+                            if t_sesion and (t_sesion.nombre_red in ids_conectados or t_sesion.ip in ips_conectadas):
+                                sesion_activa.hora_salida   = ahora_bloqueo_todas
+                                sesion_activa.activa        = False
+                                sesion_activa.motivo_cierre = "bloqueo_admin"
+                                cerradas += 1
+                        logger.warning(f"[AUDIT] {op_username} [{op_rol}] ejecutó BLOQUEO GLOBAL: {cerradas} sesión(es) cerrada(s) (solo conectadas)")
+
+                        res_terms = await db.execute(select(Terminal))
+                        for t in res_terms.scalars().all():
+                            if t.nombre_red in ids_conectados or t.ip in ips_conectadas:
+                                t.estado = "bloqueado"
+                            # Las offline/desconectadas conservan su estado actual
+                        await registrar_auditoria(op_username, "bloquear_todas", rol=op_rol,
+                                                  objetivo=f"sede {sede_bloqueo}" if sede_bloqueo else "toda la sala",
+                                                  detalle=f"{cerradas} sesión(es) cerrada(s)", db=db)
+                        await db.commit()
+
+                    # Enviar comando "bloquear" solo a los kioscos conectados (de la sede, si aplica)
+                    if sede_bloqueo:
+                        for k in ids_conectados:
+                            await manager.bloquear_terminal(k)
+                    else:
+                        await manager.bloquear_todas()
+                    await manager.notificar_evento(f"BLOQUEO GLOBAL: {cerradas} sesión(es) cerrada(s) ({len(ids_conectados)} terminal(es) conectada(s))", "warning")
+                    await websocket.send_json({"tipo": "ok", "mensaje": f"Terminales conectadas bloqueadas ({cerradas} sesión(es) cerrada(s))"})
+                    await manager.notificar_admins()
+
+                logger.info(f"[WS-Admin] comando: {tipo}")
+            except WebSocketDisconnect:
+                raise
+            except Exception as exc_cmd:
+                logger.error(f"[WS-Admin] Error procesando '{tipo}' de {op_username}: {exc_cmd}", exc_info=True)
+                try:
+                    await websocket.send_json({"tipo": "error", "motivo": f"Error interno al procesar '{tipo}'. Intente de nuevo."})
+                except Exception:
+                    raise WebSocketDisconnect()   # socket muerto: salir del loop
 
     except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.error(f"[WS-Admin] Conexión de {op_username} terminada por error: {exc}", exc_info=True)
+    finally:
+        # Siempre sacar el socket de la lista de difusión, salga como salga.
         manager.desconectar_admin(websocket)
 
 
@@ -1910,13 +2145,7 @@ async def offline_sync(datos: _OfflineSyncReq, request: Request, db: AsyncSessio
         return {"estado": "not_found", "motivo": "El DNI no está registrado en el sistema."}
 
     # Verificar ban activo
-    res_ban = await db.execute(
-        select(Ban).where(
-            Ban.dni_alumno == dni,
-            (Ban.fecha_fin == None) | (Ban.fecha_fin > datetime.now())
-        )
-    )
-    ban = res_ban.scalar_one_or_none()
+    ban = await _ban_activo(db, dni)
     if ban:
         return {"estado": "baneado", "motivo": f"Acceso restringido: {ban.motivo}"}
 

@@ -27,7 +27,7 @@
         }
     </script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link rel="stylesheet" href="static/css/style.css?v=86">
+    <link rel="stylesheet" href="static/css/style.css?v=90">
     <style>
         ::-webkit-scrollbar { width:6px; height:6px; }
         .dark ::-webkit-scrollbar-track { background:transparent; }
@@ -159,6 +159,12 @@
                     <i class="ph ph-warning-circle"></i>
                     <span>Alertas</span>
                     <span id="incidencias-badge" class="nav-badge" style="display:none"></span>
+                </button>
+
+                <button onclick="switchTab('reportes')" id="nav-reportes"
+                    class="nav-item">
+                    <i class="ph ph-printer"></i>
+                    <span>Reportes</span>
                 </button>
 
                 <button onclick="switchTab('basedatos')" id="nav-basedatos"
@@ -316,11 +322,20 @@
                         <div id="monAlertasMini" style="display:none"></div>
                     </div>
 
+                    <!-- ── Sedes / facultades: estado de cada centro de cómputo; clic = filtrar el mapa ── -->
+                    <section id="monSedes" class="mon-sedes" style="display:none" aria-label="Sedes">
+                        <div class="mon-section-hdr">
+                            <h2 class="mon-section-ttl"><span class="mon-section-bar mon-section-bar-a"></span> Sedes y centros de cómputo</h2>
+                            <span class="bento-badge" id="monSedesBadge"></span>
+                        </div>
+                        <div id="monSedesGrid" class="mon-sedes-grid" role="group" aria-label="Elegir sede para ver sus PCs"></div>
+                    </section>
+
                     <!-- ── Fila inferior: Mapa de PCs (ancho completo) ── -->
                     <div class="mon-split">
                         <div class="mon-split-main" id="seccionEquipos">
                             <div class="mon-section-hdr">
-                                <h2 class="mon-section-ttl"><span class="mon-section-bar mon-section-bar-a"></span> Mapa de Terminales</h2>
+                                <h2 class="mon-section-ttl"><span class="mon-section-bar mon-section-bar-a"></span> <span id="monMapaTitulo">Mapa de Terminales</span></h2>
                                 <span class="bento-badge" id="badgeEquipos"></span>
                             </div>
                             <div id="terminalesGrid" class="terminales-grid"></div>
@@ -499,15 +514,15 @@
                             class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-student"></i> Estudiantes
                         </button>
-                        <button id="subtab-btn-egresados" onclick="switchSubtab('egresados')"
+                        <button id="subtab-btn-egresados" onclick="switchSubtab('egresados')" style="display:none"
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-graduation-cap"></i> Egresados
                         </button>
-                        <button id="subtab-btn-docentes" onclick="switchSubtab('docentes')"
+                        <button id="subtab-btn-docentes" onclick="switchSubtab('docentes')" style="display:none"
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-chalkboard-teacher"></i> Docentes
                         </button>
-                        <button id="subtab-btn-autoridad" onclick="switchSubtab('autoridad')"
+                        <button id="subtab-btn-autoridad" onclick="switchSubtab('autoridad')" style="display:none"
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-shield-star"></i> Autoridad
                         </button>
@@ -730,7 +745,7 @@
                             <i class="ph ph-warning-circle"></i> Incidencias
                             <span id="incidencias-badge-sub" class="text-[10px] font-bold bg-amber-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none" style="display:none"></span>
                         </button>
-                        <button id="subtab-btn-incidencias-bans" onclick="switchSubtabInc('bans')"
+                        <button id="subtab-btn-incidencias-bans" onclick="switchSubtabInc('bans')" style="display:none"
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-prohibit"></i> Usuarios Baneados
                         </button>
@@ -753,6 +768,9 @@
                                 </div>
                                 <div class="flex gap-2 flex-wrap items-center">
                                     <span id="incidenciasTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
+                                    <button onclick="switchTab('reportes')" class="kpi-btn-sec" title="Imprimir incidencias por día, mes, ciclo o año">
+                                        <i class="ph ph-printer" aria-hidden="true"></i> Imprimir
+                                    </button>
                                     <button onclick="abrirNuevaIncidencia()" class="db-btn db-btn-new">
                                         <i class="ph ph-plus"></i> Registrar Incidencia
                                     </button>
@@ -950,6 +968,75 @@
                 </div>
 
                 <!-- ══ TAB: INDICADORES (KPIs) ══ -->
+                <!-- ══ TAB: REPORTES (estadisticas e incidencias imprimibles) ══ -->
+                <div id="tab-reportes" style="display:none" class="kpi-view">
+                    <div class="kpi-hdr">
+                        <div>
+                            <h2 class="kpi-title">Reportes</h2>
+                            <p class="kpi-subtitle">Estadísticas e incidencias por día, mes, ciclo académico o año, listas para imprimir</p>
+                        </div>
+                    </div>
+
+                    <section class="rep-filtros" aria-label="Filtros del reporte">
+                        <div class="rep-fila">
+                            <div class="rep-campo">
+                                <span class="rep-lbl" id="rep-periodo-lbl">Periodo</span>
+                                <div class="kpi-periodo" role="group" aria-labelledby="rep-periodo-lbl">
+                                    <button class="kpi-periodo-btn" data-rep-tipo="dia" onclick="repSetTipo('dia')">Día</button>
+                                    <button class="kpi-periodo-btn kpi-periodo-activo" data-rep-tipo="mes" onclick="repSetTipo('mes')">Mes</button>
+                                    <button class="kpi-periodo-btn" data-rep-tipo="ciclo" onclick="repSetTipo('ciclo')">Ciclo</button>
+                                    <button class="kpi-periodo-btn" data-rep-tipo="anio" onclick="repSetTipo('anio')">Año</button>
+                                    <button class="kpi-periodo-btn" data-rep-tipo="rango" onclick="repSetTipo('rango')">Rango</button>
+                                </div>
+                            </div>
+                            <div class="rep-campo" data-rep-para="dia" style="display:none">
+                                <label class="rep-lbl" for="rep-dia">Fecha</label>
+                                <input id="rep-dia" type="date" class="rep-input" onchange="repGenerar()">
+                            </div>
+                            <div class="rep-campo" data-rep-para="mes">
+                                <label class="rep-lbl" for="rep-mes">Mes</label>
+                                <input id="rep-mes" type="month" class="rep-input" onchange="repGenerar()">
+                            </div>
+                            <div class="rep-campo" data-rep-para="ciclo" style="display:none">
+                                <label class="rep-lbl" for="rep-ciclo">Ciclo académico</label>
+                                <select id="rep-ciclo" class="rep-input" onchange="repGenerar()"></select>
+                            </div>
+                            <div class="rep-campo" data-rep-para="anio" style="display:none">
+                                <label class="rep-lbl" for="rep-anio">Año</label>
+                                <input id="rep-anio" type="number" min="2020" max="2100" step="1" class="rep-input rep-input-corto" onchange="repGenerar()">
+                            </div>
+                            <div class="rep-campo" data-rep-para="rango" style="display:none">
+                                <label class="rep-lbl" for="rep-desde">Desde</label>
+                                <input id="rep-desde" type="date" class="rep-input">
+                            </div>
+                            <div class="rep-campo" data-rep-para="rango" style="display:none">
+                                <label class="rep-lbl" for="rep-hasta">Hasta</label>
+                                <input id="rep-hasta" type="date" class="rep-input">
+                            </div>
+                            <div class="rep-campo" id="rep-sede-campo" style="display:none">
+                                <label class="rep-lbl" for="rep-sede">Sede</label>
+                                <select id="rep-sede" class="rep-input" onchange="repGenerar()"></select>
+                            </div>
+                        </div>
+                        <div class="rep-acciones">
+                            <button onclick="repGenerar()" id="rep-btn-generar" class="kpi-btn-sec">
+                                <i class="ph ph-arrows-clockwise" aria-hidden="true"></i> Ver reporte
+                            </button>
+                            <button onclick="repImprimir('estadisticas')" class="kpi-btn-pri">
+                                <i class="ph ph-printer" aria-hidden="true"></i> Imprimir estadísticas
+                            </button>
+                            <button onclick="repImprimir('incidencias')" class="kpi-btn-sec">
+                                <i class="ph ph-warning-circle" aria-hidden="true"></i> Imprimir incidencias
+                            </button>
+                        </div>
+                        <p id="rep-error" class="rep-error" role="alert"></p>
+                    </section>
+
+                    <div id="rep-resultado" aria-live="polite">
+                        <p class="kpi-empty">Elige un periodo para ver el reporte.</p>
+                    </div>
+                </div>
+
                 <div id="tab-indicadores" style="display:none" class="kpi-view">
                     <div class="kpi-hdr">
                         <div>
@@ -1257,20 +1344,20 @@
                 <div id="tab-configuracion" style="display:none">
 
                     <!-- Sub-pestañas -->
-                    <div class="flex gap-1 mb-5 border-b border-zinc-200 dark:border-zinc-800">
-                        <button id="subtab-btn-cfg-actividad" onclick="switchSubtabCfg('actividad')"
+                    <div class="subtab-bar flex gap-1 mb-5 border-b border-zinc-200 dark:border-zinc-800">
+                        <button id="subtab-btn-cfg-actividad" onclick="switchSubtabCfg('actividad')" style="display:none"
                             class="subtab-btn active px-4 py-2 text-sm font-semibold rounded-t-lg border border-b-0 border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-terminal"></i> Actividad del Sistema
                         </button>
-                        <button id="subtab-btn-cfg-credenciales" onclick="switchSubtabCfg('credenciales')"
+                        <button id="subtab-btn-cfg-credenciales" onclick="switchSubtabCfg('credenciales')" style="display:none"
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-key"></i> Credenciales
                         </button>
-                        <button id="subtab-btn-cfg-aplicacion" onclick="switchSubtabCfg('aplicacion')"
+                        <button id="subtab-btn-cfg-aplicacion" onclick="switchSubtabCfg('aplicacion')" style="display:none"
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-paint-brush"></i> Aplicación
                         </button>
-                        <button id="subtab-btn-cfg-actualizaciones" onclick="switchSubtabCfg('actualizaciones')"
+                        <button id="subtab-btn-cfg-actualizaciones" onclick="switchSubtabCfg('actualizaciones')" style="display:none"
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-arrow-circle-up"></i> Actualizaciones
                         </button>
@@ -1278,11 +1365,19 @@
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-list-checks"></i> Motivos de uso
                         </button>
+                        <button id="subtab-btn-cfg-ciclos" onclick="switchSubtabCfg('ciclos')" style="display:none"
+                            class="subtab-btn bd-solo-superadmin px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-calendar-dots"></i> Ciclos académicos
+                        </button>
+                        <button id="subtab-btn-cfg-sedes" onclick="switchSubtabCfg('sedes')" style="display:none"
+                            class="subtab-btn bd-solo-superadmin px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
+                            <i class="ph ph-buildings"></i> Sedes
+                        </button>
                         <button id="subtab-btn-cfg-backdoor" onclick="switchSubtabCfg('backdoor')"
                             class="subtab-btn px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-lock-key"></i> Backdoor
                         </button>
-                        <button id="subtab-btn-cfg-auditoria" onclick="switchSubtabCfg('auditoria')"
+                        <button id="subtab-btn-cfg-auditoria" onclick="switchSubtabCfg('auditoria')" style="display:none"
                             class="subtab-btn bd-solo-superadmin px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 -mb-px flex items-center gap-2 transition-colors">
                             <i class="ph ph-clipboard-text"></i> Auditoría
                         </button>
@@ -1496,6 +1591,76 @@
                         </section>
                     </div>
 
+                    <!-- Panel: Ciclos académicos (solo superadmin) -->
+                    <div id="subtab-cfg-ciclos" style="display:none">
+                        <section class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors" style="max-width:960px">
+                            <div class="flex items-start justify-between flex-wrap gap-3 mb-1">
+                                <div>
+                                    <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                                        <i class="ph ph-calendar-dots text-indigo-600 dark:text-indigo-400"></i> Ciclos académicos
+                                    </h3>
+                                    <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-2xl leading-relaxed">
+                                        Registra cada ciclo de la UNASAM (por ejemplo 2026-0, 2026-I, 2026-II) con sus fechas exactas.
+                                        Los reportes por ciclo usan estas fechas. Dos ciclos no pueden superponerse.
+                                    </p>
+                                </div>
+                                <button onclick="cicloAbrirModal()" class="db-btn db-btn-new">
+                                    <i class="ph ph-plus"></i> Nuevo ciclo
+                                </button>
+                            </div>
+                            <div id="ciclos-lista" class="org-lista mt-4">
+                                <p class="empty-msg">Cargando…</p>
+                            </div>
+                        </section>
+                    </div>
+
+                    <!-- Panel: Sedes / centros de cómputo (solo superadmin) -->
+                    <div id="subtab-cfg-sedes" style="display:none">
+                        <section class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors" style="max-width:960px">
+                            <div class="flex items-start justify-between flex-wrap gap-3 mb-1">
+                                <div>
+                                    <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                                        <i class="ph ph-buildings text-indigo-600 dark:text-indigo-400"></i> Sedes y centros de cómputo
+                                    </h3>
+                                    <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-2xl leading-relaxed">
+                                        Cada sede agrupa sus PCs (Biblioteca Central, centro de cómputo de una facultad...).
+                                        Si indicas el prefijo de red de la sede, las PCs nuevas se asignan solas.
+                                        Un encargado con sede asignada solo ve los reportes e incidencias de su sede.
+                                    </p>
+                                </div>
+                                <button onclick="sedeAbrirModal()" class="db-btn db-btn-new">
+                                    <i class="ph ph-plus"></i> Nueva sede
+                                </button>
+                            </div>
+                            <div id="sedes-lista" class="org-lista mt-4">
+                                <p class="empty-msg">Cargando…</p>
+                            </div>
+                        </section>
+
+                        <section class="section bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm transition-colors mt-5" style="max-width:960px">
+                            <h3 class="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2 mb-1">
+                                <i class="ph ph-desktop text-indigo-600 dark:text-indigo-400"></i> PCs por sede
+                            </h3>
+                            <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Marca las PCs y elige a qué sede pertenecen.</p>
+                            <div class="org-asignar">
+                                <div class="rep-campo">
+                                    <label class="rep-lbl" for="sede-pc-filtro">Mostrar</label>
+                                    <select id="sede-pc-filtro" class="rep-input" onchange="sedesRenderPCs()"></select>
+                                </div>
+                                <div class="rep-campo">
+                                    <label class="rep-lbl" for="sede-pc-destino">Mover las marcadas a</label>
+                                    <select id="sede-pc-destino" class="rep-input"></select>
+                                </div>
+                                <button onclick="sedesAsignarPCs()" class="kpi-btn-pri" id="sede-pc-btn">
+                                    <i class="ph ph-arrow-right" aria-hidden="true"></i> Asignar
+                                </button>
+                            </div>
+                            <div id="sedes-pcs" class="org-pcs">
+                                <p class="empty-msg">Cargando…</p>
+                            </div>
+                        </section>
+                    </div>
+
                     <!-- Panel: Backdoor -->
                     <div id="subtab-cfg-backdoor" style="display:none">
 
@@ -1612,7 +1777,7 @@
                             </div>
 
                         <!-- ── Atajo de Mantenimiento (solo superadmin) ── -->
-                        <div class="max-w-xl" id="seccion-mantenimiento-backdoor">
+                        <div class="max-w-xl" id="seccion-mantenimiento-backdoor" style="display:none">
                             <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
                                 <i class="ph ph-keyboard text-indigo-500"></i> Atajo de Mantenimiento
                             </h3>
@@ -1670,8 +1835,8 @@
                             </div>
                         </div>
 
-                        <!-- ── Atajo de Modo Offline (admin y superadmin) ── -->
-                        <div class="max-w-xl mt-4">
+                        <!-- ── Atajo de Modo Offline (solo superadmin: su PIN lo lee/guarda solo el superadmin) ── -->
+                        <div class="max-w-xl mt-4 bd-solo-superadmin" style="display:none">
                             <h3 class="text-sm font-bold text-zinc-700 dark:text-zinc-200 mb-1 flex items-center gap-2">
                                 <i class="ph ph-wifi-slash text-amber-500"></i> Modo Offline de Emergencia
                             </h3>
@@ -1849,6 +2014,67 @@
     </div>
 </div>
 
+<div id="modal-ciclo" role="dialog" aria-modal="true" aria-labelledby="modal-ciclo-titulo" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <div class="flex items-center justify-between mb-1">
+            <h3 id="modal-ciclo-titulo" class="text-base font-bold text-zinc-900 dark:text-white">Nuevo ciclo</h3>
+            <button onclick="cicloCerrarModal()" aria-label="Cerrar" class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"><i class="ph ph-x"></i></button>
+        </div>
+        <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Las fechas son inclusivas: el último día cuenta completo.</p>
+        <form class="flex flex-col gap-3" onsubmit="event.preventDefault(); cicloGuardar();">
+            <div>
+                <label for="ciclo-nombre" class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nombre <span class="text-rose-400">*</span></label>
+                <input id="ciclo-nombre" type="text" maxlength="30" placeholder="Ej: 2026-II" autocomplete="off" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label for="ciclo-inicio" class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Inicio <span class="text-rose-400">*</span></label>
+                    <input id="ciclo-inicio" type="date" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
+                </div>
+                <div>
+                    <label for="ciclo-fin" class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Fin <span class="text-rose-400">*</span></label>
+                    <input id="ciclo-fin" type="date" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
+                </div>
+            </div>
+            <p id="ciclo-error" class="modal-error text-rose-500 text-xs min-h-4" role="alert"></p>
+            <div class="flex gap-3 justify-end">
+                <button type="button" onclick="cicloCerrarModal()" class="text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+                <button type="submit" id="btn-ciclo-guardar" class="db-btn db-btn-new"><i class="ph ph-floppy-disk"></i> Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="modal-sede" role="dialog" aria-modal="true" aria-labelledby="modal-sede-titulo" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
+    <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <div class="flex items-center justify-between mb-1">
+            <h3 id="modal-sede-titulo" class="text-base font-bold text-zinc-900 dark:text-white">Nueva sede</h3>
+            <button onclick="sedeCerrarModal()" aria-label="Cerrar" class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"><i class="ph ph-x"></i></button>
+        </div>
+        <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-4">Un centro de cómputo con PCs controladas por este servidor.</p>
+        <form class="flex flex-col gap-3" onsubmit="event.preventDefault(); sedeGuardar();">
+            <div>
+                <label for="sede-nombre" class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Nombre <span class="text-rose-400">*</span></label>
+                <input id="sede-nombre" type="text" maxlength="150" placeholder="Ej: Centro de cómputo - Facultad de Ciencias" autocomplete="off" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
+            </div>
+            <div>
+                <label for="sede-desc" class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Descripción <span class="text-zinc-400">(opcional)</span></label>
+                <input id="sede-desc" type="text" maxlength="300" placeholder="Ej: Pabellón B, 2do piso" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
+            </div>
+            <div>
+                <label for="sede-redes" class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Prefijos de red <span class="text-zinc-400">(opcional)</span></label>
+                <input id="sede-redes" type="text" maxlength="300" placeholder="Ej: 10.21.5., 10.21.6." autocomplete="off" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors font-mono">
+                <p class="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">Las PCs nuevas cuya IP empiece así se asignan solas a esta sede.</p>
+            </div>
+            <p id="sede-error" class="modal-error text-rose-500 text-xs min-h-4" role="alert"></p>
+            <div class="flex gap-3 justify-end">
+                <button type="button" onclick="sedeCerrarModal()" class="text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
+                <button type="submit" id="btn-sede-guardar" class="db-btn db-btn-new"><i class="ph ph-floppy-disk"></i> Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div id="modal-encargado" role="dialog" aria-modal="true" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" style="display:none">
     <div class="modal-content bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
         <div class="flex items-center justify-between mb-1">
@@ -1872,7 +2098,12 @@
                 <input id="enc-password" type="password" placeholder="Mínimo 8, una mayúscula y un número" autocomplete="new-password"
                     class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors">
             </div>
-            <p id="enc-error" class="text-rose-500 text-xs min-h-4" role="alert"></p>
+            <div id="enc-sede-campo">
+                <label for="enc-sede" class="block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Sede que administra</label>
+                <select id="enc-sede" class="modal-select w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors"></select>
+                <p class="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">Con una sede asignada, sus reportes e incidencias se limitan a esa sede.</p>
+            </div>
+            <p id="enc-error" class="modal-error text-rose-500 text-xs min-h-4" role="alert"></p>
             <div class="flex gap-3 justify-end">
                 <button onclick="cerrarModalEncargado()" class="text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
                 <button id="btn-encargado-guardar" onclick="guardarEncargado()" class="db-btn db-btn-new">
@@ -2048,21 +2279,25 @@
     <div class="modal-content bg-white dark:bg-zinc-900 border border-amber-200 dark:border-amber-800/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
         <h3 class="text-base font-bold text-zinc-900 dark:text-white mb-1 flex items-center gap-2"><i class="ph ph-warning-circle text-amber-500"></i> Registrar Incidencia</h3>
         <p id="modal-incidencia-nombre" class="text-xs text-zinc-500 dark:text-zinc-400 mb-4"></p>
-        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">DNI del Alumno <span class="text-rose-500">*</span></label>
-        <input id="inc-dni" type="text" maxlength="8" placeholder="8 dígitos" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
-        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Tipo de Incidencia <span class="text-rose-500">*</span></label>
+        <label for="inc-dni" class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">DNI o código del alumno <span class="text-rose-500">*</span></label>
+        <input id="inc-dni" type="text" maxlength="30" placeholder="DNI (8 dígitos) o código universitario" autocomplete="off" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
+        <div id="inc-sede-campo" style="display:none">
+            <label for="inc-sede" class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Sede donde ocurrió <span class="text-rose-500">*</span></label>
+            <select id="inc-sede" class="modal-select w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors"></select>
+        </div>
+        <label for="inc-tipo" class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Tipo de Incidencia <span class="text-rose-500">*</span></label>
         <select id="inc-tipo" class="modal-select w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
             <option value="leve">Leve — advertencia verbal / comportamiento</option>
             <option value="grave">Grave — daño a equipos / conducta seria</option>
         </select>
-        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Motivo <span class="text-rose-500">*</span></label>
+        <label for="inc-motivo" class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Motivo <span class="text-rose-500">*</span></label>
         <input id="inc-motivo" type="text" maxlength="200" placeholder="ej: Uso de redes sociales en hora no permitida" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors">
-        <label class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Descripción (opcional)</label>
+        <label for="inc-descripcion" class="modal-field-label block text-xs text-zinc-500 dark:text-zinc-400 mb-1">Descripción (opcional)</label>
         <textarea id="inc-descripcion" rows="3" maxlength="600" placeholder="Detalle adicional de lo ocurrido…" class="modal-input w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white text-sm rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-amber-500 transition-colors resize-none"></textarea>
         <div id="inc-advertencia-ban" style="display:none" class="mb-3 p-3 rounded-lg border border-rose-200 dark:border-rose-700/60 bg-rose-50 dark:bg-rose-950/30 text-xs text-rose-700 dark:text-rose-400">
             <i class="ph ph-warning"></i> Este alumno ya tiene <strong id="inc-contador"></strong> incidencias activas. Al registrar esta, podrás banearlo directamente.
         </div>
-        <p id="modal-incidencia-error" class="text-rose-500 text-xs min-h-4 mb-2"></p>
+        <p id="modal-incidencia-error" class="modal-error text-rose-500 text-xs min-h-4 mb-2" role="alert"></p>
         <div class="modal-buttons flex gap-3 justify-end">
             <button id="btn-inc-cancelar" class="btn-cancelar text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 px-4 py-2 rounded-lg transition-colors">Cancelar</button>
             <button id="btn-inc-guardar" class="btn-confirmar text-xs bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg transition-colors font-medium">Registrar</button>
@@ -2071,7 +2306,8 @@
 </div>
 
 
-<script src="static/js/app.js?v=62"></script>
+<script src="static/js/app.js?v=68"></script>
+<script src="static/js/organizacion.js?v=3"></script>
 <script>
 // Tema
 (function() {
@@ -2194,7 +2430,7 @@ function switchSubtabInc(sub) {
 }
 
 function switchSubtabCfg(sub) {
-    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones', 'motivos', 'backdoor', 'auditoria'].forEach(s => {
+    ['actividad', 'credenciales', 'aplicacion', 'actualizaciones', 'motivos', 'ciclos', 'sedes', 'backdoor', 'auditoria'].forEach(s => {
         const panel = document.getElementById('subtab-cfg-' + s);
         const btn   = document.getElementById('subtab-btn-cfg-' + s);
         if (!panel || !btn) return;
@@ -2223,14 +2459,17 @@ function switchSubtabCfg(sub) {
         if (typeof cargarMensajes      === 'function') cargarMensajes();
     }
     if (sub === 'auditoria' && typeof cargarAuditoria === 'function') cargarAuditoria();
+    if (sub === 'ciclos'    && _rolServidor === 'superadmin' && typeof ciclosCargar === 'function') ciclosCargar();
+    if (sub === 'sedes'     && _rolServidor === 'superadmin' && typeof sedesCargar === 'function') sedesCargar();
 }
 
 function switchTab(tab) {
-    const tabs = ['monitoreo', 'indicadores', 'historial', 'basedatos', 'incidencias', 'actividad', 'configuracion'];
+    const tabs = ['monitoreo', 'indicadores', 'historial', 'reportes', 'basedatos', 'incidencias', 'actividad', 'configuracion'];
     const titles = {
         monitoreo:    'Monitoreo en Vivo',
         indicadores:  'Indicadores',
         historial:    'Historial de Sesiones',
+        reportes:     'Reportes',
         basedatos:    'Base de Datos',
         incidencias:  'Incidencias',
         actividad:    'Actividad de Alumnos',
@@ -2256,6 +2495,7 @@ function switchTab(tab) {
 
     if (tab === 'indicadores')   cargarIndicadores();
     if (tab === 'historial')     aplicarFiltros();
+    if (tab === 'reportes' && typeof repInit === 'function') repInit();
     if (tab === 'basedatos')     switchSubtab('estudiantes');
     if (tab === 'incidencias')   switchSubtabInc('inc');
     if (tab === 'configuracion') switchSubtabCfg(_rolServidor === 'superadmin' ? 'actividad' : 'backdoor');
