@@ -72,7 +72,7 @@ NOTA: La clave nueva invalida los tokens JWT previos — el admin debe volver
 PENDIENTE OPERATIVO:
   - El HISTORIAL pasado de git aún contiene los .env viejos. Como la SECRET_KEY
     ya se rotó, las claves JWT viejas quedan inservibles. PERO la contraseña de
-    MySQL (***REMOVED***) y PASS_NIVEL2 (***REMOVED***) siguen en el historial — conviene
+    MySQL (<CONTRASENA_MYSQL>) y PASS_NIVEL2 (<CLAVE_NIVEL2>) siguen en el historial — conviene
     rotarlas también si el repo es compartido o se publicará.
   - En el equipo de PRODUCCIÓN, generar una SECRET_KEY propia distinta a esta.
 

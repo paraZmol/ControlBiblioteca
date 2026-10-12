@@ -23,3 +23,11 @@ server/.env.*
 
 # Logs del servidor (rotativos, con datos operativos)
 server/logs/
+
+# Credenciales y configuracion local: NUNCA al repo (usar config.example.json)
+server/config.json
+usuarios.txt
+.claude/settings.local.json
+**/kiosco.config.json
+*.log
+copias/

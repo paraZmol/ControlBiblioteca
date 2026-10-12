@@ -46,7 +46,7 @@ LO MÁS IMPORTANTE — LEER ANTES DE EMPEZAR:
       3. Abrir el "XAMPP Control Panel" y arrancar el módulo "MySQL".
       4. Anotar: por defecto el usuario es "root", el puerto 3306, y la
          contraseña suele estar vacía o ser la que definas. En este proyecto
-         se viene usando usuario "root" y contraseña "***REMOVED***".
+         se viene usando usuario "root" y contraseña "<CONTRASENA_MYSQL>".
 
     Opción alternativa — MySQL Server 8.x:
       https://dev.mysql.com/downloads/mysql/  (tipo "Server Only", puerto 3306,
@@ -76,7 +76,7 @@ LO MÁS IMPORTANTE — LEER ANTES DE EMPEZAR:
     {
       "database": {
         "user": "root",
-        "password": "***REMOVED***",        <- la contraseña de TU MySQL/MariaDB
+        "password": "<CONTRASENA_MYSQL>",        <- la contraseña de TU MySQL/MariaDB
         "host": "localhost",
         "port": 3306,
         "name": "biblioteca_unasam"     <- nombre de la base (dejar así)
@@ -86,7 +86,7 @@ LO MÁS IMPORTANTE — LEER ANTES DE EMPEZAR:
         "port": 8000
       },
       "security": {
-        "pass_nivel2": "***REMOVED***"
+        "pass_nivel2": "<CLAVE_NIVEL2>"
       },
       "actualizaciones": {
         "ruta_distribucion": "C:\\WinSysCache"

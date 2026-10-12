@@ -57,7 +57,7 @@ DEPLOY EN BIBLIOTECA (hacer antes de poner en producción)
     (El servidor local ya fue migrado el 14/05/2026)
 
 [ ] Verificar que server/.env apunta a la BD correcta en producción
-    (actualmente: mysql+asyncmy://root:***REMOVED***@localhost:3306/biblioteca_unasam)
+    (actualmente: mysql+asyncmy://root:<CONTRASENA_MYSQL>@localhost:3306/biblioteca_unasam)
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

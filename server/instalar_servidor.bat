@@ -53,6 +53,13 @@ echo  OK.
 :: PASO 3: Configurar desde config.json (genera .env y crea BD)
 echo.
 echo  [3/4] Ejecutando configurador...
+if not exist config.json (
+    copy /Y config.example.json config.json >nul
+    echo  [AVISO] Se creo config.json desde config.example.json.
+    echo  Edite config.json con la IP del servidor y la contrasena de MySQL,
+    echo  y vuelva a ejecutar este instalador.
+    pause & exit /b 1
+)
 echo  (Edite config.json antes de continuar si necesita cambiar la IP o contrasena)
 echo.
 .venv\Scripts\python.exe configurador.py
@@ -94,6 +101,6 @@ echo  Inicie el servidor: doble clic en servidor_run.bat
 echo  O reinicie la PC para arranque automatico.
 echo.
 echo  Panel: http://localhost:8000/admin
-echo  admin / admin123  ^|  Nivel 2: ***REMOVED***
+echo  Usuarios: superadmin y admin. La contrasena inicial la mostro el configurador arriba.
 echo.
 pause

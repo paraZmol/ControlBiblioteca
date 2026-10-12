@@ -54,7 +54,7 @@
 |---|---|---|
 | Administración completa | `superadmin` | `admin123` |
 | Operación de sala | `admin` | `admin123` |
-| Nivel 2 (consola admin) | — | `***REMOVED***` |
+| Nivel 2 (consola admin) | — | `<CLAVE_NIVEL2>` |
 
 > **Cambiar todas las contraseñas en el primer inicio** (Configuración → Credenciales).
 
@@ -63,7 +63,7 @@
 ## Seguridad — lista antes de producción
 
 - [ ] Cambiar contraseña de `superadmin` y `admin` al primer inicio
-- [ ] Cambiar `pass_nivel2` en `config.json` (`***REMOVED***` es el valor por defecto)
+- [ ] Cambiar `pass_nivel2` en `config.json` (`<CLAVE_NIVEL2>` es el valor por defecto)
 - [ ] La `SECRET_KEY` la genera el configurador automáticamente — no tocar
 - [ ] No exponer el puerto 8000 a internet (solo red local)
 - [ ] Verificar que `.env` esté en `.gitignore` ✓

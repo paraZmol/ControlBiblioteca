@@ -1,0 +1,19 @@
+{
+  "database": {
+    "user": "biblio",
+    "password": "<CONTRASENA_MYSQL>",
+    "host": "localhost",
+    "port": 3306,
+    "name": "biblioteca_unasam"
+  },
+  "network": {
+    "server_static_ip": "<IP_DEL_SERVIDOR>",
+    "port": 8000
+  },
+  "security": {
+    "pass_nivel2": "<CLAVE_NIVEL2>"
+  },
+  "actualizaciones": {
+    "ruta_distribucion": "C:\\WinSysCache"
+  }
+}

@@ -46,7 +46,7 @@ Desde cualquier terminal en la red:
 Credenciales:
   Usuario:        admin
   Contrasena:     admin123
-  Nivel 2 (admin completo): ***REMOVED***
+  Nivel 2 (admin completo): <CLAVE_NIVEL2>
 
 
 INICIO MANUAL DEL SERVIDOR
@@ -72,7 +72,7 @@ Si no carga:
 CARGAR ALUMNOS AL SISTEMA
 ----------------------------------------------------------------
 1. Ingresar al panel con admin / admin123
-2. Elevar a Nivel 2 ingresando: ***REMOVED***
+2. Elevar a Nivel 2 ingresando: <CLAVE_NIVEL2>
 3. Ir a seccion "Base de Datos"
 4. Clic en "Importar Excel"
 5. Seleccionar el archivo Excel con columnas:

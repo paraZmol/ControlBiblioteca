@@ -165,7 +165,7 @@ FLUJO_ALUMNO.txt.
   Pasos (requiere acceso a la PC del servidor):
     1. Abrir una terminal en la PC del servidor (CMD o PowerShell).
     2. Conectarse a MySQL:
-         mysql -u root -p***REMOVED*** biblioteca_unasam
+         mysql -u root -p<CONTRASENA_MYSQL> biblioteca_unasam
     3. Generar un hash bcrypt de la nueva contraseña con Python:
          python -c "from passlib.context import CryptContext; ctx=CryptContext(schemes=['bcrypt']); print(ctx.hash('NuevaContraseña123'))"
        Esto imprime algo como: $2b$12$abcdef...
