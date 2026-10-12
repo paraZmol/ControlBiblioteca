@@ -1,7 +1,7 @@
 # endpoints.py - Rutas de la API REST
 import asyncio
 from datetime import datetime, date, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Body, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Body, Request, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,7 @@ from auth_service import (
 from core.websocket_manager import manager
 from core.auditoria import registrar_auditoria
 from core import rate_limit
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api")
 
@@ -117,6 +117,215 @@ async def _leer_upload_limitado(archivo, max_bytes: int = _MAX_EXCEL_BYTES) -> b
     return bytes(buf)
 
 
+# ── Utilidades comunes de importación Excel ─────────────────────────
+# Reglas de todas las importaciones (maestro, personal, egresados, docentes,
+# autoridades e historial):
+#   - DNI que llega como número (Excel le quita los ceros) -> 8 dígitos.
+#   - Fechas: datetime/date nativas de Excel, o texto AAAA-MM-DD / DD/MM/AAAA.
+#     Una fecha presente pero ilegible RECHAZA la fila (nunca se inventa "hoy").
+#   - Cada fila se guarda en su propio SAVEPOINT: una fila mala se omite y el
+#     resto de la importación sigue.
+#   - La respuesta informa cuántas filas se omitieron y por qué.
+
+_FMT_FECHA_EXCEL = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d")
+
+
+def _excel_abrir(contenido: bytes):
+    import io
+    import openpyxl
+    try:
+        return openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True).active
+    except Exception as e:
+        from main import logger
+        logger.warning(f"[IMPORT] Archivo inválido: {e}")
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
+
+
+def _excel_encabezados(ws) -> list[str]:
+    """Encabezados de la fila 1 (texto, sin espacios extremos). 400 si el Excel está vacío."""
+    try:
+        primera = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+    except StopIteration:
+        primera = ()
+    hdrs = [str(v).strip() if v is not None else "" for v in primera]
+    if not any(hdrs):
+        raise HTTPException(status_code=400, detail="El Excel está vacío: falta la fila de encabezados.")
+    return hdrs
+
+
+def _excel_fila_vacia(fila) -> bool:
+    return all(v is None or (isinstance(v, str) and not v.strip()) for v in fila)
+
+
+def _excel_celda(fila, idx):
+    return fila[idx] if idx is not None and idx < len(fila) else None
+
+
+def _excel_txt(v) -> str:
+    """Texto de una celda: None -> '', 2020.0 -> '2020', resto str().strip()."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v).strip()
+
+
+def _excel_dni(v) -> str:
+    """DNI normalizado. Si Excel lo guardó como número (int/float) se rellenan
+    los ceros a la izquierda: 1234567 -> '01234567'."""
+    if v is None or isinstance(v, bool):
+        return ""
+    if isinstance(v, (int, float)):
+        try:
+            return str(int(v)).zfill(8)
+        except (ValueError, OverflowError):
+            return ""
+    s = str(v).strip().replace(" ", "").replace("-", "")
+    if s.endswith(".0") and s[:-2].isdigit():
+        s = s[:-2].zfill(8)
+    return s
+
+
+def _dni_valido(dni: str) -> bool:
+    return dni.isdigit() and len(dni) == 8
+
+
+def _excel_fecha(v) -> datetime | None:
+    """Fecha de una celda. None/vacío -> None. Ilegible o fuera de 1900-2100 ->
+    ValueError (la fila se rechaza)."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    if isinstance(v, datetime):
+        d = v
+    elif isinstance(v, date):
+        d = datetime(v.year, v.month, v.day)
+    else:
+        s = str(v).strip()
+        s = s.split(" ")[0] if len(s) > 10 else s   # "2026-03-01 00:00:00"
+        d = None
+        for fmt in _FMT_FECHA_EXCEL:
+            try:
+                d = datetime.strptime(s, fmt)
+                break
+            except ValueError:
+                pass
+        if d is None:
+            raise ValueError(f"fecha ilegible '{str(v)[:30]}'")
+    if not (1900 <= d.year <= 2100):
+        raise ValueError(f"fecha fuera de rango '{str(v)[:30]}'")
+    return d
+
+
+def _excel_largo_excedido(modelo, valores: dict) -> str | None:
+    """Nombre del primer campo de texto que supera el largo de su columna."""
+    cols = modelo.__table__.columns
+    for k, val in valores.items():
+        largo = getattr(cols[k].type, "length", None) if k in cols else None
+        if largo and isinstance(val, str) and len(val) > largo:
+            return k
+    return None
+
+
+class _ResumenImport:
+    """Cuenta filas omitidas por motivo y guarda un detalle acotado."""
+    def __init__(self):
+        from collections import Counter
+        self.motivos = Counter()
+        self.detalle: list[str] = []
+        self.filas_datos = 0
+
+    @property
+    def omitidas(self) -> int:
+        return sum(self.motivos.values())
+
+    def omitir(self, num_fila: int, motivo: str, extra: str = ""):
+        self.motivos[motivo] += 1
+        if len(self.detalle) < 10:
+            self.detalle.append(f"Fila {num_fila}: {motivo}" + (f" ({extra})" if extra else ""))
+
+    def exigir_datos(self):
+        if self.filas_datos == 0:
+            raise HTTPException(status_code=400, detail="El Excel no tiene filas de datos.")
+
+    def texto_motivos(self) -> str:
+        return ", ".join(f"{m}: {n}" for m, n in self.motivos.most_common())
+
+    def respuesta(self) -> dict:
+        lineas = list(self.detalle)
+        if self.omitidas:
+            lineas.insert(0, f"{self.omitidas} fila(s) omitida(s). Motivos: {self.texto_motivos()}")
+        return {"errores": self.omitidas, "omitidas_por_motivo": dict(self.motivos),
+                "detalle_errores": lineas}
+
+
+def _err_corto(e: Exception) -> str:
+    """Primer renglón del error de BD, acotado (sin volcar SQL al panel)."""
+    texto = str(getattr(e, "orig", None) or e) or type(e).__name__
+    return texto.splitlines()[0][:120]
+
+
+async def _importar_padron_simple(db: AsyncSession, contenido: bytes, modelo, campos: dict) -> dict:
+    """Upsert por DNI de un padrón simple (personal, egresados, docentes,
+    autoridades). campos = {atributo: (encabezados aceptados en minúsculas)}.
+    En una actualización se sobrescriben todos los campos (como antes)."""
+    ws = _excel_abrir(contenido)
+    hdrs = [h.lower() for h in _excel_encabezados(ws)]
+
+    def col(opts):
+        for o in opts:
+            if o in hdrs:
+                return hdrs.index(o)
+        return None
+
+    i_dni = col(("dni",))
+    if i_dni is None:
+        raise HTTPException(status_code=400, detail="Columna 'DNI' no encontrada")
+    idx = {attr: col(opts) for attr, opts in campos.items()}
+    r = _ResumenImport()
+    ins = act = 0
+    for num_fila, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if _excel_fila_vacia(fila):
+            continue
+        r.filas_datos += 1
+        dni = _excel_dni(_excel_celda(fila, i_dni))
+        if not _dni_valido(dni):
+            r.omitir(num_fila, "DNI inválido", dni[:20])
+            continue
+        valores = {attr: (_excel_txt(_excel_celda(fila, i)) or None) for attr, i in idx.items()}
+        if not valores.get("nombre"):
+            r.omitir(num_fila, "sin nombre")
+            continue
+        largo = _excel_largo_excedido(modelo, valores)
+        if largo:
+            r.omitir(num_fila, "texto demasiado largo", largo)
+            continue
+        try:
+            async with db.begin_nested():
+                ex = (await db.execute(select(modelo).where(modelo.dni == dni))).scalar_one_or_none()
+                if ex:
+                    for k, val in valores.items():
+                        setattr(ex, k, val)
+                else:
+                    db.add(modelo(dni=dni, **valores))
+        except Exception as e:
+            r.omitir(num_fila, "error al guardar", _err_corto(e))
+            continue
+        if ex:
+            act += 1
+        else:
+            ins += 1
+    r.exigir_datos()
+    return {"insertados": ins, "actualizados": act, "_r": r}
+
+
+def _respuesta_padron(res: dict) -> dict:
+    r = res.pop("_r")
+    msg = f"{res['insertados']} nuevo(s), {res['actualizados']} actualizado(s), {r.omitidas} ignorado(s)"
+    if r.omitidas:
+        msg += f" ({r.texto_motivos()})"
+    return {"mensaje": msg, **res, **r.respuesta()}
+
+
 # E-7: hash bcrypt "señuelo" para igualar el tiempo de respuesta cuando el
 # usuario NO existe. Sin esto, "usuario inexistente" responde al instante y
 # "contraseña incorrecta" tarda ~300ms (bcrypt), lo que permite enumerar
@@ -130,9 +339,6 @@ _HASH_SENUELO = hashear_password("timing-attack-mitigation-dummy")
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-
-class AlumnoAuth(BaseModel):
-    codigo: str
 
 class TerminalRegistro(BaseModel):
     nombre: str
@@ -234,45 +440,9 @@ async def registrar_usuario(
 
 # ── Alumnos ─────────────────────────────────────────────────────────
 
-@router.post("/alumnos/validar")
-async def validar_alumno(request: Request, datos: AlumnoAuth, db: AsyncSession = Depends(get_db)):
-    """Validar código/DNI de alumno para desbloquear terminal."""
-    # E-6: límite por IP para frenar enumeración masiva de DNIs desde la LAN.
-    # 30/min por IP es de sobra para el uso real del kiosco (un login por vez).
-    rate_limit.exigir(request, "kiosco", limite=30, ventana_seg=60)
-    result = await db.execute(select(AlumnoMaestro).where(
-        (AlumnoMaestro.codigo == datos.codigo) | (AlumnoMaestro.dni == datos.codigo)
-    ))
-    alumno = result.scalars().first()  # puede haber varias filas
-    if not alumno:
-        raise HTTPException(status_code=404, detail="Alumno no encontrado")
-    # Vigencia: si la credencial venció, no se permite el ingreso hasta renovar.
-    # Prioriza la caducidad real del carnet; si no hay, usa alta + vigencia.
-    meses = await _vigencia_meses(db)
-    if _vencido_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, meses):
-        raise HTTPException(
-            status_code=403,
-            detail="Credencial vencida. Acércate al encargado para renovar tu acceso.",
-        )
-    return {
-        "valido": True,
-        "codigo": alumno.codigo,
-        "nombre": alumno.nombre,
-        "escuela": alumno.escuela,
-    }
-
-
-@router.get("/alumnos")
-async def listar_alumnos(
-    db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual)
-):
-    """Listar alumnos del maestro."""
-    result = await db.execute(select(AlumnoMaestro).order_by(AlumnoMaestro.nombre))
-    return [
-        {"dni": a.dni, "codigo": a.codigo, "nombre": a.nombre, "escuela": a.escuela}
-        for a in result.scalars().all()
-    ]
+# POST /alumnos/validar y GET /alumnos se eliminaron: ni el kiosco (valida por
+# WebSocket) ni el panel los usaban, y exponían el padrón completo / permitían
+# enumerar DNIs. El kiosco y el panel usan /maestro y el WS.
 
 
 @router.get("/alumnos/exportar")
@@ -441,9 +611,20 @@ async def iniciar_sesion(
     alumno_codigo: str,
     terminal_ip: str,
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual),   # F-4: exigir auth (antes era público)
+    admin: Usuario = Depends(obtener_usuario_actual),   # F-4: exigir auth (antes era público)
 ):
-    """Iniciar sesión de uso en una terminal."""
+    """Iniciar sesión de uso en una terminal (alta manual).
+
+    Ni el panel ni el kiosco usan este endpoint (el kiosco abre sesiones por
+    WebSocket), así que queda como herramienta de soporte solo-superadmin y
+    con las mismas defensas que el login real: ban vigente, credencial
+    vencida y PC con sesión ya abierta."""
+    if admin.rol != "superadmin":
+        raise HTTPException(status_code=403, detail="Solo el superadmin puede iniciar sesiones manualmente")
+    alumno_codigo = (alumno_codigo or "").strip()[:20]
+    terminal_ip = (terminal_ip or "").strip()[:45]
+    if not alumno_codigo or not terminal_ip:
+        raise HTTPException(status_code=422, detail="Indique el alumno y la IP de la terminal")
     res_alumno = await db.execute(select(AlumnoMaestro).where(
         (AlumnoMaestro.codigo == alumno_codigo) | (AlumnoMaestro.dni == alumno_codigo)
     ))
@@ -451,7 +632,7 @@ async def iniciar_sesion(
     if not alumno:
         raise HTTPException(status_code=403, detail="Alumno no encontrado")
     # Defensa en profundidad: bloquear también acá el inicio de sesión de un
-    # alumno con credencial vencida (no solo en /alumnos/validar).
+    # alumno con credencial vencida (no solo en el login por WebSocket).
     meses = await _vigencia_meses(db)
     if _vencido_efectivo(alumno.fecha_alta, alumno.fecha_caducidad, meses):
         raise HTTPException(status_code=403, detail="Credencial vencida. Renovar acceso con el encargado.")
@@ -460,12 +641,17 @@ async def iniciar_sesion(
     terminal = res_terminal.scalars().first()  # puede haber varias filas
     if not terminal:
         raise HTTPException(status_code=404, detail="Terminal no registrada")
+    if await _ban_activo(db, alumno.dni):
+        raise HTTPException(status_code=403, detail="El alumno tiene un ban vigente")
+    if await _sesion_activa_de_terminal(db, terminal.id):
+        raise HTTPException(status_code=409, detail="La terminal ya tiene una sesión activa")
 
     sesion = Sesion(
         dni_alumno=alumno.dni,
         id_terminal=terminal.id,
         hora_entrada=datetime.now(),
         fecha_uso=datetime.now().date(),
+        id_sede=terminal.id_sede,
     )
     terminal.estado = "activo"
     db.add(sesion)
@@ -494,10 +680,13 @@ async def iniciar_sesion(
             nombre_alumno=alumno.nombre,
             tipo="cambio_pc_rapido",
             detalle=detalle,
+            id_sede=terminal.id_sede,
         )
         db.add(sospecha)
         await db.flush()
-        await manager.broadcast({
+        # Solo a los paneles: antes iba por broadcast a TODOS los kioscos con
+        # nombre y DNI del alumno (fuga de datos personales en cada PC).
+        await manager._broadcast_admins({
             "tipo": "sospecha",
             "nivel": "alerta",
             "mensaje": f"SOSPECHA - {alumno.nombre} (DNI {alumno.dni}): cambió de PC "
@@ -505,6 +694,8 @@ async def iniciar_sesion(
             "sospecha_id": sospecha.id,
         })
 
+    await registrar_auditoria(admin.username, "iniciar_sesion_manual", rol=admin.rol,
+                              objetivo=f"DNI {alumno.dni} en {terminal.nombre_red}", db=db)
     await db.commit()
     return {"sesion_id": sesion.id, "mensaje": "Sesión iniciada", "alumno": alumno.nombre}
 
@@ -514,7 +705,7 @@ async def cerrar_sesion(
     sesion_id: int,
     motivo: str = "manual",
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual),   # F-4: exigir auth (el panel ya manda el token)
+    usuario: Usuario = Depends(obtener_usuario_actual),   # F-4: exigir auth (el panel ya manda el token)
 ):
     """Cerrar una sesión activa usando exclusivamente el reloj del servidor.
 
@@ -523,10 +714,18 @@ async def cerrar_sesion(
     éxito en vez de 404 — el objetivo (sesión cerrada) ya se cumplió. Solo es
     404 si la sesión nunca existió.
     """
+    if usuario.rol not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+    # motivo_cierre es VARCHAR(50): acotar evita un 500 por texto largo.
+    motivo = (motivo or "manual").strip()[:50] or "manual"
     result = await db.execute(select(Sesion).where(Sesion.id == sesion_id))
     sesion = result.scalar_one_or_none()
     if not sesion:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    # Un encargado con sede fija no cierra sesiones de otra sede.
+    mi_sede = _sede_usuario(usuario)
+    if mi_sede and sesion.id_sede != mi_sede:
+        raise HTTPException(status_code=403, detail="La sesión pertenece a otra sede")
 
     # Ya cerrada por otra vía (desconexión, fantasma, logout) — nada que hacer.
     if sesion.estado != "activa":
@@ -948,9 +1147,12 @@ def _entero_en_rango(valor: str, nombre: str, minimo: int, maximo: int) -> int:
 def _fecha_iso(valor: str, nombre: str):
     from datetime import datetime as _dt
     try:
-        return _dt.strptime(str(valor).strip(), "%Y-%m-%d").date()
+        d = _dt.strptime(str(valor).strip(), "%Y-%m-%d").date()
     except (TypeError, ValueError):
         raise _error_filtro(f"La {nombre} '{valor}' no es válida (formato AAAA-MM-DD)")
+    if not (2000 <= d.year <= 2100):
+        raise _error_filtro(f"La {nombre} '{valor}' está fuera de rango (2000-2100)")
+    return d
 
 
 def _aplicar_filtro_fecha(q, periodo: str | None, fecha_inicio: str | None, fecha_fin: str | None,
@@ -1068,8 +1270,8 @@ async def sesiones_activas(
     fecha_fin:    str | None = None,
     mes:          str | None = None,
     anio:         str | None = None,
-    limit:        int = 30,
-    offset:       int = 0,
+    limit:        int = Query(30, ge=1, le=500),
+    offset:       int = Query(0, ge=0),
 ):
     """Historial con filtros de búsqueda, actividad, estado, fecha y ordenamiento."""
     q = _query_historial(
@@ -1173,7 +1375,7 @@ async def backup_sql(
 
     # Parsear credenciales desde DATABASE_URL
     db_url = os.getenv("DATABASE_URL", "")
-    m = re.match(r"mysql\+asyncmy://([^:]+):([^@]+)@([^:/]+):?(\d+)?/(.+)", db_url)
+    m = re.match(r"mysql\+(?:asyncmy|aiomysql)://([^:]+):([^@]+)@([^:/]+):?(\d+)?/([^?]+)", db_url)
     if not m:
         raise HTTPException(status_code=500, detail="No se pudo leer la configuración de BD")
 
@@ -1246,18 +1448,33 @@ async def backup_sql(
 
 # ── Sospechas ────────────────────────────────────────────────────────
 
+async def _sospecha_de_mi_sede(db: AsyncSession, sospecha_id: int, usuario: Usuario) -> Sospecha:
+    """Sospecha por id, verificando rol de panel y sede (404 / 403)."""
+    if usuario.rol not in ("superadmin", "admin"):
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+    sospecha = (await db.execute(select(Sospecha).where(Sospecha.id == sospecha_id))).scalar_one_or_none()
+    if not sospecha:
+        raise HTTPException(status_code=404, detail="Sospecha no encontrada")
+    mi_sede = _sede_usuario(usuario)
+    if mi_sede and sospecha.id_sede != mi_sede:
+        raise HTTPException(status_code=403, detail="La sospecha pertenece a otra sede")
+    return sospecha
+
 @router.get("/admin/sospechas")
 async def listar_sospechas(
     estado: str | None = None,   # pendiente | aprobada | descartada
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual),
+    usuario: Usuario = Depends(obtener_usuario_actual),
 ):
     from sqlalchemy import func as _func
     q = select(Sospecha).order_by(Sospecha.fecha.desc())
     if estado:
         q = q.where(Sospecha.estado == estado)
+    mi_sede = _sede_usuario(usuario)
+    if mi_sede:
+        q = q.where(Sospecha.id_sede == mi_sede)
     limit = min(max(limit, 1), 200)   # G-13: tope de seguridad
     total = (await db.execute(select(_func.count()).select_from(q.subquery()))).scalar()
     rows  = (await db.execute(q.offset(offset).limit(limit))).scalars().all()
@@ -1287,10 +1504,7 @@ async def aprobar_sospecha(
     admin: Usuario = Depends(obtener_usuario_actual),
 ):
     """Convierte la sospecha en incidencia leve y la marca como aprobada."""
-    res = await db.execute(select(Sospecha).where(Sospecha.id == sospecha_id))
-    sospecha = res.scalar_one_or_none()
-    if not sospecha:
-        raise HTTPException(status_code=404, detail="Sospecha no encontrada")
+    sospecha = await _sospecha_de_mi_sede(db, sospecha_id, admin)
     if sospecha.estado != "pendiente":
         raise HTTPException(status_code=409, detail="La sospecha ya fue revisada")
 
@@ -1300,7 +1514,8 @@ async def aprobar_sospecha(
         tipo="leve",
         motivo=_TIPO_LABEL.get(sospecha.tipo, sospecha.tipo),
         descripcion=sospecha.detalle,
-        registrado_por=f"sistema (aprobado por {admin.username})",
+        registrado_por=f"sistema (aprobado por {admin.username})"[:50],
+        id_sede=sospecha.id_sede,
     )
     db.add(inc)
 
@@ -1320,10 +1535,7 @@ async def descartar_sospecha(
     db: AsyncSession = Depends(get_db),
     admin: Usuario = Depends(obtener_usuario_actual),
 ):
-    res = await db.execute(select(Sospecha).where(Sospecha.id == sospecha_id))
-    sospecha = res.scalar_one_or_none()
-    if not sospecha:
-        raise HTTPException(status_code=404, detail="Sospecha no encontrada")
+    sospecha = await _sospecha_de_mi_sede(db, sospecha_id, admin)
     if sospecha.estado != "pendiente":
         raise HTTPException(status_code=409, detail="La sospecha ya fue revisada")
 
@@ -1345,6 +1557,25 @@ _TIPO_LABEL = {
 
 # ── Actividad Logs ───────────────────────────────────────────────────
 
+def _actividad_de_sede(q, id_sede: int | None):
+    """Limita una consulta de ActividadLog a las PCs de una sede (None = todas).
+    El log no guarda la sede: se resuelve por la sede actual de su terminal."""
+    if id_sede:
+        q = q.where(ActividadLog.id_terminal.in_(
+            select(Terminal.id).where(Terminal.id_sede == id_sede)))
+    return q
+
+
+def _fecha_iso_valida(valor: str, campo: str = "fecha") -> date:
+    """YYYY-MM-DD dentro de 2000..2100; si no, 422 (antes se ignoraba en silencio)."""
+    try:
+        d = date.fromisoformat((valor or "").strip())
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"'{campo}' inválida (use AAAA-MM-DD)")
+    if not (2000 <= d.year <= 2100):
+        raise HTTPException(status_code=422, detail=f"'{campo}' fuera de rango (2000-2100)")
+    return d
+
 @router.get("/admin/actividad")
 async def listar_actividad(
     dni:      str | None = None,
@@ -1352,13 +1583,14 @@ async def listar_actividad(
     nivel:    str | None = None,   # normal | sospechoso
     fecha:    str | None = None,   # YYYY-MM-DD
     incluir_ignorados: bool = False,  # True = mostrar también procesos ocultados
-    limit:    int = 200,
-    offset:   int = 0,
+    limit:    int = Query(200, ge=1, le=500),
+    offset:   int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual),
+    usuario: Usuario = Depends(obtener_usuario_actual),
 ):
     from sqlalchemy import func as _func
     q = select(ActividadLog).order_by(ActividadLog.fecha_hora.desc())
+    q = _actividad_de_sede(q, _sede_usuario(usuario))
     if dni:
         q = q.where(ActividadLog.dni_alumno == dni)
     if terminal:
@@ -1382,14 +1614,11 @@ async def listar_actividad(
             )
         )
     if fecha:
-        try:
-            d = date.fromisoformat(fecha)
-            # BUG-5: usar < inicio del día siguiente para incluir el día completo
-            # (antes < 23:59:59 dejaba fuera el último segundo del día).
-            q = q.where(ActividadLog.fecha_hora >= datetime(d.year, d.month, d.day))
-            q = q.where(ActividadLog.fecha_hora <  datetime(d.year, d.month, d.day) + timedelta(days=1))
-        except ValueError:
-            pass
+        d = _fecha_iso_valida(fecha)
+        # BUG-5: usar < inicio del día siguiente para incluir el día completo
+        # (antes < 23:59:59 dejaba fuera el último segundo del día).
+        q = q.where(ActividadLog.fecha_hora >= datetime(d.year, d.month, d.day))
+        q = q.where(ActividadLog.fecha_hora <  datetime(d.year, d.month, d.day) + timedelta(days=1))
 
     limit = min(max(limit, 1), 200)   # G-13: tope de seguridad
     total = (await db.execute(select(_func.count()).select_from(q.subquery()))).scalar()
@@ -1419,20 +1648,21 @@ async def listar_actividad(
 @router.get("/admin/actividad/resumen-hoy")
 async def resumen_actividad_hoy(
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual),
+    usuario: Usuario = Depends(obtener_usuario_actual),
 ):
     """Conteo de eventos sospechosos del día para el badge del menú."""
     from sqlalchemy import func as _func
     hoy = date.today()
     desde = datetime(hoy.year, hoy.month, hoy.day, 0, 0, 0)
-    total_sosp = (await db.execute(
-        select(_func.count()).where(
+    mi_sede = _sede_usuario(usuario)
+    total_sosp = (await db.execute(_actividad_de_sede(
+        select(_func.count(ActividadLog.id)).where(
             ActividadLog.nivel == "sospechoso",
             ActividadLog.fecha_hora >= desde,
-        )
+        ), mi_sede)
     )).scalar()
-    total_hoy = (await db.execute(
-        select(_func.count()).where(ActividadLog.fecha_hora >= desde)
+    total_hoy = (await db.execute(_actividad_de_sede(
+        select(_func.count(ActividadLog.id)).where(ActividadLog.fecha_hora >= desde), mi_sede)
     )).scalar()
     return {"sospechosos_hoy": total_sosp, "total_hoy": total_hoy}
 
@@ -1440,7 +1670,7 @@ async def resumen_actividad_hoy(
 @router.get("/admin/actividad/resumen-por-pc")
 async def resumen_actividad_por_pc(
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual),
+    usuario: Usuario = Depends(obtener_usuario_actual),
 ):
     """Resumen de actividad del día agrupado por PC, para las tarjetas del panel."""
     from sqlalchemy import func as _func, case
@@ -1461,6 +1691,7 @@ async def resumen_actividad_por_pc(
         .group_by(ActividadLog.nombre_terminal, ActividadLog.id_terminal)
         .order_by(_func.max(ActividadLog.fecha_hora).desc())
     )
+    q = _actividad_de_sede(q, _sede_usuario(usuario))
     rows = (await db.execute(q)).all()
     return {
         "items": [
@@ -1733,7 +1964,7 @@ async def eliminar_banco_ruido(
 
 @router.get("/admin/banco/pendientes")
 async def listar_pendientes_banco(
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     _: Usuario = Depends(obtener_usuario_actual),
 ):
@@ -2189,21 +2420,31 @@ async def exportar_pdf(
 @router.get("/dashboard/stats")
 async def dashboard_stats(
     db: AsyncSession = Depends(get_db),
-    _: Usuario = Depends(obtener_usuario_actual)
+    usuario: Usuario = Depends(obtener_usuario_actual)
 ):
-    """Estadísticas para el panel de administración."""
+    """Estadísticas para el panel de administración.
+
+    Un encargado con sede fija ve solo su sede. La terminal virtual
+    'IMPORTADO' (historial importado desde Excel) no es una PC real: no cuenta.
+    'terminales_en_linea' = toda PC que no está offline (en uso o libre)."""
     from sqlalchemy import func
+    mi_sede = _sede_usuario(usuario)
 
-    # Total terminales y estados
-    terminales = await db.execute(select(func.count(Terminal.id)))
-    total_terminales = terminales.scalar()
+    def _term(q):
+        q = q.where(Terminal.nombre_red != "IMPORTADO")
+        return q.where(Terminal.id_sede == mi_sede) if mi_sede else q
 
-    activas_q = await db.execute(select(func.count(Terminal.id)).where(Terminal.estado == "activo"))
-    terminales_activas = activas_q.scalar()
+    total_terminales = (await db.execute(_term(select(func.count(Terminal.id))))).scalar() or 0
+    terminales_activas = (await db.execute(
+        _term(select(func.count(Terminal.id)).where(Terminal.estado == "activo")))).scalar() or 0
+    terminales_en_linea = (await db.execute(
+        _term(select(func.count(Terminal.id)).where(Terminal.estado != "offline")))).scalar() or 0
 
     # Sesiones activas
-    sesiones_q = await db.execute(select(func.count(Sesion.id)).where(Sesion.estado == "activa"))
-    sesiones_activas_count = sesiones_q.scalar()
+    q_ses = select(func.count(Sesion.id)).where(Sesion.estado == "activa")
+    if mi_sede:
+        q_ses = q_ses.where(Sesion.id_sede == mi_sede)
+    sesiones_activas_count = (await db.execute(q_ses)).scalar() or 0
 
     # Total alumnos
     alumnos_q = await db.execute(select(func.count(AlumnoMaestro.dni)))
@@ -2212,6 +2453,7 @@ async def dashboard_stats(
     return {
         "total_terminales": total_terminales,
         "terminales_activas": terminales_activas,
+        "terminales_en_linea": terminales_en_linea,
         "sesiones_activas": sesiones_activas_count,
         "total_alumnos": total_alumnos
     }
@@ -2288,10 +2530,13 @@ async def importar_excel_upload(
     db: AsyncSession = Depends(get_db),
     admin: Usuario = Depends(obtener_usuario_actual)
 ):
-    """Importa historial de sesiones desde un Excel con el formato de exportación estándar."""
+    """Importa historial de sesiones desde un Excel con el formato de exportación estándar.
+
+    Cada fila va en su propio SAVEPOINT (una fila mala no tumba la importación)
+    y se deduplica por (DNI, hora de entrada): reimportar el mismo archivo no
+    duplica el historial."""
     from main import logger
-    import io
-    import openpyxl
+    from datetime import time as _time
 
     if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
@@ -2299,35 +2544,10 @@ async def importar_excel_upload(
     logger.info(f"[ADMIN] '{admin.username}' inició importación de Excel")
 
     contenido = await _leer_upload_limitado(archivo)  # E-10: límite de tamaño
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
-        ws = wb.active
-    except Exception as e:
-        from main import logger
-        logger.warning(f"[IMPORT-EXCEL] Archivo inválido: {e}")
-        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
-
-    # ── Obtener o crear terminal virtual para sesiones importadas ──
-    # Se hace commit inmediato para que no se pierda si hay rollback en filas posteriores
-    try:
-        res_vt = await db.execute(select(Terminal).where(Terminal.nombre_red == "IMPORTADO"))
-        terminal_virtual = res_vt.scalar_one_or_none()
-        if not terminal_virtual:
-            terminal_virtual = Terminal(nombre_red="IMPORTADO", ip="0.0.0.0", estado="offline")
-            db.add(terminal_virtual)
-            await db.commit()  # commit inmediato, nunca habrá duplicate entry
-            # Re-fetch para tener id correcto en sesión fresca
-            res_vt2 = await db.execute(select(Terminal).where(Terminal.nombre_red == "IMPORTADO"))
-            terminal_virtual = res_vt2.scalar_one_or_none()
-        terminal_virtual_id = terminal_virtual.id
-    except Exception as e:
-        await db.rollback()
-        from main import logger
-        logger.error(f"[IMPORT-EXCEL] Error preparando terminal virtual: {e}")
-        raise HTTPException(status_code=500, detail="Error al preparar la importación. Revise los logs.")
+    ws = _excel_abrir(contenido)
 
     # ── Mapear encabezados (case-insensitive, sin espacios) ──
-    headers = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    headers = [h.lower() for h in _excel_encabezados(ws)]
 
     def col(variantes):
         for v in variantes:
@@ -2347,122 +2567,141 @@ async def importar_excel_upload(
         raise HTTPException(status_code=400, detail="No se encontró la columna 'DNI' en el Excel. Verifique el formato.")
 
     def cell(fila, idx):
-        return str(fila[idx]).strip() if idx is not None and idx < len(fila) and fila[idx] is not None else ""
+        return _excel_txt(_excel_celda(fila, idx))
 
-    def parse_dt(s):
+    def parse_hora(v):
+        """Hora de una celda: time/datetime nativos o texto. None si vacía;
+        ValueError si viene algo ilegible."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        if isinstance(v, datetime):
+            return v.time()
+        if isinstance(v, _time):
+            return v
+        txt = str(v).strip()
         for fmt in ("%H:%M:%S", "%H:%M", "%I:%M:%S %p", "%I:%M %p"):
             try:
-                return datetime.strptime(s, fmt)
-            except Exception:
+                return datetime.strptime(txt, fmt).time()
+            except ValueError:
                 pass
-        return None
+        raise ValueError(f"hora ilegible '{txt[:20]}'")
 
-    def parse_fecha(s):
-        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"):
-            try:
-                return datetime.strptime(s, fmt).date()
-            except Exception:
-                pass
-        return datetime.now().date()
+    # ── Obtener o crear la terminal virtual para sesiones importadas ──
+    # Commit inmediato: así existe aunque luego se omitan filas.
+    try:
+        terminal_virtual = (await db.execute(
+            select(Terminal).where(Terminal.nombre_red == "IMPORTADO"))).scalars().first()
+        if not terminal_virtual:
+            db.add(Terminal(nombre_red="IMPORTADO", ip="0.0.0.0", estado="offline"))
+            await db.commit()
+            terminal_virtual = (await db.execute(
+                select(Terminal).where(Terminal.nombre_red == "IMPORTADO"))).scalars().first()
+        terminal_virtual_id = terminal_virtual.id
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[IMPORT-EXCEL] Error preparando terminal virtual: {e}")
+        raise HTTPException(status_code=500, detail="Error al preparar la importación. Revise los logs.")
 
     insertadas = 0
-    errores    = 0
-    errores_detalle = []
+    r = _ResumenImport()
+    vistos: set[tuple[str, datetime]] = set()   # dedup dentro del mismo archivo
 
     for num_fila, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        # Saltar filas completamente vacías
-        if all(v is None for v in fila):
+        if _excel_fila_vacia(fila):
             continue
+        r.filas_datos += 1
+
+        dni_limpio = _excel_dni(_excel_celda(fila, idx_dni))
+        if not _dni_valido(dni_limpio):
+            r.omitir(num_fila, "DNI inválido", dni_limpio[:20])
+            continue
+        codigo     = cell(fila, idx_codigo)[:30]
+        estudiante = cell(fila, idx_estudiante)[:200]
+        actividad  = cell(fila, idx_actividad)[:200]
+
+        # Fecha obligatoria y legible: nunca se asume "hoy".
         try:
-            dni        = cell(fila, idx_dni)
-            codigo     = cell(fila, idx_codigo)
-            estudiante = cell(fila, idx_estudiante)
-            actividad  = cell(fila, idx_actividad)
-            inicio_s   = cell(fila, idx_inicio)
-            salida_s   = cell(fila, idx_salida)
-            fecha_s    = cell(fila, idx_fecha)
-
-            # Validar DNI
-            dni_limpio = dni.replace(" ", "").replace("-", "")
-            if not dni_limpio.isdigit() or len(dni_limpio) != 8:
-                errores += 1
-                errores_detalle.append(f"Fila {num_fila}: DNI inválido '{dni}'")
+            v_inicio = _excel_celda(fila, idx_inicio)
+            fecha_dt = _excel_fecha(_excel_celda(fila, idx_fecha))
+            if fecha_dt is None and isinstance(v_inicio, datetime):
+                fecha_dt = v_inicio          # la celda de inicio trae fecha y hora
+            if fecha_dt is None:
+                r.omitir(num_fila, "sin fecha")
                 continue
+            if not (2000 <= fecha_dt.year <= 2100):
+                raise ValueError(f"fecha fuera de rango '{fecha_dt.date()}'")
+            hora_ini = parse_hora(v_inicio)
+            hora_sal = parse_hora(_excel_celda(fila, idx_salida))
+        except ValueError as e:
+            motivo = "hora ilegible" if "hora" in str(e) else "fecha ilegible"
+            r.omitir(num_fila, motivo, str(e))
+            continue
 
-            # Buscar alumno por DNI, luego por código
-            res_a = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni_limpio))
-            alumno = res_a.scalar_one_or_none()
+        fecha_obj = fecha_dt.date()
+        inicio_dt = datetime.combine(fecha_obj, hora_ini or _time(0, 0))
+        salida_dt = datetime.combine(fecha_obj, hora_sal) if hora_sal else None
 
-            if not alumno and codigo:
-                res_a2 = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.codigo == codigo))
-                alumno = res_a2.scalars().first()  # puede haber varias filas
+        clave = (dni_limpio, inicio_dt)
+        if clave in vistos:
+            r.omitir(num_fila, "duplicada en el archivo")
+            continue
 
-            if not alumno:
-                alumno = AlumnoMaestro(
-                    dni=dni_limpio,
-                    codigo=codigo or None,
-                    nombre=estudiante or "SIN NOMBRE",
-                )
-                db.add(alumno)
-                await db.flush()
+        try:
+            async with db.begin_nested():
+                ya = (await db.execute(
+                    select(Sesion.id).where(Sesion.dni_alumno == dni_limpio,
+                                            Sesion.hora_entrada == inicio_dt).limit(1)
+                )).scalar()
+                if ya:
+                    vistos.add(clave)
+                    r.omitir(num_fila, "ya existía en el historial")
+                    continue
 
-            fecha_obj  = parse_fecha(fecha_s)
-            inicio_obj = parse_dt(inicio_s)
-            salida_obj = parse_dt(salida_s)
+                alumno = (await db.execute(
+                    select(AlumnoMaestro).where(AlumnoMaestro.dni == dni_limpio))).scalar_one_or_none()
+                if not alumno and codigo:
+                    alumno = (await db.execute(
+                        select(AlumnoMaestro).where(AlumnoMaestro.codigo == codigo))).scalars().first()
+                if not alumno:
+                    alumno = AlumnoMaestro(dni=dni_limpio, codigo=codigo or None,
+                                           nombre=estudiante or "SIN NOMBRE")
+                    db.add(alumno)
+                    await db.flush()
 
-            inicio_dt = datetime.combine(fecha_obj, inicio_obj.time()) if inicio_obj else datetime.combine(fecha_obj, datetime.min.time())
-            salida_dt = datetime.combine(fecha_obj, salida_obj.time()) if salida_obj else None
-
-            sesion = Sesion(
-                dni_alumno=alumno.dni,
-                id_terminal=terminal_virtual_id,
-                hora_entrada=inicio_dt,
-                hora_salida=salida_dt,
-                estado="cerrada",
-                motivo_cierre="importacion_excel",
-                razon_uso=actividad or None,
-                fecha_uso=fecha_obj,
-            )
-            db.add(sesion)
-            insertadas += 1
-
+                db.add(Sesion(
+                    dni_alumno=alumno.dni,
+                    id_terminal=terminal_virtual_id,
+                    hora_entrada=inicio_dt,
+                    hora_salida=salida_dt,
+                    estado="cerrada",
+                    motivo_cierre="importacion_excel",
+                    razon_uso=actividad or None,
+                    fecha_uso=fecha_obj,
+                ))
         except Exception as ex:
-            # Rollback solo la fila problemática; el terminal_virtual ya está commiteado
-            try:
-                await db.rollback()
-            except Exception:
-                pass
             logger.warning(f"[IMPORT] Error en fila {num_fila}: {ex}")
-            errores += 1
-            errores_detalle.append(f"Fila {num_fila}: {ex}")
-            # terminal_virtual_id ya existe en DB (commiteado antes), solo re-verificamos
-            try:
-                res_vt2 = await db.execute(select(Terminal).where(Terminal.nombre_red == "IMPORTADO"))
-                tv2 = res_vt2.scalar_one_or_none()
-                if tv2:
-                    terminal_virtual_id = tv2.id
-            except Exception:
-                pass
+            r.omitir(num_fila, "error al guardar", _err_corto(ex))
+            continue
+        vistos.add(clave)
+        insertadas += 1
 
+    r.exigir_datos()
     try:
+        await registrar_auditoria(admin.username, "importar_historial", rol=admin.rol,
+                                  objetivo="historial de sesiones",
+                                  detalle=f"{insertadas} insertada(s), {r.omitidas} omitida(s)", db=db)
         await db.commit()
     except Exception as e:
         await db.rollback()
-        from main import logger
         logger.error(f"[IMPORT-EXCEL] Error al guardar en BD: {e}")
         raise HTTPException(status_code=500, detail="Error al guardar en la base de datos. Revise los logs.")
 
     msg = f"Importación completada: {insertadas} registro(s) insertado(s)"
-    if errores:
-        msg += f", {errores} fila(s) ignorada(s)"
+    if r.omitidas:
+        msg += f", {r.omitidas} fila(s) omitida(s) ({r.texto_motivos()})"
     logger.info(f"[ADMIN] {msg}")
     await manager.notificar_evento(f"{msg}", "warning")
-    return {
-        "mensaje": msg,
-        "insertadas": insertadas,
-        "errores": errores,
-        "detalle_errores": errores_detalle[:10]  # máx 10 para no saturar la respuesta
-    }
+    return {"mensaje": msg, "insertadas": insertadas, **r.respuesta()}
 
 
 @router.post("/admin/importar-maestro")
@@ -2473,20 +2712,12 @@ async def importar_maestro(
 ):
     """Importación incremental del maestro de alumnos desde Excel. Upsert por DNI."""
     from main import logger
-    import io
-    import openpyxl
 
     if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
 
     contenido = await _leer_upload_limitado(archivo)  # E-10: límite de tamaño
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
-        ws = wb.active
-    except Exception as e:
-        from main import logger
-        logger.warning(f"[IMPORT-EXCEL] Archivo inválido: {e}")
-        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
+    ws = _excel_abrir(contenido)
 
     import unicodedata
 
@@ -2495,7 +2726,7 @@ async def importar_maestro(
         s = s.lower().replace(".", "").strip()
         return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
 
-    raw_headers = [str(c.value).strip() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    raw_headers = _excel_encabezados(ws)
     headers_norm = [_norm(h) for h in raw_headers]
 
     def col(variantes):
@@ -2545,7 +2776,7 @@ async def importar_maestro(
         raise HTTPException(status_code=400, detail="Columna 'dni' no encontrada en el Excel.")
 
     def cell(fila, idx):
-        return str(fila[idx]).strip() if idx is not None and idx < len(fila) and fila[idx] is not None else ""
+        return _excel_txt(_excel_celda(fila, idx))
 
     def titulo(s: str) -> str:
         return s.title().strip() if s else ""
@@ -2597,102 +2828,99 @@ async def importar_maestro(
         _cache_esc[key] = esc.id
         return esc.id
 
-    insertados = actualizados = errores = 0
-    errores_detalle = []
+    insertados = actualizados = 0
+    r = _ResumenImport()
 
     for num_fila, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        if all(v is None for v in fila):
+        if _excel_fila_vacia(fila):
             continue
+        r.filas_datos += 1
+        dni = _excel_dni(_excel_celda(fila, idx_dni))
+        if not _dni_valido(dni):
+            r.omitir(num_fila, "DNI inválido", dni[:20])
+            continue
+
+        if _modo_nombre == "apellidos_nombres":
+            apellidos = titulo(cell(fila, idx_apellidos))
+            nombres_v = titulo(cell(fila, idx_nombres_p))
+            nombre = f"{apellidos} {nombres_v}".strip()
+        elif _modo_nombre == "partes":
+            paterno = titulo(cell(fila, idx_paterno))
+            materno = titulo(cell(fila, idx_materno) if idx_materno is not None else "")
+            nombres_v = titulo(cell(fila, idx_nombres_p))
+            apellidos = " ".join(p for p in [paterno, materno] if p)
+            nombre = f"{apellidos} {nombres_v}".strip()
+        else:
+            nombre = titulo(cell(fila, idx_nombre))
+        codigo        = cell(fila, idx_codigo) or None
+        nombre_fac    = limpiar_facultad(cell(fila, idx_facultad))
+        nombre_esc    = limpiar_escuela(cell(fila, idx_escuela)) or ""
+
+        # Fechas: date/datetime nativas o texto AAAA-MM-DD / DD/MM/AAAA.
+        # Presente pero ilegible -> la fila se rechaza (no se inventa una fecha).
         try:
-            dni = cell(fila, idx_dni).replace(" ", "").replace("-", "")
-            if not dni.isdigit() or len(dni) != 8:
-                errores += 1
-                errores_detalle.append(f"Fila {num_fila}: DNI inválido '{dni}'")
-                continue
+            fecha_alta  = _excel_fecha(_excel_celda(fila, idx_fecha_alta))
+            fecha_cad   = _excel_fecha(_excel_celda(fila, idx_fecha_cad))
+            fecha_renov = _excel_fecha(_excel_celda(fila, idx_fecha_renov))
+        except ValueError as e:
+            r.omitir(num_fila, "fecha ilegible", str(e))
+            continue
 
-            if _modo_nombre == "apellidos_nombres":
-                apellidos = titulo(cell(fila, idx_apellidos))
-                nombres_v = titulo(cell(fila, idx_nombres_p))
-                nombre = f"{apellidos} {nombres_v}".strip()
-            elif _modo_nombre == "partes":
-                paterno = titulo(cell(fila, idx_paterno))
-                materno = titulo(cell(fila, idx_materno) if idx_materno is not None else "")
-                nombres_v = titulo(cell(fila, idx_nombres_p))
-                apellidos = " ".join(p for p in [paterno, materno] if p)
-                nombre = f"{apellidos} {nombres_v}".strip()
-            else:
-                nombre = titulo(cell(fila, idx_nombre))
-            codigo        = cell(fila, idx_codigo) or None
-            nombre_fac    = limpiar_facultad(cell(fila, idx_facultad))
-            nombre_esc_raw = cell(fila, idx_escuela).strip()
-            nombre_esc     = limpiar_escuela(nombre_esc_raw) or ""
+        largo = _excel_largo_excedido(AlumnoMaestro, {"nombre": nombre, "codigo": codigo})
+        if largo:
+            r.omitir(num_fila, "texto demasiado largo", largo)
+            continue
 
-            # Fase 1: Facultad
-            id_fac = await _get_or_create_facultad(nombre_fac)
-            # Fase 2: Escuela — SOLO si pasó el filtro de limpieza
-            id_esc = await _get_or_create_escuela(nombre_esc, id_fac) if nombre_esc else None
+        try:
+            # SAVEPOINT por fila: si esta falla, se deshace solo ella.
+            async with db.begin_nested():
+                id_fac = await _get_or_create_facultad(nombre_fac)
+                id_esc = await _get_or_create_escuela(nombre_esc, id_fac) if nombre_esc else None
 
-            # Fase 3: Upsert AlumnoMaestro
-            res = await db.execute(select(AlumnoMaestro).where(AlumnoMaestro.dni == dni))
-            existente = res.scalar_one_or_none()
-
-            # Fechas: el Excel puede traer date, datetime o string
-            def _parse_fecha(val):
-                if val is None:
-                    return None
-                if isinstance(val, datetime):
-                    return val
-                if hasattr(val, 'year'):  # date
-                    return datetime(val.year, val.month, val.day)
-                try:
-                    return datetime.strptime(str(val).strip()[:10], "%Y-%m-%d")
-                except Exception:
-                    return None
-
-            fecha_alta  = _parse_fecha(fila[idx_fecha_alta]  if idx_fecha_alta  is not None and idx_fecha_alta  < len(fila) else None)
-            fecha_cad   = _parse_fecha(fila[idx_fecha_cad]   if idx_fecha_cad   is not None and idx_fecha_cad   < len(fila) else None)
-            fecha_renov = _parse_fecha(fila[idx_fecha_renov] if idx_fecha_renov is not None and idx_fecha_renov < len(fila) else None)
-
-            if existente:
-                if nombre:              existente.nombre      = nombre
-                if codigo:              existente.codigo      = codigo
-                if id_esc is not None:  existente.id_escuela  = id_esc
-                if id_fac is not None:  existente.id_facultad = id_fac
-                if fecha_alta:          existente.fecha_alta       = fecha_alta
-                if fecha_cad:           existente.fecha_caducidad  = fecha_cad
-                if fecha_renov:         existente.fecha_renovacion = fecha_renov
-                actualizados += 1
-            else:
-                db.add(AlumnoMaestro(
-                    dni=dni,
-                    nombre=nombre or "SIN NOMBRE",
-                    codigo=codigo or None,
-                    id_escuela=id_esc,
-                    id_facultad=id_fac,
-                    fecha_alta=fecha_alta,
-                    fecha_caducidad=fecha_cad,
-                    fecha_renovacion=fecha_renov,
-                ))
-                insertados += 1
-
-            # Flush cada 200 filas para liberar memoria sin hacer commit parcial
-            if (insertados + actualizados) % 200 == 0:
-                await db.flush()
-
+                existente = (await db.execute(
+                    select(AlumnoMaestro).where(AlumnoMaestro.dni == dni))).scalar_one_or_none()
+                if existente:
+                    if nombre:              existente.nombre      = nombre
+                    if codigo:              existente.codigo      = codigo
+                    if id_esc is not None:  existente.id_escuela  = id_esc
+                    if id_fac is not None:  existente.id_facultad = id_fac
+                    if fecha_alta:          existente.fecha_alta       = fecha_alta
+                    if fecha_cad:           existente.fecha_caducidad  = fecha_cad
+                    if fecha_renov:         existente.fecha_renovacion = fecha_renov
+                else:
+                    db.add(AlumnoMaestro(
+                        dni=dni,
+                        nombre=nombre or "SIN NOMBRE",
+                        codigo=codigo or None,
+                        id_escuela=id_esc,
+                        id_facultad=id_fac,
+                        fecha_alta=fecha_alta,
+                        fecha_caducidad=fecha_cad,
+                        fecha_renovacion=fecha_renov,
+                    ))
         except Exception as ex:
-            errores += 1
-            errores_detalle.append(f"Fila {num_fila}: {ex}")
+            # La facultad/escuela creada dentro del savepoint tambien se deshizo:
+            # vaciar los caches para no reutilizar ids inexistentes.
+            _cache_fac.clear()
+            _cache_esc.clear()
+            r.omitir(num_fila, "error al guardar", _err_corto(ex))
+            continue
+        if existente:
+            actualizados += 1
+        else:
+            insertados += 1
 
+    r.exigir_datos()
+    errores = r.omitidas
     await registrar_auditoria(admin.username, "importar_maestro", rol=admin.rol,
                               objetivo="padrón de alumnos",
                               detalle=f"{insertados} nuevo(s), {actualizados} actualizado(s), {errores} ignorada(s)", db=db)
     await db.commit()
     msg = f"Maestro importado: {insertados} alumno(s) nuevo(s), {actualizados} actualizado(s)"
     if errores:
-        msg += f", {errores} fila(s) ignorada(s)"
+        msg += f", {errores} fila(s) ignorada(s) ({r.texto_motivos()})"
     logger.info(f"[ADMIN] {msg}")
-    return {"mensaje": msg, "insertados": insertados, "actualizados": actualizados,
-            "errores": errores, "detalle_errores": errores_detalle[:10]}
+    return {"mensaje": msg, "insertados": insertados, "actualizados": actualizados, **r.respuesta()}
 
 
 @router.get("/admin/maestro")
@@ -2701,8 +2929,8 @@ async def listar_maestro(
     admin: Usuario = Depends(obtener_usuario_actual),
     search: str | None = None,
     solo_vencidos: bool = False,   # True = solo credenciales vencidas
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     """Lista paginada del maestro de alumnos con búsqueda opcional. Incluye el
     estado de vigencia (vencido + fecha de vencimiento) de cada credencial."""
@@ -2984,7 +3212,7 @@ async def reset_maestro(
 class BanCreate(BaseModel):
     dni: str
     motivo: str
-    dias: int = 7
+    dias: int = Field(7, ge=1, le=3650)   # 1 dia .. 10 años
 
 
 class PersonalCreate(BaseModel):
@@ -3113,8 +3341,8 @@ async def historial_bans(
     admin: Usuario = Depends(obtener_usuario_actual),
     dni: str | None = None,
     estado: str | None = None,   # activo | expirado | levantado
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     """Historial completo de bans (activos, expirados y levantados manualmente)."""
     if admin.rol != "superadmin":
@@ -3175,8 +3403,8 @@ async def listar_auditoria(
     accion: str | None = None,
     desde: str | None = None,    # ISO date "2026-06-01"
     hasta: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     """Bitácora de acciones administrativas (solo superadmin). Filtros: usuario,
     accion, rango de fechas; con paginación."""
@@ -3190,15 +3418,11 @@ async def listar_auditoria(
     if accion:
         q = q.where(Auditoria.accion == accion)
     if desde:
-        try:
-            q = q.where(Auditoria.fecha_hora >= datetime.fromisoformat(desde))
-        except ValueError:
-            pass
+        d = _fecha_iso_valida(desde, "desde")
+        q = q.where(Auditoria.fecha_hora >= datetime(d.year, d.month, d.day))
     if hasta:
-        try:
-            q = q.where(Auditoria.fecha_hora < datetime.fromisoformat(hasta) + timedelta(days=1))
-        except ValueError:
-            pass
+        d = _fecha_iso_valida(hasta, "hasta")
+        q = q.where(Auditoria.fecha_hora < datetime(d.year, d.month, d.day) + timedelta(days=1))
     total_res = await db.execute(select(_func.count()).select_from(q.subquery()))
     total = total_res.scalar_one()
     res = await db.execute(q.limit(limit).offset(offset))
@@ -3228,7 +3452,7 @@ async def check_ban(
     db: AsyncSession = Depends(get_db),
 ):
     """Verifica si un DNI tiene ban activo (usado por el WebSocket del kiosco)."""
-    # E-6: mismo límite por IP que /alumnos/validar (evita enumerar quién está baneado).
+    # E-6: límite por IP del kiosco (evita enumerar quién está baneado).
     rate_limit.exigir(request, "kiosco", limite=30, ventana_seg=60)
     ban = await _ban_activo(db, dni)
     if ban:
@@ -3241,8 +3465,8 @@ async def listar_personal(
     db: AsyncSession = Depends(get_db),
     admin: Usuario = Depends(obtener_usuario_actual),
     search: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     """Lista paginada del personal universitario."""
     if admin.rol != "superadmin":
@@ -3363,70 +3587,20 @@ async def importar_personal(
     """Importación masiva de personal desde Excel. Upsert por DNI."""
     if admin.rol != "superadmin":
         raise HTTPException(status_code=403, detail="No tiene permisos para esta acción")
-    import io, openpyxl
     contenido = await _leer_upload_limitado(archivo)  # E-10: límite de tamaño
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
-        ws = wb.active
-    except Exception as e:
-        from main import logger
-        logger.warning(f"[IMPORT-PERSONAL] Archivo inválido: {e}")
-        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
-
-    hdrs = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
-
-    def col(*opts):
-        for o in opts:
-            if o in hdrs: return hdrs.index(o)
-        return None
-
-    idx_dni      = col("dni")
-    idx_nombre   = col("nombre completo", "nombre", "apellidos y nombres", "apellidos nombres", "trabajador")
-    idx_cargo    = col("cargo", "puesto")
-    idx_area     = col("área", "area", "oficina", "dependencia")
-    idx_correo   = col("correo", "email", "correo electrónico", "correo electronico")
-    idx_telefono = col("teléfono", "telefono", "celular")
-
-    if idx_dni is None:
-        raise HTTPException(status_code=400, detail="Columna 'DNI' no encontrada")
-
-    def cell(fila, idx):
-        return str(fila[idx]).strip() if idx is not None and idx < len(fila) and fila[idx] is not None else ""
-
-    insertados = actualizados = errores = 0
-    for num_fila, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        if all(v is None for v in fila): continue
-        dni = cell(fila, idx_dni).replace(" ", "").replace("-", "")
-        if not dni.isdigit() or len(dni) != 8:
-            errores += 1; continue
-        nombre = cell(fila, idx_nombre)
-        if not nombre: errores += 1; continue
-        res = await db.execute(select(PersonalUniversidad).where(PersonalUniversidad.dni == dni))
-        existente = res.scalar_one_or_none()
-        if existente:
-            existente.nombre   = nombre
-            existente.cargo    = cell(fila, idx_cargo)    or None
-            existente.area     = cell(fila, idx_area)     or None
-            existente.correo   = cell(fila, idx_correo)   or None
-            existente.telefono = cell(fila, idx_telefono) or None
-            actualizados += 1
-        else:
-            db.add(PersonalUniversidad(
-                dni=dni, nombre=nombre,
-                cargo=cell(fila, idx_cargo) or None,
-                area=cell(fila, idx_area) or None,
-                correo=cell(fila, idx_correo) or None,
-                telefono=cell(fila, idx_telefono) or None,
-            ))
-            insertados += 1
-        if (insertados + actualizados) % 200 == 0:
-            await db.flush()
+    res = await _importar_padron_simple(db, contenido, PersonalUniversidad, {
+        "nombre":   ("nombre completo", "nombre", "apellidos y nombres", "apellidos nombres", "trabajador"),
+        "cargo":    ("cargo", "puesto"),
+        "area":     ("área", "area", "oficina", "dependencia"),
+        "correo":   ("correo", "email", "correo electrónico", "correo electronico"),
+        "telefono": ("teléfono", "telefono", "celular"),
+    })
+    r = res["_r"]
     await registrar_auditoria(admin.username, "importar_personal", rol=admin.rol,
                               objetivo="padrón de personal",
-                              detalle=f"{insertados} nuevo(s), {actualizados} actualizado(s), {errores} ignorado(s)", db=db)
+                              detalle=f"{res['insertados']} nuevo(s), {res['actualizados']} actualizado(s), {r.omitidas} ignorado(s)", db=db)
     await db.commit()
-    return {"mensaje": f"{insertados} nuevo(s), {actualizados} actualizado(s), {errores} ignorado(s)",
-            "insertados": insertados, "actualizados": actualizados, "errores": errores}
+    return _respuesta_padron(res)
 
 
 @router.get("/admin/personal/exportar")
@@ -3534,8 +3708,8 @@ async def listar_incidencias(
     admin: Usuario = Depends(obtener_usuario_actual),
     dni: str | None = None,
     solo_activas: bool = False,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     """Lista incidencias con filtro opcional por DNI y estado. Los encargados
     (rol admin) las ven porque son quienes las registran; si tienen una sede
@@ -3821,8 +3995,11 @@ KPI_DEFAULT_ACTIVOS = [
 ]
 
 
-async def _kpis_calcular(db: AsyncSession) -> dict:
-    """Calcula TODOS los KPIs del catálogo. Devuelve {clave: valor}."""
+async def _kpis_calcular(db: AsyncSession, id_sede: int | None = None) -> dict:
+    """Calcula TODOS los KPIs del catálogo. Devuelve {clave: valor}.
+
+    id_sede limita a una sede lo que tiene sede (equipos, sesiones, incidencias,
+    sospechas, actividad). El padrón, los bans y el personal son globales."""
     from sqlalchemy import func as _f, case as _case
     hoy = date.today()
     ini_dia = datetime(hoy.year, hoy.month, hoy.day)
@@ -3833,11 +4010,20 @@ async def _kpis_calcular(db: AsyncSession) -> dict:
     async def _scalar(q):
         return (await db.execute(q)).scalar() or 0
 
+    def _t(q):
+        # La terminal virtual 'IMPORTADO' (historial de Excel) no es una PC real.
+        q = q.where(Terminal.nombre_red != "IMPORTADO")
+        return q.where(Terminal.id_sede == id_sede) if id_sede else q
+
+    def _s(q):
+        return q.where(Sesion.id_sede == id_sede) if id_sede else q
+
     # Equipos
-    v["equipos_total"]      = await _scalar(select(_f.count(Terminal.id)))
-    v["equipos_online"]     = await _scalar(select(_f.count(Terminal.id)).where(Terminal.estado.in_(["activo", "bloqueado"])))
-    v["equipos_en_uso"]     = await _scalar(select(_f.count(Terminal.id)).where(Terminal.estado == "activo"))
-    v["equipos_bloqueados"] = await _scalar(select(_f.count(Terminal.id)).where(Terminal.estado == "bloqueado"))
+    v["equipos_total"]      = await _scalar(_t(select(_f.count(Terminal.id))))
+    # En línea = todo lo que no está offline (en uso o libre).
+    v["equipos_online"]     = await _scalar(_t(select(_f.count(Terminal.id)).where(Terminal.estado != "offline")))
+    v["equipos_en_uso"]     = await _scalar(_t(select(_f.count(Terminal.id)).where(Terminal.estado == "activo")))
+    v["equipos_bloqueados"] = await _scalar(_t(select(_f.count(Terminal.id)).where(Terminal.estado == "bloqueado")))
     tot = v["equipos_total"] or 0
     v["ocupacion_pct"]      = round((v["equipos_en_uso"] / tot) * 100) if tot else 0
 
@@ -3861,29 +4047,35 @@ async def _kpis_calcular(db: AsyncSession) -> dict:
             _and(AlumnoMaestro.fecha_caducidad.is_(None),
                  AlumnoMaestro.fecha_alta.isnot(None), AlumnoMaestro.fecha_alta < _corte_venc),
         )))
-    v["sesiones_activas"] = await _scalar(select(_f.count(Sesion.id)).where(Sesion.estado == "activa"))
-    v["atendidos_hoy"]   = await _scalar(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_dia))
-    v["atendidos_semana"] = await _scalar(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_semana))
-    v["atendidos_mes"]   = await _scalar(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_mes))
-    v["sesiones_hoy"]    = await _scalar(select(_f.count(Sesion.id)).where(Sesion.hora_entrada >= ini_dia))
+    v["sesiones_activas"] = await _scalar(_s(select(_f.count(Sesion.id)).where(Sesion.estado == "activa")))
+    v["atendidos_hoy"]   = await _scalar(_s(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_dia)))
+    v["atendidos_semana"] = await _scalar(_s(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_semana)))
+    v["atendidos_mes"]   = await _scalar(_s(select(_f.count(_f.distinct(Sesion.dni_alumno))).where(Sesion.hora_entrada >= ini_mes)))
+    v["sesiones_hoy"]    = await _scalar(_s(select(_f.count(Sesion.id)).where(Sesion.hora_entrada >= ini_dia)))
     # Duración promedio de sesiones cerradas hoy (en minutos). TIMESTAMPDIFF con
     # text() crudo: pasar la unidad MINUTE como argumento de func no es portable.
     from sqlalchemy import text as _text
     dur = (await db.execute(
         _text("SELECT AVG(TIMESTAMPDIFF(MINUTE, hora_entrada, hora_salida)) "
-              "FROM sesiones WHERE hora_entrada >= :ini AND hora_salida IS NOT NULL"),
-        {"ini": ini_dia}
+              "FROM sesiones WHERE hora_entrada >= :ini AND hora_salida IS NOT NULL"
+              + (" AND id_sede = :sede" if id_sede else "")),
+        {"ini": ini_dia, "sede": id_sede}
     )).scalar()
     v["duracion_prom_hoy"] = round(float(dur)) if dur else 0
 
     # Seguridad / disciplina
     v["bans_activos"]  = await _scalar(select(_f.count(Ban.id)).where((Ban.fecha_fin == None) | (Ban.fecha_fin > datetime.now())))
     v["bans_mes"]      = await _scalar(select(_f.count(Ban.id)).where(Ban.fecha_ini >= ini_mes))
-    v["incidencias_leves"]  = await _scalar(select(_f.count(Incidencia.id)).where(Incidencia.tipo == "leve", Incidencia.activa == True))
-    v["incidencias_graves"] = await _scalar(select(_f.count(Incidencia.id)).where(Incidencia.tipo == "grave", Incidencia.activa == True))
-    v["sospechas_pend"]   = await _scalar(select(_f.count(Sospecha.id)).where(Sospecha.estado == "pendiente"))
-    v["eventos_sosp_hoy"] = await _scalar(select(_f.count(ActividadLog.id)).where(ActividadLog.nivel == "sospechoso", ActividadLog.fecha_hora >= ini_dia))
-    v["eventos_hoy"]      = await _scalar(select(_f.count(ActividadLog.id)).where(ActividadLog.fecha_hora >= ini_dia))
+    def _i(q):
+        return q.where(Incidencia.id_sede == id_sede) if id_sede else q
+    v["incidencias_leves"]  = await _scalar(_i(select(_f.count(Incidencia.id)).where(Incidencia.tipo == "leve", Incidencia.activa == True)))
+    v["incidencias_graves"] = await _scalar(_i(select(_f.count(Incidencia.id)).where(Incidencia.tipo == "grave", Incidencia.activa == True)))
+    q_sosp = select(_f.count(Sospecha.id)).where(Sospecha.estado == "pendiente")
+    if id_sede:
+        q_sosp = q_sosp.where(Sospecha.id_sede == id_sede)
+    v["sospechas_pend"]   = await _scalar(q_sosp)
+    v["eventos_sosp_hoy"] = await _scalar(_actividad_de_sede(select(_f.count(ActividadLog.id)).where(ActividadLog.nivel == "sospechoso", ActividadLog.fecha_hora >= ini_dia), id_sede))
+    v["eventos_hoy"]      = await _scalar(_actividad_de_sede(select(_f.count(ActividadLog.id)).where(ActividadLog.fecha_hora >= ini_dia), id_sede))
 
     # Sensibles
     v["personal_total"] = await _scalar(select(_f.count(PersonalUniversidad.dni)))
@@ -3930,7 +4122,7 @@ async def listar_kpis(
     """Devuelve el catálogo completo + valores + config activa.
     Los KPIs sensibles solo se incluyen para superadmin."""
     es_super = usuario.rol == "superadmin"
-    valores = await _kpis_calcular(db)
+    valores = await _kpis_calcular(db, _sede_usuario(usuario))
     activos = await _kpis_leer_config(db)
 
     catalogo = []
@@ -4002,6 +4194,8 @@ def _kpi_rango_fechas(periodo: str, desde: str | None, hasta: str | None):
             d_fin = datetime.strptime(hasta, "%Y-%m-%d").date()
         except (ValueError, TypeError):
             raise HTTPException(status_code=422, detail="Fechas inválidas (use YYYY-MM-DD).")
+        if not (2000 <= d_ini.year <= 2100 and 2000 <= d_fin.year <= 2100):
+            raise HTTPException(status_code=422, detail="Fechas fuera de rango (2000-2100).")
         if d_fin < d_ini:
             raise HTTPException(status_code=422, detail="La fecha final no puede ser anterior a la inicial.")
         # Tope defensivo: máximo 366 días para no generar series enormes
@@ -4032,6 +4226,9 @@ async def grafico_atenciones(
         .where(Sesion.hora_entrada >= dt_ini, Sesion.hora_entrada < dt_fin)
         .group_by(_f.date(Sesion.hora_entrada))
     )
+    mi_sede = _sede_usuario(usuario)
+    if mi_sede:
+        q = q.where(Sesion.id_sede == mi_sede)
     filas = {str(r.dia): r.n for r in (await db.execute(q)).all()}
     # Construir serie continua día a día
     serie = []
@@ -4093,6 +4290,9 @@ async def grafico_facultades(
         .group_by(Facultad.nombre)
         .order_by(_f.count(Sesion.id).desc())
     )
+    mi_sede = _sede_usuario(usuario)
+    if mi_sede:
+        q = q.where(Sesion.id_sede == mi_sede)
     filas = (await db.execute(q)).all()
     return {"periodo": periodo, "items": [{"facultad": r.fac, "valor": int(r.n)} for r in filas]}
 
@@ -4145,6 +4345,7 @@ async def grafico_programas(
         .group_by(ActividadLog.proceso_exe)
         .order_by(_f.count(_f.distinct(ActividadLog.dni_alumno)).desc())
     )
+    q = _actividad_de_sede(q, _sede_usuario(usuario))
     filas = (await db.execute(q)).all()
 
     items = []
@@ -4209,6 +4410,7 @@ async def programas_ranking(
         .group_by(_func.lower(ActividadLog.proceso_exe))
         .order_by(_func.count(_func.distinct(ActividadLog.dni_alumno)).desc())
     )
+    q = _actividad_de_sede(q, _sede_usuario(usuario))
     rows = (await db.execute(q)).all()
 
     # Bancos: apps (con metadatos legibles) y exclusiones (ruido + ignorados).
@@ -4299,7 +4501,7 @@ def _val_dni_nombre(dni: str, nombre: str):
 @router.get("/admin/egresados")
 async def listar_egresados(
     db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual),
-    search: str | None = None, limit: int = 50, offset: int = 0,
+    search: str | None = None, limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
 ):
     _exige_super(admin)
     from sqlalchemy import or_, func
@@ -4352,39 +4554,18 @@ async def eliminar_egresado(dni: str, db: AsyncSession = Depends(get_db), admin:
 @router.post("/admin/egresados/importar")
 async def importar_egresados(archivo: UploadFile, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
     _exige_super(admin)
-    import io, openpyxl
     contenido = await _leer_upload_limitado(archivo)
-    try:
-        ws = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True).active
-    except Exception:
-        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
-    hdrs = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
-    def col(*opts):
-        for o in opts:
-            if o in hdrs: return hdrs.index(o)
-        return None
-    i_dni = col("dni"); i_nom = col("nombre completo", "nombre", "apellidos y nombres")
-    i_cod = col("código univ.", "codigo univ.", "código", "codigo"); i_esc = col("escuela")
-    i_anio = col("año egreso", "anio egreso", "año de egreso", "año");
-    if i_dni is None: raise HTTPException(status_code=400, detail="Columna 'DNI' no encontrada")
-    def cell(f, idx): return str(f[idx]).strip() if idx is not None and idx < len(f) and f[idx] is not None else ""
-    ins = act = err = 0
-    for fila in ws.iter_rows(min_row=2, values_only=True):
-        if all(v is None for v in fila): continue
-        dni = cell(fila, i_dni).replace(" ", "").replace("-", "")
-        if not dni.isdigit() or len(dni) != 8: err += 1; continue
-        nom = cell(fila, i_nom)
-        if not nom: err += 1; continue
-        ex = (await db.execute(select(Egresado).where(Egresado.dni == dni))).scalar_one_or_none()
-        if ex:
-            ex.nombre = nom; ex.codigo = cell(fila, i_cod) or None; ex.escuela = cell(fila, i_esc) or None; ex.anio_egreso = cell(fila, i_anio) or None
-            act += 1
-        else:
-            db.add(Egresado(dni=dni, nombre=nom, codigo=cell(fila, i_cod) or None, escuela=cell(fila, i_esc) or None, anio_egreso=cell(fila, i_anio) or None)); ins += 1
-        if (ins + act) % 200 == 0: await db.flush()
-    await registrar_auditoria(admin.username, "importar_egresados", rol=admin.rol, objetivo="padrón de egresados", detalle=f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", db=db)
+    res = await _importar_padron_simple(db, contenido, Egresado, {
+        "nombre":      ("nombre completo", "nombre", "apellidos y nombres"),
+        "codigo":      ("código univ.", "codigo univ.", "código", "codigo"),
+        "escuela":     ("escuela",),
+        "anio_egreso": ("año egreso", "anio egreso", "año de egreso", "año"),
+    })
+    r = res["_r"]
+    await registrar_auditoria(admin.username, "importar_egresados", rol=admin.rol, objetivo="padrón de egresados",
+                              detalle=f"{res['insertados']} nuevo(s), {res['actualizados']} actualizado(s), {r.omitidas} ignorado(s)", db=db)
     await db.commit()
-    return {"mensaje": f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", "insertados": ins, "actualizados": act, "errores": err}
+    return _respuesta_padron(res)
 
 @router.get("/admin/egresados/exportar")
 async def exportar_egresados(db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
@@ -4404,7 +4585,7 @@ async def exportar_egresados(db: AsyncSession = Depends(get_db), admin: Usuario 
 @router.get("/admin/docentes")
 async def listar_docentes(
     db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual),
-    search: str | None = None, limit: int = 50, offset: int = 0,
+    search: str | None = None, limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
 ):
     _exige_super(admin)
     from sqlalchemy import or_, func
@@ -4457,39 +4638,19 @@ async def eliminar_docente(dni: str, db: AsyncSession = Depends(get_db), admin: 
 @router.post("/admin/docentes/importar")
 async def importar_docentes(archivo: UploadFile, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
     _exige_super(admin)
-    import io, openpyxl
     contenido = await _leer_upload_limitado(archivo)
-    try:
-        ws = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True).active
-    except Exception:
-        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
-    hdrs = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
-    def col(*opts):
-        for o in opts:
-            if o in hdrs: return hdrs.index(o)
-        return None
-    i_dni = col("dni"); i_nom = col("nombre completo", "nombre", "apellidos y nombres")
-    i_fac = col("facultad"); i_esc = col("escuela"); i_cor = col("correo", "email"); i_tel = col("teléfono", "telefono", "celular")
-    if i_dni is None: raise HTTPException(status_code=400, detail="Columna 'DNI' no encontrada")
-    def cell(f, idx): return str(f[idx]).strip() if idx is not None and idx < len(f) and f[idx] is not None else ""
-    ins = act = err = 0
-    for fila in ws.iter_rows(min_row=2, values_only=True):
-        if all(v is None for v in fila): continue
-        dni = cell(fila, i_dni).replace(" ", "").replace("-", "")
-        if not dni.isdigit() or len(dni) != 8: err += 1; continue
-        nom = cell(fila, i_nom)
-        if not nom: err += 1; continue
-        ex = (await db.execute(select(Docente).where(Docente.dni == dni))).scalar_one_or_none()
-        if ex:
-            ex.nombre = nom; ex.facultad = cell(fila, i_fac) or None; ex.escuela = cell(fila, i_esc) or None
-            ex.correo = cell(fila, i_cor) or None; ex.telefono = cell(fila, i_tel) or None; act += 1
-        else:
-            db.add(Docente(dni=dni, nombre=nom, facultad=cell(fila, i_fac) or None, escuela=cell(fila, i_esc) or None,
-                           correo=cell(fila, i_cor) or None, telefono=cell(fila, i_tel) or None)); ins += 1
-        if (ins + act) % 200 == 0: await db.flush()
-    await registrar_auditoria(admin.username, "importar_docentes", rol=admin.rol, objetivo="padrón de docentes", detalle=f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", db=db)
+    res = await _importar_padron_simple(db, contenido, Docente, {
+        "nombre":   ("nombre completo", "nombre", "apellidos y nombres"),
+        "facultad": ("facultad",),
+        "escuela":  ("escuela",),
+        "correo":   ("correo", "email"),
+        "telefono": ("teléfono", "telefono", "celular"),
+    })
+    r = res["_r"]
+    await registrar_auditoria(admin.username, "importar_docentes", rol=admin.rol, objetivo="padrón de docentes",
+                              detalle=f"{res['insertados']} nuevo(s), {res['actualizados']} actualizado(s), {r.omitidas} ignorado(s)", db=db)
     await db.commit()
-    return {"mensaje": f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", "insertados": ins, "actualizados": act, "errores": err}
+    return _respuesta_padron(res)
 
 @router.get("/admin/docentes/exportar")
 async def exportar_docentes(db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
@@ -4509,7 +4670,7 @@ async def exportar_docentes(db: AsyncSession = Depends(get_db), admin: Usuario =
 @router.get("/admin/autoridades")
 async def listar_autoridades(
     db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual),
-    search: str | None = None, limit: int = 50, offset: int = 0,
+    search: str | None = None, limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
 ):
     _exige_super(admin)
     from sqlalchemy import or_, func
@@ -4561,37 +4722,18 @@ async def eliminar_autoridad(dni: str, db: AsyncSession = Depends(get_db), admin
 @router.post("/admin/autoridades/importar")
 async def importar_autoridades(archivo: UploadFile, db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):
     _exige_super(admin)
-    import io, openpyxl
     contenido = await _leer_upload_limitado(archivo)
-    try:
-        ws = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True).active
-    except Exception:
-        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido (.xlsx).")
-    hdrs = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
-    def col(*opts):
-        for o in opts:
-            if o in hdrs: return hdrs.index(o)
-        return None
-    i_dni = col("dni"); i_nom = col("nombre completo", "nombre", "apellidos y nombres")
-    i_car = col("cargo", "puesto"); i_cor = col("correo", "email"); i_tel = col("teléfono", "telefono", "celular")
-    if i_dni is None: raise HTTPException(status_code=400, detail="Columna 'DNI' no encontrada")
-    def cell(f, idx): return str(f[idx]).strip() if idx is not None and idx < len(f) and f[idx] is not None else ""
-    ins = act = err = 0
-    for fila in ws.iter_rows(min_row=2, values_only=True):
-        if all(v is None for v in fila): continue
-        dni = cell(fila, i_dni).replace(" ", "").replace("-", "")
-        if not dni.isdigit() or len(dni) != 8: err += 1; continue
-        nom = cell(fila, i_nom)
-        if not nom: err += 1; continue
-        ex = (await db.execute(select(Autoridad).where(Autoridad.dni == dni))).scalar_one_or_none()
-        if ex:
-            ex.nombre = nom; ex.cargo = cell(fila, i_car) or None; ex.correo = cell(fila, i_cor) or None; ex.telefono = cell(fila, i_tel) or None; act += 1
-        else:
-            db.add(Autoridad(dni=dni, nombre=nom, cargo=cell(fila, i_car) or None, correo=cell(fila, i_cor) or None, telefono=cell(fila, i_tel) or None)); ins += 1
-        if (ins + act) % 200 == 0: await db.flush()
-    await registrar_auditoria(admin.username, "importar_autoridades", rol=admin.rol, objetivo="padrón de autoridades", detalle=f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", db=db)
+    res = await _importar_padron_simple(db, contenido, Autoridad, {
+        "nombre":   ("nombre completo", "nombre", "apellidos y nombres"),
+        "cargo":    ("cargo", "puesto"),
+        "correo":   ("correo", "email"),
+        "telefono": ("teléfono", "telefono", "celular"),
+    })
+    r = res["_r"]
+    await registrar_auditoria(admin.username, "importar_autoridades", rol=admin.rol, objetivo="padrón de autoridades",
+                              detalle=f"{res['insertados']} nuevo(s), {res['actualizados']} actualizado(s), {r.omitidas} ignorado(s)", db=db)
     await db.commit()
-    return {"mensaje": f"{ins} nuevo(s), {act} actualizado(s), {err} ignorado(s)", "insertados": ins, "actualizados": act, "errores": err}
+    return _respuesta_padron(res)
 
 @router.get("/admin/autoridades/exportar")
 async def exportar_autoridades(db: AsyncSession = Depends(get_db), admin: Usuario = Depends(obtener_usuario_actual)):

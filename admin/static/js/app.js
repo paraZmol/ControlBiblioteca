@@ -369,8 +369,13 @@ async function login() {
 
 }
 
-// Evita que los intervalos de refresco se dupliquen al re-entrar al dashboard
-let _intervalosDashboard = false;
+// Ids de los intervalos de refresco: se registran una sola vez por sesión y se
+// limpian en logout() (antes seguían disparando fetch sin token tras salir).
+let _intervalosIds = [];
+// Recarga agrupada por mensajes WS 'actividad' (ver conectarWebSocket).
+let _actWsTimer = null;
+// Reintento de _restaurarSesion() cuando el servidor no responde.
+let _restaurarTimer = null;
 
 // Lógica común de entrada al dashboard, compartida por login() y _restaurarSesion()
 async function _entrarDashboard(username) {
@@ -405,12 +410,13 @@ async function _entrarDashboard(username) {
     _cargarResumenIncidencias();
     _cargarEventosMini();
 
-    // Registrar los intervalos una sola vez por carga de página
-    if (!_intervalosDashboard) {
-        _intervalosDashboard = true;
-        setInterval(cargarDashboard, 15000);
-        setInterval(_cargarResumenIncidencias, 60000);
-        setInterval(_cargarEventosMini, 30000);
+    // Registrar los intervalos una sola vez por sesión
+    if (_intervalosIds.length === 0) {
+        _intervalosIds.push(
+            setInterval(cargarDashboard, 15000),
+            setInterval(_cargarResumenIncidencias, 60000),
+            setInterval(_cargarEventosMini, 30000),
+        );
     }
 
     // Restaurar la pestaña donde estaba el usuario antes del F5
@@ -420,29 +426,37 @@ async function _entrarDashboard(username) {
 
 // Al recargar la página (F5): si hay un token guardado, validarlo y entrar
 // directo al dashboard sin pedir login de nuevo.
-async function _restaurarSesion() {
+async function _restaurarSesion(esReintento = false) {
+    clearTimeout(_restaurarTimer);
+    _restaurarTimer = null;
+    // Un reintento no pisa una sesión que el usuario ya abrió a mano.
+    if (esReintento && token) return;
     const guardado = sessionStorage.getItem('panel_token');
     if (!guardado) { document.documentElement.classList.remove('con-sesion'); return; }
     token = guardado;
 
-    // Validar el token contra el servidor antes de confiar en él
+    // Validar el token contra el servidor antes de confiar en él.
+    // Solo un 401 significa "token inválido/expirado" y lo borra; un error de
+    // red o un 5xx (servidor reiniciando) conserva el token y reintenta.
+    let res = null;
     try {
-        const res = await fetch(`${API_BASE}/auth/me`, { headers: authHeaders() });
-        if (!res.ok) {
-            // Token inválido/expirado: limpiar y mostrar el login
-            token = null;
-            sessionStorage.removeItem('panel_token');
-            document.documentElement.classList.remove('con-sesion');
-            return;
-        }
+        res = await fetch(`${API_BASE}/auth/me`, { headers: authHeaders() });
+    } catch (e) { res = null; }
+
+    if (res && res.ok) {
         const me = await res.json();
         await _entrarDashboard(me.username || '');
-    } catch (e) {
-        // Sin conexión u otro error: mostrar el login para que reintente
-        token = null;
-        sessionStorage.removeItem('panel_token');
-        document.documentElement.classList.remove('con-sesion');
+        return;
     }
+    token = null;
+    document.documentElement.classList.remove('con-sesion');
+    if (res && res.status === 401) {
+        sessionStorage.removeItem('panel_token');
+        return;
+    }
+    // Servidor no disponible: se muestra el login y se reintenta en 5 s.
+    if (!esReintento) addLog('error', 'No se pudo validar la sesión guardada: el servidor no responde. Reintentando...');
+    _restaurarTimer = setTimeout(() => _restaurarSesion(true), 5000);
 }
 
 
@@ -490,6 +504,14 @@ function logout() {
     if (wsAdmin) { wsAdmin.onclose = null; wsAdmin.close(); wsAdmin = null; }
 
     clearTimeout(_reconnectTimer);
+
+    // Detener los refrescos periódicos y las recargas pendientes.
+    _intervalosIds.forEach(clearInterval);
+    _intervalosIds = [];
+    clearTimeout(_actWsTimer);
+    _actWsTimer = null;
+    clearTimeout(_restaurarTimer);
+    _restaurarTimer = null;
 
     document.getElementById('dashboard').style.display  = 'none';
 
@@ -857,7 +879,8 @@ async function cargarDashboard() {
 
             document.getElementById('totalTerminales').textContent  = s.total_terminales;
 
-            document.getElementById('terminalesActivas').textContent = s.terminales_activas;
+            // El hero dice "Terminales en línea": PCs conectadas (en uso o libres).
+            document.getElementById('terminalesActivas').textContent = s.terminales_en_linea ?? s.terminales_activas;
 
             document.getElementById('sesionesActivas').textContent  = s.sesiones_activas;
 
@@ -876,7 +899,9 @@ async function cargarDashboard() {
 
             // Badge de equipos
             const badgeEl = document.getElementById('badgeEquipos');
-            if (badgeEl) badgeEl.textContent = `${s.total_terminales} equipo${s.total_terminales !== 1 ? 's' : ''} en línea`;
+            // En línea = PCs conectadas (en uso o libres), no el total registrado.
+            const enLinea = (s.terminales_en_linea ?? s.total_terminales) || 0;
+            if (badgeEl) badgeEl.textContent = `${enLinea} equipo${enLinea !== 1 ? 's' : ''} en línea`;
 
         }
 
@@ -1038,14 +1063,20 @@ function conectarWebSocket() {
 
         } else if (data.tipo === 'actividad') {
 
-            // Actualizar tabla de actividad en tiempo real si la pestaña está visible
-            const tabActivo = document.getElementById('tab-actividad');
-            if (tabActivo && tabActivo.style.display !== 'none') {
-                cargarActividad(false);
+            // Llegan ráfagas de eventos (un alumno abriendo programas): se
+            // agrupan y se recarga como mucho una vez cada 2 s, no por mensaje.
+            if (!_actWsTimer) {
+                _actWsTimer = setTimeout(() => {
+                    _actWsTimer = null;
+                    if (!token) return;
+                    const tabActivo = document.getElementById('tab-actividad');
+                    if (tabActivo && tabActivo.style.display !== 'none') {
+                        cargarActividad(false);
+                    }
+                    _actActualizarBadge();
+                    _cargarEventosMini();
+                }, 2000);
             }
-            // Actualizar badge y mini-panel siempre
-            _actActualizarBadge();
-            _cargarEventosMini();
 
         } else if (data.tipo === 'sospecha') {
 
@@ -3015,6 +3046,7 @@ async function importarPersonal(input) {
             if (resultado) { resultado.className = 'maestro-resultado ok'; resultado.innerHTML = msg; }
             mostrarNotificacion('Importación completada', 'ok');
             addLog('activity', `Personal: ${data.mensaje}`);
+            if (data.detalle_errores?.length) data.detalle_errores.forEach(e => addLog('error', e));
             _personalOffset = 0;
             cargarPersonal();
         } else {
@@ -3285,6 +3317,7 @@ async function importarGrupo(grupo, input) {
             if (resultado) { resultado.className = 'maestro-resultado ok'; resultado.innerHTML = msg; }
             mostrarNotificacion('Importación completada', 'ok');
             addLog('activity', `${cfg.singular}: ${data.mensaje}`);
+            if (data.detalle_errores?.length) data.detalle_errores.forEach(e => addLog('error', e));
             _grupoEstado[grupo].offset = 0;
             cargarGrupo(grupo);
         } else {
@@ -3686,8 +3719,10 @@ function _renderMonAlertasMini(data) {
 
 async function _cargarEventosMini() {
     try {
-        // Actividad en vivo: los 11 eventos mas recientes (la lista tiene scroll).
-        const res = await fetch(`${API_BASE}/admin/actividad?limit=11&offset=0`, { headers: authHeaders() });
+        // Actividad en vivo: los 11 eventos mas recientes DE HOY (la lista tiene
+        // scroll). El contador es el total de hoy, no el historico completo.
+        const hoy = new Date().toLocaleDateString('en-CA');  // AAAA-MM-DD local
+        const res = await fetch(`${API_BASE}/admin/actividad?limit=11&offset=0&fecha=${hoy}`, { headers: authHeaders() });
         if (!res.ok) return;
         const data = await res.json();
         const items = data.items || [];
@@ -3696,7 +3731,7 @@ async function _cargarEventosMini() {
         if (cnt) cnt.textContent = data.total != null ? data.total : items.length;
         if (!el) return;
         if (!items.length) {
-            el.innerHTML = '<p class="mon-alerts-empty">Sin eventos recientes</p>';
+            el.innerHTML = '<p class="mon-alerts-empty">Sin eventos hoy</p>';
             return;
         }
         const filas = items.map(r => {

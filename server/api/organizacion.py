@@ -55,9 +55,12 @@ def sede_efectiva(usuario: Usuario, id_sede_pedida: int | None) -> int | None:
 
 def _parse_fecha(valor: str | None, campo: str) -> date:
     try:
-        return datetime.strptime(valor or "", "%Y-%m-%d").date()
+        d = datetime.strptime(valor or "", "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Fecha '{campo}' inválida (use AAAA-MM-DD)")
+    if not (2000 <= d.year <= 2100):
+        raise HTTPException(status_code=422, detail=f"Fecha '{campo}' fuera de rango (2000-2100)")
+    return d
 
 
 # ══════════════════════════════════════════════════════════════════════

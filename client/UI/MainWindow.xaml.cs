@@ -60,6 +60,12 @@ namespace ControlBiblioteca.Client.UI
 
             Loaded += (_, _) => CubrirPantallaCompleta();
             Loaded += (_, _) => FocoDNI();
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+            // Version sana tambien si el kiosco sigue vivo 60 s (aunque el servidor
+            // este caido): el rollback es para builds que fallan al arrancar.
+            var timerSana = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+            timerSana.Tick += (_, _) => { timerSana.Stop(); Services.AutoUpdater.MarcarVersionSana(); };
+            timerSana.Start();
 
             var (cfg, cfgDiag) = Services.KioscoConfig.LeerConDiagnostico();
             string localIp     = ObtenerIpLocal();
@@ -414,58 +420,9 @@ namespace ControlBiblioteca.Client.UI
                 return;
             }
 
-            // Salida instantánea legado (Ctrl+Alt+F10)
-            if (e.Key == MASTER_KEY && (Keyboard.Modifiers & MASTER_MOD) == MASTER_MOD)
-            {
-                e.Handled = true;
-                LogDebug("MASTER KEY activada — salida de emergencia");
-                ActivarEscapeEmergencia("master_key_offline");
-                return;
-            }
-
-            // Paso 1: Ctrl+M activa el modo escape
-            if (e.Key == Key.M && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
-            {
-                e.Handled = true;
-                _esperandoEscapes = true;
-                _conteoEscapes    = 0;
-                LogDebug("Ctrl+M — esperando 5x ESC en 5 segundos...");
-
-                // Reiniciar timer de 5 segundos
-                if (_timerEscape == null)
-                {
-                    _timerEscape = new System.Windows.Threading.DispatcherTimer
-                    {
-                        Interval = TimeSpan.FromSeconds(5)
-                    };
-                    _timerEscape.Tick += (_, _) =>
-                    {
-                        _timerEscape.Stop();
-                        _esperandoEscapes = false;
-                        _conteoEscapes    = 0;
-                        LogDebug("Timeout — secuencia de escape cancelada");
-                    };
-                }
-                _timerEscape.Stop();
-                _timerEscape.Start();
-                return;
-            }
-
-            // Paso 2: contar ESC solo si el modo está activo
-            if (e.Key == Key.Escape && _esperandoEscapes)
-            {
-                e.Handled = true;
-                _conteoEscapes++;
-                LogDebug($"ESC {_conteoEscapes}/{ESCAPES_PARA_SALIR}");
-                if (_conteoEscapes >= ESCAPES_PARA_SALIR)
-                {
-                    _timerEscape?.Stop();
-                    _esperandoEscapes = false;
-                    _conteoEscapes    = 0;
-                    ActivarEscapeEmergencia("ctrl_m_escape_5x");
-                }
-                return;
-            }
+            // Las salidas "legado" sin PIN (Ctrl+Alt+F10 y Ctrl+M + 5x Esc) se
+            // eliminaron: cualquier alumno que las conociera salia del kiosco.
+            // La unica salida es el mantenimiento (atajo + PIN) o el modo offline (PIN).
         }
 
         private void ActivarEscapeEmergencia(string razon)
@@ -504,6 +461,14 @@ namespace ControlBiblioteca.Client.UI
 
         private void Bloquear()
         {
+            // Llamado desde hilos del WebSocket: todo el bloqueo corre en el hilo
+            // de UI. Antes _ventanaDesconexion.Cancelar() (Window.Hide) lanzaba
+            // InvalidOperationException fuera del hilo de UI y el bloqueo se perdia.
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(Bloquear);
+                return;
+            }
             App.AppLog($"[Bloquear] llamado — stack: {new System.Diagnostics.StackTrace(true).ToString().Split('\n')[1].Trim()}");
             _activityMonitor.Detener();
 
@@ -664,33 +629,42 @@ namespace ControlBiblioteca.Client.UI
 
                     case "hello_ack":
                     case "config_backdoor_update":
+                        if (tipo == "hello_ack")
+                            Services.AutoUpdater.MarcarVersionSana();
                         try
                         {
                             int mods = root.GetProperty("backdoor_modifiers").GetInt32();
                             int key  = root.GetProperty("backdoor_key").GetInt32();
-                            string pin = root.GetProperty("backdoor_pin").GetString() ?? "";
-                            LogDebug($"[Backdoor] Config recibida del servidor: Mod: {mods}, Key: {key}, Pin: {pin}");
-                            Dispatcher.Invoke(() =>
-                            {
-                                if (Application.Current is App app)
-                                    app.ActualizarBackdoorConfig(mods, key, pin);
-                            });
+                            // Servidor nuevo: solo hash. Servidor viejo: PIN en claro.
+                            bool bHash = root.TryGetProperty("backdoor_pin_hash", out var bh);
+                            string pin = bHash ? (bh.GetString() ?? "")
+                                               : (root.TryGetProperty("backdoor_pin", out var bp) ? bp.GetString() ?? "" : "");
+                            // Nunca registrar el PIN (ni su hash) en el log.
+                            LogDebug($"[Backdoor] Config recibida del servidor: Mod: {mods}, Key: {key}, hash={bHash}");
+                            if (pin.Length > 0)
+                                Dispatcher.Invoke(() =>
+                                {
+                                    if (Application.Current is App app)
+                                        app.ActualizarBackdoorConfig(mods, key, pin, bHash);
+                                });
 
                             // hello_ack también lleva config offline
                             if (tipo == "hello_ack"
                                 && root.TryGetProperty("offline_modifiers", out var om)
-                                && root.TryGetProperty("offline_key", out var ok2)
-                                && root.TryGetProperty("offline_pin", out var op))
+                                && root.TryGetProperty("offline_key", out var ok2))
                             {
                                 int oMods = om.GetInt32();
                                 int oKey  = ok2.GetInt32();
-                                string oPin = op.GetString() ?? "";
+                                bool oHash = root.TryGetProperty("offline_pin_hash", out var oh);
+                                string oPin = oHash ? (oh.GetString() ?? "")
+                                                    : (root.TryGetProperty("offline_pin", out var op) ? op.GetString() ?? "" : "");
                                 LogDebug($"[Offline] Config recibida del servidor: Mod:{oMods} Key:{oKey}");
-                                Dispatcher.Invoke(() =>
-                                {
-                                    if (Application.Current is App app)
-                                        app.ActualizarOfflineConfig(oMods, oKey, oPin);
-                                });
+                                if (oPin.Length > 0)
+                                    Dispatcher.Invoke(() =>
+                                    {
+                                        if (Application.Current is App app)
+                                            app.ActualizarOfflineConfig(oMods, oKey, oPin, oHash);
+                                    });
                             }
                         }
                         catch (Exception ex)
@@ -704,13 +678,16 @@ namespace ControlBiblioteca.Client.UI
                         {
                             int oMods = root.GetProperty("offline_modifiers").GetInt32();
                             int oKey  = root.GetProperty("offline_key").GetInt32();
-                            string oPin = root.GetProperty("offline_pin").GetString() ?? "";
+                            bool oHash = root.TryGetProperty("offline_pin_hash", out var oh);
+                            string oPin = oHash ? (oh.GetString() ?? "")
+                                                : (root.TryGetProperty("offline_pin", out var op) ? op.GetString() ?? "" : "");
                             LogDebug($"[Offline] Config actualizada: Mod:{oMods} Key:{oKey}");
-                            Dispatcher.Invoke(() =>
-                            {
-                                if (Application.Current is App app)
-                                    app.ActualizarOfflineConfig(oMods, oKey, oPin);
-                            });
+                            if (oPin.Length > 0)
+                                Dispatcher.Invoke(() =>
+                                {
+                                    if (Application.Current is App app)
+                                        app.ActualizarOfflineConfig(oMods, oKey, oPin, oHash);
+                                });
                         }
                         catch (Exception ex)
                         {
@@ -858,11 +835,28 @@ namespace ControlBiblioteca.Client.UI
 
         private void CubrirPantallaCompleta()
         {
+            // Cubre el escritorio VIRTUAL (todos los monitores): con un segundo
+            // monitor o proyector en modo extendido, cubrir solo el primario dejaba
+            // el otro escritorio libre.
             WindowState = WindowState.Normal;
-            Left   = 0;
-            Top    = 0;
-            Width  = SystemParameters.PrimaryScreenWidth;
-            Height = SystemParameters.PrimaryScreenHeight;
+            Left   = SystemParameters.VirtualScreenLeft;
+            Top    = SystemParameters.VirtualScreenTop;
+            Width  = SystemParameters.VirtualScreenWidth;
+            Height = SystemParameters.VirtualScreenHeight;
+        }
+
+        // Si cambian monitores o resolucion con la PC bloqueada, volver a cubrir todo.
+        private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (!_desbloqueado)
+                {
+                    CubrirPantallaCompleta();
+                    Topmost = true;
+                    Activate();
+                }
+            });
         }
 
         private void PonerVentanaAlFrente()
@@ -1100,6 +1094,7 @@ namespace ControlBiblioteca.Client.UI
 
         protected override void OnClosed(EventArgs e)
         {
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
             _loginCts?.Cancel();
             _loginCts?.Dispose();
             _toastTimer?.Stop();
@@ -1220,41 +1215,48 @@ namespace ControlBiblioteca.Client.UI
             // Dar un momento al servidor para estabilizar la conexión WS
             await Task.Delay(1500);
 
-            string estadoVerif = "ok";
+            // Sin confirmacion del servidor NO se da por buena la sesion: antes un
+            // error (o un 4xx) dejaba la PC desbloqueada sin registro y sin limite.
+            string estadoVerif = "sin_verificar";
             string motivo      = "";
 
-            try
+            var config = Services.KioscoConfig.Leer();
+            string apiUrl = $"http://{config.ServerIp}:{config.ServerPort}";
+            var payload = new
             {
-                var config = Services.KioscoConfig.Leer();
-                string apiUrl = $"http://{config.ServerIp}:{config.ServerPort}";
+                dni          = dniSnap,
+                razon        = razonSnap,
+                hora_inicio  = inicioSnap.ToString("yyyy-MM-dd HH:mm:ss"),
+                hora_fin     = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                terminal     = Environment.MachineName
+            };
+            string json = System.Text.Json.JsonSerializer.Serialize(payload);
 
-                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(8) };
-                var payload = new
+            int[] esperas = { 0, 3000, 8000 };   // la red acaba de volver: reintentar
+            foreach (int espera in esperas)
+            {
+                if (espera > 0) await Task.Delay(espera);
+                try
                 {
-                    dni          = dniSnap,
-                    razon        = razonSnap,
-                    hora_inicio  = inicioSnap.ToString("yyyy-MM-dd HH:mm:ss"),
-                    hora_fin     = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                    terminal     = Environment.MachineName
-                };
-                string json = System.Text.Json.JsonSerializer.Serialize(payload);
-                var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-                var res = await http.PostAsync($"{apiUrl}/api/offline-sync", content);
-
-                if (res.IsSuccessStatusCode)
-                {
+                    using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+                    var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                    var res = await http.PostAsync($"{apiUrl}/api/offline-sync", content);
                     var body = await res.Content.ReadAsStringAsync();
-                    using var doc = System.Text.Json.JsonDocument.Parse(body);
-                    var root = doc.RootElement;
-                    estadoVerif = root.TryGetProperty("estado", out var ev) ? ev.GetString() ?? "ok" : "ok";
-                    motivo      = root.TryGetProperty("motivo", out var mv) ? mv.GetString() ?? "" : "";
+                    if (res.IsSuccessStatusCode)
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(body);
+                        var root = doc.RootElement;
+                        estadoVerif = root.TryGetProperty("estado", out var ev) ? ev.GetString() ?? "ok" : "ok";
+                        motivo      = root.TryGetProperty("motivo", out var mv) ? mv.GetString() ?? "" : "";
+                        break;
+                    }
+                    LogDebug($"[Offline] offline-sync respondio {(int)res.StatusCode}");
+                    if ((int)res.StatusCode < 500) break;   // 4xx: reintentar no cambia nada
                 }
-            }
-            catch (Exception ex)
-            {
-                LogDebug($"[Offline] Error al verificar con servidor: {ex.Message}");
-                // Si no se puede verificar, dejar continuar (red acaba de volver, puede ser inestable)
-                estadoVerif = "ok";
+                catch (Exception ex)
+                {
+                    LogDebug($"[Offline] Error al verificar con servidor: {ex.Message}");
+                }
             }
 
             offlineBackdoor.NotificarReconexion(estadoVerif, motivo);
@@ -1271,7 +1273,9 @@ namespace ControlBiblioteca.Client.UI
                 {
                     string msgAviso = estadoVerif == "baneado"
                         ? "Usuario con acceso restringido. El equipo se bloqueará en 3 minutos."
-                        : "Usuario no registrado en el sistema. El equipo se bloqueará en 3 minutos.";
+                        : estadoVerif == "sin_verificar" || estadoVerif == "rechazado"
+                            ? "No se pudo registrar la sesión en el servidor. El equipo se bloqueará en 3 minutos; vuelva a ingresar con su DNI."
+                            : "Usuario no registrado en el sistema. El equipo se bloqueará en 3 minutos.";
 
                     if (_ventanaDesconexion == null)
                     {

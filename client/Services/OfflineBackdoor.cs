@@ -225,7 +225,7 @@ namespace ControlBiblioteca.Client.Services
 
                 void Verificar(object? s, RoutedEventArgs ev)
                 {
-                    if (pinBox.Password == _config.OfflinePin)
+                    if (KioscoConfig.PinValido(pinBox.Password, _config.OfflinePinHash, _config.OfflinePin))
                     {
                         resultado = true;
                         ventana.Close();
@@ -234,7 +234,7 @@ namespace ControlBiblioteca.Client.Services
                     {
                         pinBox.Clear();
                         pinBox.Focus();
-                        etiqueta.Text       = "PIN incorrecto — intente nuevamente:";
+                        etiqueta.Text       = KioscoConfig.PinBloqueado ? "Demasiados intentos — espere 1 minuto:" : "PIN incorrecto — intente nuevamente:";
                         etiqueta.Foreground = Brushes.Salmon;
                     }
                 }
@@ -418,7 +418,8 @@ namespace ControlBiblioteca.Client.Services
             }
         }
 
-        public void ActualizarConfig(int modifiers, int key, string pin)
+        /// <param name="pinOHash">Hash PBKDF2 (servidor nuevo) o PIN en claro (servidor viejo).</param>
+        public void ActualizarConfig(int modifiers, int key, string pinOHash, bool esHash = false)
         {
             _app.Dispatcher.Invoke(() =>
             {
@@ -429,7 +430,8 @@ namespace ControlBiblioteca.Client.Services
 
                 _config.OfflineModifiers = modifiers;
                 _config.OfflineKey       = key;
-                _config.OfflinePin       = pin;
+                if (esHash) { _config.OfflinePinHash = pinOHash; _config.OfflinePin = ""; }
+                else        { _config.OfflinePin = pinOHash;     _config.OfflinePinHash = ""; }
                 _config.Guardar();
 
                 if (_hwnd != null && estabaActivo)

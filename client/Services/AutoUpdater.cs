@@ -2,7 +2,9 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace ControlBiblioteca.Client.Services
@@ -21,6 +23,66 @@ namespace ControlBiblioteca.Client.Services
 
         private static readonly string _logPath      = Path.Combine(_exeDir, "autoupdate.log");
         private static readonly string _versionLocal = Path.Combine(_exeDir, "version.local");
+
+        // ── Rollback automatico ──
+        // update_pendiente.txt = "versionNueva|versionAnterior|arranques". Se crea al
+        // instalar una version y se borra cuando esa version demuestra que funciona
+        // (hello_ack del servidor, o 60 s abierta sin fallar). Si arranca 3 veces sin lograrlo, vuelve
+        // al .bak y esa version se anota en version_rota.txt para no reinstalarla.
+        private static readonly string _pendiente   = Path.Combine(_exeDir, "update_pendiente.txt");
+        private static readonly string _versionRota = Path.Combine(_exeDir, "version_rota.txt");
+        private const int ARRANQUES_PARA_ROLLBACK = 3;
+        private static string ExeBackup => Path.Combine(_exeDir, "ControlBiblioteca.Client.exe.bak");
+
+        /// <summary>
+        /// Llamar al inicio de cada arranque. Devuelve true si hizo rollback y
+        /// relanzo la version anterior (el llamador debe salir).
+        /// </summary>
+        public static bool RegistrarArranqueYRollback()
+        {
+            try
+            {
+                if (!File.Exists(_pendiente)) return false;
+                var p = File.ReadAllText(_pendiente, Encoding.UTF8).Trim().Split('|');
+                if (p.Length != 3 || !int.TryParse(p[2], out int arranques)) { File.Delete(_pendiente); return false; }
+                arranques++;
+                if (arranques < ARRANQUES_PARA_ROLLBACK || !File.Exists(ExeBackup))
+                {
+                    File.WriteAllText(_pendiente, $"{p[0]}|{p[1]}|{arranques}", Encoding.UTF8);
+                    Log($"Version {p[0]} pendiente de confirmar — arranque {arranques}/{ARRANQUES_PARA_ROLLBACK}");
+                    return false;
+                }
+                string exeActual = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule!.FileName;
+                string exeRoto   = exeActual + ".roto";
+                Log($"ROLLBACK: version {p[0]} no logro conectarse en {arranques} arranques — volviendo a {p[1]}");
+                try { if (File.Exists(exeRoto)) File.Delete(exeRoto); } catch { }
+                File.Move(exeActual, exeRoto);        // el exe vivo se puede renombrar
+                File.Move(ExeBackup, exeActual);
+                File.WriteAllText(_versionLocal, p[1], Encoding.UTF8);
+                File.WriteAllText(_versionRota, p[0], Encoding.UTF8);
+                File.Delete(_pendiente);
+                Process.Start(new ProcessStartInfo(exeActual, "--reinicio") { UseShellExecute = false });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log($"Error en verificacion de rollback: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>La version actual funciona (llego hello_ack): confirmar y borrar el .bak.</summary>
+        public static void MarcarVersionSana()
+        {
+            try
+            {
+                if (!File.Exists(_pendiente)) return;
+                File.Delete(_pendiente);
+                if (File.Exists(ExeBackup)) File.Delete(ExeBackup);
+                Log("Version confirmada como sana (hello_ack recibido); .bak eliminado.");
+            }
+            catch { }
+        }
 
         // Lee la versión instalada desde version.local.
         // El updater escribe este archivo al finalizar cada actualización exitosa.
@@ -56,7 +118,13 @@ namespace ControlBiblioteca.Client.Services
             string versionInstalada = LeerVersionInstalada();
             Log($"Iniciando. versionInstalada={versionInstalada} exe={exeActual}");
 
-            // Limpieza de restos de intentos anteriores
+            // Limpieza de restos de intentos anteriores. El .bak se conserva mientras
+            // la version instalada no este confirmada: es el punto de retorno.
+            if (File.Exists(_pendiente))
+            {
+                Log("Hay una version pendiente de confirmar: no se busca otra actualizacion.");
+                return false;
+            }
             try { if (File.Exists(exeBackup)) File.Delete(exeBackup); Log("bak previo eliminado."); } catch { }
             try { if (File.Exists(exeNuevo))  File.Delete(exeNuevo);  Log("new previo eliminado."); } catch { }
 
@@ -88,6 +156,14 @@ namespace ControlBiblioteca.Client.Services
                 Log($"Versión servidor='{versionServidor}' | instalada='{versionInstalada}'");
 
                 if (string.IsNullOrWhiteSpace(versionServidor)) return false;
+                string versionRota = "";
+                try { if (File.Exists(_versionRota)) versionRota = File.ReadAllText(_versionRota, Encoding.UTF8).Trim(); } catch { }
+                if (versionRota.Length > 0 && versionRota == versionServidor)
+                {
+                    Log($"La version {versionServidor} ya fallo en esta PC (rollback previo): no se reinstala.");
+                    return false;
+                }
+                string shaEsperado = ExtraerCampo(json, "sha256").ToLowerInvariant();
                 if (!EsVersionMayor(versionServidor, versionInstalada))
                 {
                     Log("Sin actualización necesaria (servidor no es mayor).");
@@ -132,6 +208,27 @@ namespace ControlBiblioteca.Client.Services
                     return false;
                 }
 
+                // 4b. Integridad: el SHA-256 debe coincidir con el que publica el
+                //     servidor (detecta descargas cortadas o corruptas).
+                if (shaEsperado.Length == 64)
+                {
+                    string shaReal;
+                    using (var fs = File.OpenRead(exeNuevo))
+                        shaReal = Convert.ToHexString(SHA256.HashData(fs)).ToLowerInvariant();
+                    if (shaReal != shaEsperado)
+                    {
+                        Log($"SHA-256 no coincide (esperado {shaEsperado}, real {shaReal}) — se descarta.");
+                        OnEstado?.Invoke("Descarga corrupta — omitiendo actualización.");
+                        try { File.Delete(exeNuevo); } catch { }
+                        return false;
+                    }
+                    Log("SHA-256 verificado.");
+                }
+                else
+                {
+                    Log("El servidor no publico SHA-256 — se omite la verificacion de integridad.");
+                }
+
                 // 5. Reemplazo en caliente — truco NTFS:
                 //    Un exe en ejecución NO se puede borrar, pero SÍ renombrar.
                 //    Al renombrar el exe vivo liberamos el nombre, luego movemos el nuevo.
@@ -151,6 +248,7 @@ namespace ControlBiblioteca.Client.Services
                 {
                     File.WriteAllText(_versionLocal, versionServidor, Encoding.UTF8);
                     Log($"version.local escrito: {versionServidor}");
+                    File.WriteAllText(_pendiente, $"{versionServidor}|{versionInstalada}|0", Encoding.UTF8);
                 }
                 catch (Exception ex)
                 {
@@ -252,6 +350,17 @@ del ""%~f0""
             {
                 return nueva.Trim() != actual.Trim();
             }
+        }
+
+        private static string ExtraerCampo(string json, string campo)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                return doc.RootElement.TryGetProperty(campo, out var v) && v.ValueKind == JsonValueKind.String
+                    ? (v.GetString() ?? "").Trim() : "";
+            }
+            catch { return ""; }
         }
 
         private static string ExtraerVersion(string json)

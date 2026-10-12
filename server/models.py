@@ -328,6 +328,10 @@ class Sospecha(Base):
     estado:        Mapped[str] = mapped_column(String(20),  default="pendiente")  # pendiente | aprobada | descartada
     revisado_por:  Mapped[str] = mapped_column(String(50),  nullable=True)
     fecha_revision: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    # Sede donde ocurrio (para aislar a los encargados con sede fija). Si quien
+    # la crea no la indica, el evento before_insert de abajo la toma de la
+    # sesion mas reciente del alumno.
+    id_sede:       Mapped[int] = mapped_column(Integer, nullable=True)
 
     alumno: Mapped["AlumnoMaestro"] = relationship()
 
@@ -475,4 +479,16 @@ def _sesion_fijar_sede(mapper, connection, target):
     if target.id_sede is None and target.id_terminal is not None:
         target.id_sede = connection.execute(
             _text("SELECT id_sede FROM terminales WHERE id = :t"), {"t": target.id_terminal}
+        ).scalar()
+
+
+@_event.listens_for(Sospecha, "before_insert")
+def _sospecha_fijar_sede(mapper, connection, target):
+    # Toda sospecha nace de una sesion del alumno (activa o recien abierta):
+    # su sede es la de esa sesion. Cubre las vias que no la fijan a mano.
+    if target.id_sede is None and target.dni_alumno:
+        target.id_sede = connection.execute(
+            _text("SELECT id_sede FROM sesiones WHERE dni_alumno = :d "
+                  "ORDER BY hora_entrada DESC, id DESC LIMIT 1"),
+            {"d": target.dni_alumno},
         ).scalar()

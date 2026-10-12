@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import socket
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
@@ -13,7 +14,9 @@ import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketState
 from sqlalchemy import select, delete
+from sqlalchemy.exc import IntegrityError
 from database import init_db, async_session
 from models import AlumnoMaestro, Usuario, Terminal, Sesion, Facultad, Escuela, Ban, PersonalUniversidad, ActividadLog, Sospecha, MensajeProgramado
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,9 +29,46 @@ from core.websocket_manager import manager
 from core.auditoria import registrar_auditoria
 from core import rate_limit
 
-# Configurar logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+# Configurar logging: consola + archivo rotativo (server/logs/server.log,
+# 10 MB x 10). Con cientos de PCs la consola sola no sirve para diagnosticar
+# después, y un archivo sin rotar llenaría el disco.
+def _configurar_logging():
+    from logging.handlers import RotatingFileHandler
+    fmt = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+    raiz = logging.getLogger()
+    if any(getattr(h, "_control_log", False) for h in raiz.handlers):
+        return   # import repetido (reload): no duplicar handlers
+    raiz.setLevel(logging.INFO)
+    consola = logging.StreamHandler()
+    consola.setFormatter(fmt)
+    consola._control_log = True
+    raiz.addHandler(consola)
+    try:
+        carpeta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        os.makedirs(carpeta, exist_ok=True)
+        archivo = RotatingFileHandler(os.path.join(carpeta, "server.log"),
+                                      maxBytes=10 * 1024 * 1024, backupCount=10,
+                                      encoding="utf-8")
+        archivo.setFormatter(fmt)
+        archivo._control_log = True
+        raiz.addHandler(archivo)
+    except Exception as e:   # sin permiso de escritura: seguir solo con consola
+        logging.getLogger("control").warning(f"No se pudo abrir server/logs/server.log: {e}")
+
+_configurar_logging()
 logger = logging.getLogger("control")
+
+
+def _limpio(texto, maximo: int = 300) -> str:
+    """Sanea texto que viene del cliente antes de loguearlo o reenviarlo:
+    sin saltos de línea (evita falsificar líneas de log) y acotado."""
+    s = str(texto if texto is not None else "")
+    s = s.replace("\r", " ").replace("\n", " ").replace("\x00", "")
+    return s[:maximo]
+
+
+# Hostname de Windows/NetBIOS: letras, dígitos, punto, guion y guion bajo.
+_HOSTNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,63}$")
 
 # ── Detección de IP Real ───────────────────────────────────────────
 
@@ -83,7 +123,36 @@ _SGA_VERIFY_SSL = os.getenv("SGA_SSL_VERIFY", "true").strip().lower() not in ("f
 # Contraseña inicial para los usuarios por defecto (solo se usa al crearlos por
 # primera vez). Se lee de .env; si no está, cae a un valor temporal y se avisa.
 # NUNCA se registra en logs en claro. Cambiar tras el primer login.
-_DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "").strip() or "admin123"
+_DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "").strip()
+if not _DEFAULT_ADMIN_PASSWORD:
+    # Sin contraseña inicial configurada: una aleatoria e irrecuperable. Las
+    # cuentas creadas con ella se habilitan cambiando la clave por BD o
+    # reinstalando con configurador.py (que la genera y la muestra una vez).
+    import secrets as _secrets
+    _DEFAULT_ADMIN_PASSWORD = "X" + _secrets.token_urlsafe(24)
+
+
+# ── PINs del kiosco: nunca viajan en claro ─────────────────────────────
+# El WS de terminal no tiene autenticacion fuerte: cualquiera en la LAN puede
+# abrirlo. Antes el hello_ack entregaba los PIN de mantenimiento y offline en
+# texto plano. Ahora se envia solo un hash PBKDF2 con sal que el kiosco verifica
+# localmente. Se cachea por valor de PIN (calcularlo cuesta ~50 ms y se pide en
+# cada hello de cada PC).
+_PIN_ITER = 120_000
+_pin_hash_cache: dict[str, str] = {}
+
+
+def _hash_pin(pin: str) -> str:
+    import hashlib, base64
+    if pin in _pin_hash_cache:
+        return _pin_hash_cache[pin]
+    sal = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", (pin or "").encode("utf-8"), sal, _PIN_ITER)
+    h = f"pbkdf2_sha256${_PIN_ITER}${base64.b64encode(sal).decode()}${base64.b64encode(dk).decode()}"
+    if len(_pin_hash_cache) > 32:
+        _pin_hash_cache.clear()
+    _pin_hash_cache[pin] = h
+    return h
 
 
 # ── B-8: enmascarado de PII para los logs ──────────────────────────────
@@ -184,7 +253,8 @@ async def consultar_sga(dni: str) -> Optional[dict]:
         data = resp.json()
         alumno_data = data.get("alumno") if isinstance(data, dict) else None
         if not alumno_data:
-            logger.warning(f"[SGA] Respuesta sin campo 'alumno': {data}")
+            # Sin volcar la respuesta: puede traer DNI/nombres en claro (B-8).
+            logger.warning(f"[SGA] Respuesta sin campo 'alumno' para DNI={_mask_dni(dni)}")
             return None
 
         # Nombres: el JSON viene en MAYÚSCULAS; .title() maneja unicode (Ñ, Á, É…)
@@ -200,7 +270,7 @@ async def consultar_sga(dni: str) -> Optional[dict]:
         facultad = str(facultad_data.get("nombre", "") if isinstance(facultad_data, dict) else facultad_data).strip().title()
 
         if not nombres or not apellidos:
-            logger.warning(f"[SGA] Campos de nombre vacíos en: {alumno_data}")
+            logger.warning(f"[SGA] Campos de nombre vacíos para DNI={_mask_dni(dni)}")
             return None
 
         # Extraer código de matrícula y DNI como campos DISTINTOS
@@ -247,6 +317,9 @@ async def _scheduler_mensajes():
             ahora = datetime.now()
             hora_actual = ahora.strftime("%H:%M")
             hoy = ahora.date()
+            # 1) Leer qué toca enviar y CERRAR la sesión de BD: el envío a cientos
+            #    de kioscos no debe retener una conexión del pool ni una transacción.
+            pendientes = []   # (id, tipo, mensaje)
             async with async_session() as db:
                 # Duración del aviso en el kiosco (configurable; default 60s)
                 from models import ConfiguracionKiosco
@@ -264,20 +337,9 @@ async def _scheduler_mensajes():
                 )
                 for msg in res_c.scalars().all():
                     ultima = msg.fecha_envio
-                    ya_enviado_hoy = ultima is not None and ultima.date() >= hoy
-                    if ya_enviado_hoy:
-                        continue
-                    entregados = await manager.broadcast({
-                        "tipo": "mensaje_broadcast",
-                        "mensaje": msg.mensaje,
-                        "origen": "cierre",
-                        "duracion_seg": duracion_seg,
-                    })
-                    if entregados > 0:
-                        msg.fecha_envio = ahora
-                        logger.info(f"[MSG] Cierre enviado a {entregados} terminal(es): {msg.mensaje!r}")
-                    else:
-                        logger.info(f"[MSG] Cierre pendiente (0 terminales conectadas): {msg.mensaje!r}")
+                    if ultima is not None and ultima.date() >= hoy:
+                        continue   # ya enviado hoy
+                    pendientes.append((msg.id, "cierre", msg.mensaje))
 
                 # ── Extras: no enviados, ya llegó su fecha/hora programada ──
                 res_e = await db.execute(
@@ -294,19 +356,35 @@ async def _scheduler_mensajes():
                     fecha_prog = msg.fecha_envio.date() if msg.fecha_envio else hoy
                     if fecha_prog > hoy:
                         continue  # programado para más adelante
-                    entregados = await manager.broadcast({
-                        "tipo": "mensaje_broadcast",
-                        "mensaje": msg.mensaje,
-                        "origen": "extra",
-                        "duracion_seg": duracion_seg,
-                    })
-                    if entregados > 0:
-                        msg.enviado = True
-                        logger.info(f"[MSG] Extra enviado a {entregados} terminal(es): {msg.mensaje!r}")
-                    else:
-                        logger.info(f"[MSG] Extra pendiente (0 terminales conectadas): {msg.mensaje!r}")
+                    pendientes.append((msg.id, "extra", msg.mensaje))
 
-                await db.commit()
+            # 2) Enviar sin BD abierta.
+            enviados = []
+            for msg_id, origen, texto in pendientes:
+                entregados = await manager.broadcast({
+                    "tipo": "mensaje_broadcast",
+                    "mensaje": texto,
+                    "origen": origen,
+                    "duracion_seg": duracion_seg,
+                })
+                if entregados > 0:
+                    enviados.append((msg_id, origen))
+                    logger.info(f"[MSG] {origen} enviado a {entregados} terminal(es): {texto!r}")
+                else:
+                    logger.info(f"[MSG] {origen} pendiente (0 terminales conectadas): {texto!r}")
+
+            # 3) Marcar como enviados en una transacción corta.
+            if enviados:
+                async with async_session() as db:
+                    for msg_id, origen in enviados:
+                        msg = await db.get(MensajeProgramado, msg_id)
+                        if msg is None:
+                            continue
+                        if origen == "cierre":
+                            msg.fecha_envio = ahora
+                        else:
+                            msg.enviado = True
+                    await db.commit()
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -516,6 +594,22 @@ async def _migrar_columnas():
                 try:
                     await db.execute(text(f"ALTER TABLE {_tabla} ADD COLUMN id_sede INT NULL"))
                 except Exception: pass
+            # Sospechas por sede (aislamiento de encargados). Solo al crear la
+            # columna: las existentes toman la sede de la ultima sesion del
+            # alumno anterior a la sospecha (o, si no hay, la mas reciente).
+            try:
+                await db.execute(text("ALTER TABLE sospechas ADD COLUMN id_sede INT NULL"))
+                await db.execute(text(
+                    "UPDATE sospechas sp SET sp.id_sede = COALESCE("
+                    " (SELECT s.id_sede FROM sesiones s WHERE s.dni_alumno = sp.dni_alumno"
+                    "   AND s.hora_entrada <= sp.fecha ORDER BY s.hora_entrada DESC LIMIT 1),"
+                    " (SELECT s2.id_sede FROM sesiones s2 WHERE s2.dni_alumno = sp.dni_alumno"
+                    "   ORDER BY s2.hora_entrada DESC LIMIT 1))"
+                    " WHERE sp.id_sede IS NULL"))
+            except Exception: pass
+            try:
+                await db.execute(text("ALTER TABLE sospechas ADD INDEX idx_sospecha_sede (id_sede)"))
+            except Exception: pass
             for _sql in (
                 "ALTER TABLE terminales ADD INDEX idx_terminal_sede (id_sede)",
                 "ALTER TABLE incidencias ADD INDEX idx_incidencia_sede (id_sede)",
@@ -552,6 +646,8 @@ async def _migrar_columnas():
                     ("sesiones", "idx_sesion_fecha_uso", ("fecha_uso",)),
                     ("actividad_logs", "idx_act_fecha_hora", ("fecha_hora",)),
                     ("actividad_logs", "idx_act_exe_nivel", ("proceso_exe", "nivel")),
+                    # Cada conexión/hello de kiosco busca la PC por IP.
+                    ("terminales", "idx_terminal_ip", ("ip",)),
                 ):
                     if not await _indice_existe(db, _tabla, _cols):
                         try:
@@ -627,6 +723,7 @@ async def _limpiar_sesiones_fantasma():
                 query = _text("SELECT id, id_terminal FROM sesiones WHERE estado='activa' AND confirmada=0 AND TIMESTAMPDIFF(SECOND, hora_entrada, NOW()) > 10")
                 res = await db.execute(query)
                 fantasmas = res.fetchall()
+                a_bloquear = []   # nombre_red de las PCs cuya sesión se canceló
                 for row in fantasmas:
                     sesion_id, terminal_id_db = row
                     res_s = await db.execute(select(Sesion).where(Sesion.id == sesion_id))
@@ -639,10 +736,17 @@ async def _limpiar_sesiones_fantasma():
                         t = res_t.scalar_one_or_none()
                         if t:
                             t.estado = "bloqueado"
+                            a_bloquear.append(t.nombre_red)
                         logger.warning(f"[FANTASMA] Sesión #{sesion_id} cancelada por falta de confirmación")
                 if fantasmas:
                     await db.commit()
-                    await manager.notificar_admins()
+            # Tras el commit y fuera de la sesión de BD: la sesión ya no existe, así
+            # que el kiosco no puede quedar desbloqueado (si llegó a abrirse).
+            for nombre_red in a_bloquear:
+                await manager.bloquear_terminal(nombre_red)
+                await manager.limpiar_foco(nombre_red)
+            if fantasmas:
+                await manager.notificar_admins()
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -693,54 +797,94 @@ async def _purgar_logs_actividad():
 
     Conserva siempre los sospechosos. Antes de borrar, exporta los registros
     a un .xlsx con fecha, para no perder nada históricamente."""
-    from datetime import timedelta
-    import openpyxl
-
+    # Primera pasada poco después de arrancar (si el servidor se reinicia a
+    # diario, con "cada 24 h desde el arranque" la purga no corría nunca).
+    espera = _PURGA_PRIMERA_SEG
     while True:
         try:
-            await asyncio.sleep(24 * 3600)  # una vez al día
-
-            corte = datetime.now() - timedelta(days=RETENCION_NORMALES_DIAS)
-            async with async_session() as db:
-                # Solo eventos NORMALES vencidos. Los sospechosos se conservan.
-                res = await db.execute(
-                    select(ActividadLog).where(
-                        ActividadLog.nivel != "sospechoso",
-                        ActividadLog.fecha_hora < corte,
-                    ).order_by(ActividadLog.fecha_hora)
-                )
-                vencidos = res.scalars().all()
-                if not vencidos:
-                    logger.info("[PURGA] No hay logs de actividad vencidos.")
-                    continue
-
-                # 1. Respaldar a Excel ANTES de borrar.
-                os.makedirs(RESPALDOS_DIR, exist_ok=True)
-                wb = openpyxl.Workbook()
-                ws = wb.active
-                ws.title = "Actividad purgada"
-                ws.append(["ID", "Fecha/Hora", "PC", "Alumno", "DNI",
-                           "Tipo", "Descripción", "Detalle", "Proceso", "Nivel"])
-                for r in vencidos:
-                    ws.append([
-                        r.id,
-                        r.fecha_hora.strftime("%Y-%m-%d %H:%M:%S") if r.fecha_hora else "",
-                        r.nombre_terminal, r.nombre_alumno, r.dni_alumno,
-                        r.tipo, r.descripcion, r.detalle or "", r.proceso_exe or "", r.nivel,
-                    ])
-                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                ruta = os.path.join(RESPALDOS_DIR, f"actividad_purgada_{stamp}.xlsx")
-                wb.save(ruta)
-
-                # 2. Borrar de la tabla.
-                ids = [r.id for r in vencidos]
-                await db.execute(delete(ActividadLog).where(ActividadLog.id.in_(ids)))
-                await db.commit()
-                logger.info(f"[PURGA] {len(ids)} log(s) normal(es) respaldado(s) en '{ruta}' y borrado(s). Sospechosos conservados.")
+            await asyncio.sleep(espera)
+            espera = 24 * 3600
+            await _purgar_una_vez()
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"[PURGA] Error en purga de actividad: {e}")
+
+
+_PURGA_PRIMERA_SEG = 5 * 60
+_PURGA_LOTE = 5000            # filas por DELETE: transacciones cortas, sin bloquear la tabla
+_PURGA_FILAS_POR_EXCEL = 100_000   # filas por archivo de respaldo (memoria acotada)
+
+
+def _guardar_excel(ruta: str, titulo: str, cabecera: list, filas: list) -> None:
+    """Escribe un .xlsx (se llama en un hilo: openpyxl es CPU puro y bloquearía
+    el event loop, congelando todos los WebSocket mientras dura)."""
+    import openpyxl
+    wb = openpyxl.Workbook(write_only=True)
+    ws = wb.create_sheet(titulo)
+    ws.append(cabecera)
+    for f in filas:
+        ws.append(f)
+    wb.save(ruta)
+
+
+async def _purgar_tabla(nombre: str, modelo, filtro, cabecera: list, fila_de) -> int:
+    """Respaldar a Excel y borrar en lotes las filas de `modelo` que cumplan
+    `filtro`. Recorre por id ascendente; cada archivo se guarda ANTES de borrar
+    sus filas, así un fallo nunca pierde datos sin respaldo."""
+    total = 0
+    ultimo_id = 0
+    while True:
+        filas, ids = [], []
+        async with async_session() as db:
+            while len(ids) < _PURGA_FILAS_POR_EXCEL:
+                lote = (await db.execute(
+                    select(modelo).where(filtro, modelo.id > ultimo_id)
+                    .order_by(modelo.id).limit(_PURGA_LOTE))).scalars().all()
+                if not lote:
+                    break
+                for r in lote:
+                    filas.append(fila_de(r))
+                    ids.append(r.id)
+                ultimo_id = lote[-1].id
+        if not ids:
+            return total
+        os.makedirs(RESPALDOS_DIR, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        ruta = os.path.join(RESPALDOS_DIR, f"{nombre}_purgada_{stamp}.xlsx")
+        await asyncio.to_thread(_guardar_excel, ruta, nombre[:31], cabecera, filas)
+        for i in range(0, len(ids), _PURGA_LOTE):
+            async with async_session() as db:
+                await db.execute(delete(modelo).where(modelo.id.in_(ids[i:i + _PURGA_LOTE])))
+                await db.commit()
+            await asyncio.sleep(0)   # ceder el loop entre lotes
+        total += len(ids)
+        logger.info(f"[PURGA] {len(ids)} fila(s) de {nombre} respaldada(s) en '{ruta}' y borrada(s).")
+
+
+async def _purgar_una_vez():
+    from datetime import timedelta
+    corte = datetime.now() - timedelta(days=RETENCION_NORMALES_DIAS)
+    _f = lambda d: d.strftime("%Y-%m-%d %H:%M:%S") if d else ""
+    # Solo eventos NORMALES vencidos. Los sospechosos se conservan (evidencia).
+    n_act = await _purgar_tabla(
+        "actividad", ActividadLog,
+        (ActividadLog.nivel != "sospechoso") & (ActividadLog.fecha_hora < corte),
+        ["ID", "Fecha/Hora", "PC", "Alumno", "DNI", "Tipo", "Descripción", "Detalle", "Proceso", "Nivel"],
+        lambda r: [r.id, _f(r.fecha_hora), r.nombre_terminal, r.nombre_alumno, r.dni_alumno,
+                   r.tipo, r.descripcion, r.detalle or "", r.proceso_exe or "", r.nivel])
+    # Sospechas YA RESUELTAS (aprobada/descartada) con la misma retención. Las
+    # pendientes nunca se purgan: alguien todavía tiene que revisarlas.
+    n_sosp = await _purgar_tabla(
+        "sospechas", Sospecha,
+        Sospecha.estado.in_(("aprobada", "descartada"))
+        & (Sospecha.fecha < corte)
+        & ((Sospecha.fecha_revision.is_(None)) | (Sospecha.fecha_revision < corte)),
+        ["ID", "Fecha", "DNI", "Alumno", "Tipo", "Detalle", "Estado", "Revisado por", "Fecha revisión"],
+        lambda r: [r.id, _f(r.fecha), r.dni_alumno, r.nombre_alumno, r.tipo, r.detalle,
+                   r.estado, r.revisado_por or "", _f(r.fecha_revision)])
+    if not n_act and not n_sosp:
+        logger.info("[PURGA] No hay logs de actividad ni sospechas resueltas vencidas.")
 
 
 @asynccontextmanager
@@ -767,7 +911,8 @@ async def lifespan(_app: FastAPI):
         else:
             db.add(Usuario(
                 username="superadmin",
-                hashed_password=hashear_password(_DEFAULT_ADMIN_PASSWORD),
+                # bcrypt es CPU pesado: en un hilo para no frenar el event loop.
+                hashed_password=await asyncio.to_thread(hashear_password, _DEFAULT_ADMIN_PASSWORD),
                 nombre_completo="Super Administrador",
                 rol="superadmin"
             ))
@@ -784,7 +929,7 @@ async def lifespan(_app: FastAPI):
         if res_a.scalars().first() is None:
             db.add(Usuario(
                 username="admin",
-                hashed_password=hashear_password(_DEFAULT_ADMIN_PASSWORD),
+                hashed_password=await asyncio.to_thread(hashear_password, _DEFAULT_ADMIN_PASSWORD),
                 nombre_completo="Administrador",
                 rol="admin"
             ))
@@ -961,7 +1106,7 @@ async def actualizar_config_backdoor(
         "tipo": "config_backdoor_update",
         "backdoor_modifiers": cfg.backdoor_modifiers,
         "backdoor_key": cfg.backdoor_key,
-        "backdoor_pin": cfg.backdoor_pin
+        "backdoor_pin_hash": _hash_pin(cfg.backdoor_pin),
     })
     return {"mensaje": "Configuración de mantenimiento actualizada correctamente"}
 
@@ -1018,7 +1163,7 @@ async def actualizar_config_offline(
         "tipo": "config_offline_update",
         "offline_modifiers": cfg.offline_modifiers,
         "offline_key": cfg.offline_key,
-        "offline_pin": cfg.offline_pin
+        "offline_pin_hash": _hash_pin(cfg.offline_pin),
     })
     return {"mensaje": "Configuración offline actualizada correctamente"}
 
@@ -1179,6 +1324,84 @@ async def _reanudar_sesion_con_gracia(db, t: Terminal):
     return ultima
 
 
+class _TokenBucket:
+    """Cubeta de fichas: `tasa` eventos/s sostenidos con ráfagas de hasta
+    `rafaga`. Por conexión, sin locks (un handler = una tarea asyncio)."""
+
+    def __init__(self, tasa: float, rafaga: int):
+        import time as _time
+        self._reloj = _time.monotonic
+        self.tasa = tasa
+        self.rafaga = float(rafaga)
+        self.fichas = float(rafaga)
+        self.ultimo = self._reloj()
+
+    def permitir(self) -> bool:
+        ahora = self._reloj()
+        self.fichas = min(self.rafaga, self.fichas + (ahora - self.ultimo) * self.tasa)
+        self.ultimo = ahora
+        if self.fichas >= 1.0:
+            self.fichas -= 1.0
+            return True
+        return False
+
+
+async def _registrar_terminal_por_ip(terminal_ip: str) -> None:
+    """Registro inicial de la PC por IP (antes del 'hello'): UPDATE si existe,
+    INSERT si no. Tolerante a la carrera de dos conexiones simultáneas desde
+    una IP nueva: la segunda choca con el UNIQUE de nombre_red, relee y
+    actualiza en vez de reventar el handler."""
+    async def _actualizar(db) -> bool:
+        res = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip)
+                               .order_by(Terminal.ultima_conexion.desc()))
+        terminal_db = res.scalars().first()  # la IP no es única (DHCP)
+        if terminal_db is None:
+            return False
+        terminal_db.estado = "bloqueado"
+        terminal_db.ultima_conexion = datetime.now()
+        await db.commit()
+        logger.info(f"[WS] Terminal conocida actualizada: {terminal_ip}")
+        return True
+
+    async with async_session() as db:
+        if await _actualizar(db):
+            return
+        db.add(Terminal(
+            nombre_red=f"Terminal-{terminal_ip}",
+            ip=terminal_ip,
+            estado="bloqueado",
+            ultima_conexion=datetime.now(),
+            id_sede=await _sede_para_ip(db, terminal_ip),
+        ))
+        try:
+            await db.commit()
+            logger.info(f"[WS] Nueva terminal registrada en DB: {terminal_ip}")
+            return
+        except IntegrityError:
+            await db.rollback()
+    # Otra conexión la insertó entre la lectura y el INSERT: releer y actualizar.
+    async with async_session() as db:
+        await _actualizar(db)
+
+
+async def _sospecha_pendiente_igual(db, dni: str, proceso_exe: str, detalle: str) -> bool:
+    """True si el alumno ya tiene HOY una sospecha de actividad PENDIENTE por el
+    mismo programa (o, sin .exe, con el mismo detalle). Sobrevive a reconexiones,
+    a diferencia del set en memoria de la conexión."""
+    hoy = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    q = select(Sospecha.id).where(
+        Sospecha.dni_alumno == dni,
+        Sospecha.tipo == "actividad_sospechosa",
+        Sospecha.estado == "pendiente",
+        Sospecha.fecha >= hoy,
+    )
+    if proceso_exe:
+        q = q.where(Sospecha.detalle.contains(proceso_exe, autoescape=True))
+    else:
+        q = q.where(Sospecha.detalle == detalle)
+    return (await db.execute(q.limit(1))).first() is not None
+
+
 # ── WebSocket para terminales ───────────────────────────────────────
 
 @app.websocket("/ws/terminal/{terminal_ip}")
@@ -1205,33 +1428,28 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
 
     await manager.conectar(terminal_id, websocket, ip=terminal_ip)
     logger.info(f"[WS] Terminal conectada: {terminal_id}")
-    await manager.notificar_evento(f"Terminal '{terminal_id}' conectada desde {terminal_ip}")
-    await manager.enviar_log("activity", f"Terminal '{terminal_id}' conectada desde {terminal_ip}")
 
-    # ── Registro automático: INSERT si no existe, UPDATE si ya existe ─
-    async with async_session() as db:
-        res = await db.execute(select(Terminal).where(Terminal.ip == terminal_ip).order_by(Terminal.ultima_conexion.desc()))
-        terminal_db = res.scalars().first()  # la IP no es única (DHCP)
-        if terminal_db:
-            terminal_db.estado = "bloqueado"
-            terminal_db.ultima_conexion = datetime.now()
-            logger.info(f"[WS] Terminal conocida actualizada: {terminal_ip}")
-        else:
-            terminal_db = Terminal(
-                nombre_red=f"Terminal-{terminal_ip}",
-                ip=terminal_ip,
-                estado="bloqueado",
-                ultima_conexion=datetime.now(),
-                id_sede=await _sede_para_ip(db, terminal_ip),
-            )
-            db.add(terminal_db)
-            logger.info(f"[WS] Nueva terminal registrada en DB: {terminal_ip}")
-        await db.commit()
-
-    # Notificar panel admin para que refresque la lista
-    await manager.notificar_admins()
+    # Rate limit de 'actividad' por CONEXIÓN: cada evento es un INSERT y, si es
+    # sospechoso, un aviso a todos los paneles. Un kiosco honesto emite pocos
+    # por segundo al abrir programas; un cliente falso no puede inundar la BD.
+    cubeta_actividad = _TokenBucket(tasa=5.0, rafaga=20)
+    # Sospechas ya creadas en esta conexión: (sesion_id, exe). Evita una fila y
+    # una alerta por cada vez que el alumno reabre el mismo programa.
+    sospechas_vistas: set = set()
+    errores_recepcion = 0
 
     try:
+        await manager.notificar_evento(f"Terminal '{terminal_id}' conectada desde {terminal_ip}")
+        await manager.enviar_log("activity", f"Terminal '{terminal_id}' conectada desde {terminal_ip}")
+
+        # ── Registro automático: INSERT si no existe, UPDATE si ya existe ─
+        # Dentro del try: si la BD falla, el finally saca la conexión del manager
+        # (antes quedaba una conexión fantasma listada como conectada).
+        await _registrar_terminal_por_ip(terminal_ip)
+
+        # Notificar panel admin para que refresque la lista
+        await manager.notificar_admins()
+
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=60.0)
@@ -1241,21 +1459,34 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
             except WebSocketDisconnect:
                 raise
             except Exception as e:
+                # Socket ya cerrado (p.ej. reemplazado con 4009): salir, no girar
+                # en vacío reintentando recibir de un socket muerto.
+                if websocket.application_state != WebSocketState.CONNECTED \
+                        or websocket.client_state != WebSocketState.CONNECTED:
+                    break
+                errores_recepcion += 1
+                if errores_recepcion > 50:
+                    logger.warning(f"[WS] {terminal_id}: demasiados mensajes inválidos; se cierra")
+                    break
                 logger.debug(f"[WS] Error recibiendo JSON: {e}")
                 try:
                     await websocket.send_json({"tipo": "error", "motivo": "Mensaje JSON inválido"})
-                except:
+                except Exception:
                     pass
                 continue
 
+            if not isinstance(data, dict):
+                continue
             tipo = data.get("tipo", "")
             if not tipo:
                 tipo = data.get("type", "") # Soporte para "type" en lugar de "tipo"
-            
-            logger.info(f"[WS] {terminal_id} -> tipo={tipo!r}")
+            tipo = str(tipo)[:40]
+
+            # DEBUG: con cientos de PCs (heartbeat cada 3 s) en INFO llenaría el log.
+            logger.debug(f"[WS] {terminal_id} -> tipo={tipo!r}")
 
             if tipo == "error_report":
-                msg = data.get("message", "Error sin detalle")
+                msg = _limpio(data.get("message", "Error sin detalle"))
                 logger.error(f"[WS-CLIENT-ERROR] {terminal_id}: {msg}")
                 await manager.enviar_log("error", f"PC: {terminal_id} - {msg}")
                 continue
@@ -1269,14 +1500,24 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                 if not hostname:
                     await websocket.send_json({"tipo": "error", "motivo": "hostname vacío en hello"})
                     continue
+                # El hostname es la clave de la PC en el manager, en la BD y en
+                # los logs: solo caracteres de nombre de máquina, sin saltos de
+                # línea ni HTML.
+                if not _HOSTNAME_RE.match(hostname):
+                    logger.warning(f"[WS] {terminal_id}: hello con hostname inválido rechazado: {_limpio(hostname, 80)!r}")
+                    await websocket.send_json({"tipo": "error", "motivo": "hostname inválido en hello"})
+                    continue
 
                 cliente_desbloqueado = bool(data.get("desbloqueado", False))
                 cliente_modo_offline = bool(data.get("modo_offline", False))
 
                 old_id = terminal_id
                 terminal_id = hostname
-                manager.actualizar_id(old_id, terminal_id, ip=terminal_ip)
+                # Si ya había otra conexión con este hostname, el manager la
+                # cierra con 4009 ('reemplazado'); su finally no toca la sesión.
+                await manager.actualizar_id(old_id, terminal_id, ip=terminal_ip, websocket=websocket)
                 logger.info(f"[WS] Terminal re-identificada: {old_id} -> {terminal_id} (hostname={hostname}, desbloqueado={cliente_desbloqueado})")
+                focos_a_limpiar = []
 
                 # Sincronizar DB: nombre (hostname) ↔ IP de forma atómica
                 async with async_session() as db:
@@ -1315,6 +1556,15 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                             id_sede=await _sede_para_ip(db, terminal_ip),
                         ))
                         logger.info(f"[WS] Nueva terminal '{hostname}' registrada con IP={terminal_ip}")
+                    # La PC dice estar BLOQUEADA (y no en modo offline): no puede
+                    # quedar una sesión activa en el servidor para ella (contaría
+                    # como ocupada y el alumno "seguiría" dentro). Motivo
+                    # reanudable: si en < 3 min vuelve desbloqueada, se reanuda.
+                    if not cliente_desbloqueado and not cliente_modo_offline:
+                        t_ref = t or t_by_ip
+                        if t_ref is not None and t_ref.id is not None:
+                            if await _cerrar_activas_de_terminal(db, t_ref.id, "desconexion_red"):
+                                focos_a_limpiar.append(hostname)
                     await db.commit()
 
                     from models import ConfiguracionKiosco
@@ -1337,11 +1587,13 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     "hostname": hostname,
                     "backdoor_modifiers": backdoor_modifiers,
                     "backdoor_key": backdoor_key,
-                    "backdoor_pin": backdoor_pin,
+                    "backdoor_pin_hash": _hash_pin(backdoor_pin),
                     "offline_modifiers": offline_modifiers,
                     "offline_key": offline_key,
-                    "offline_pin": offline_pin
+                    "offline_pin_hash": _hash_pin(offline_pin),
                 })
+                for _nr in focos_a_limpiar:
+                    await manager.limpiar_foco(_nr)
 
                 # ── Si el cliente dice estar desbloqueado, verificar que haya sesión activa ──
                 # En modo offline el cliente maneja su propia sincronización — no forzar bloqueo.
@@ -1391,7 +1643,7 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
 
             elif tipo == "login_request":
                 codigo = str(data.get("codigo", "")).strip().upper()
-                razon = str(data.get("razon", "")).strip()
+                razon = _limpio(data.get("razon", ""), 200).strip()   # = largo de sesiones.razon_uso
                 motivo_id = data.get("motivo_id")
                 if motivo_id is not None:
                     try:
@@ -1589,6 +1841,12 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
 
             elif tipo == "actividad":
                 # Evento de actividad del alumno en la PC (proceso, archivo, comando, navegador)
+                # Excedente del rate limit: se descarta ANTES de tocar la BD.
+                if not cubeta_actividad.permitir():
+                    logger.debug(f"[ACT] {terminal_id}: 'actividad' descartada por rate limit")
+                    continue
+                aviso_sospecha = None
+                aviso_actividad = None
                 async with async_session() as db:
                     t = await _buscar_terminal(db, terminal_id, terminal_ip)
                     if not t:
@@ -1605,11 +1863,13 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     if not alumno:
                         continue
 
-                    tipo_ev    = str(data.get("evento",      "proceso")).strip()
-                    descripcion= str(data.get("descripcion", "")).strip()[:300]
-                    detalle    = str(data.get("detalle",     "") or "").strip()[:600]
-                    nivel      = str(data.get("nivel",       "normal")).strip()
-                    proceso_exe= str(data.get("proceso_exe", "") or "").strip()
+                    # Truncado a los largos de columna (actividad_logs): un valor
+                    # más largo haría fallar el INSERT en MySQL estricto.
+                    tipo_ev    = _limpio(data.get("evento",      "proceso"), 30).strip()
+                    descripcion= _limpio(data.get("descripcion", ""), 300).strip()
+                    detalle    = _limpio(data.get("detalle",     "") or "", 600).strip()
+                    nivel      = _limpio(data.get("nivel",       "normal"), 20).strip()
+                    proceso_exe= _limpio(data.get("proceso_exe", "") or "", 150).strip()
                     if nivel not in ("normal", "sospechoso"):
                         nivel = "normal"
                     # E-13: whitelist del tipo de evento. El cliente solo emite
@@ -1659,27 +1919,37 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                     )
                     db.add(log)
 
-                    # Si es sospechoso, crear sospecha automáticamente
+                    # Si es sospechoso, crear sospecha automáticamente, salvo que
+                    # ya exista una PENDIENTE igual (mismo alumno y programa, hoy):
+                    # el log de actividad sí se guarda siempre (evidencia), pero
+                    # no se duplica la fila de sospecha ni la alerta del panel.
                     if nivel == "sospechoso":
-                        sosp = Sospecha(
-                            dni_alumno    = alumno.dni,
-                            nombre_alumno = alumno.nombre,
-                            tipo          = "actividad_sospechosa",
-                            detalle       = f"[{t.nombre_red}] {descripcion}" + (f" — {detalle}" if detalle else ""),
-                        )
-                        db.add(sosp)
-                        await db.flush()
-                        await manager._broadcast_admins({
-                            "tipo":    "sospecha",
-                            "nivel":   "alerta",
-                            "mensaje": f"ALERTA: {alumno.nombre} ({alumno.dni}) en {t.nombre_red}: {descripcion}",
-                        })
+                        detalle_sosp = (f"[{t.nombre_red}] {descripcion}" + (f" — {detalle}" if detalle else ""))[:600]
+                        clave = (sesion.id, (proceso_exe or descripcion).lower()[:150])
+                        if clave not in sospechas_vistas:
+                            if len(sospechas_vistas) > 1000:
+                                sospechas_vistas.clear()   # acotar memoria por conexión
+                            sospechas_vistas.add(clave)
+                            if not await _sospecha_pendiente_igual(db, alumno.dni, proceso_exe, detalle_sosp):
+                                db.add(Sospecha(
+                                    dni_alumno    = alumno.dni,
+                                    nombre_alumno = alumno.nombre,
+                                    tipo          = "actividad_sospechosa",
+                                    detalle       = detalle_sosp,
+                                    id_sede       = sesion.id_sede,
+                                ))
+                                aviso_sospecha = {
+                                    "tipo":    "sospecha",
+                                    "nivel":   "alerta",
+                                    "mensaje": f"ALERTA: {alumno.nombre} ({alumno.dni}) en {t.nombre_red}: {descripcion}",
+                                }
 
+                    # Commit ANTES de difundir: nunca esperar a los paneles con la
+                    # transacción (y la conexión del pool) abiertas.
                     await db.commit()
-                    logger.info(f"[ACT] {t.nombre_red} | {_mask_dni(alumno.dni)} | {tipo_ev} | {nivel} | {descripcion}")
-
-                    # Notificar al panel admin en tiempo real
-                    await manager._broadcast_admins({
+                    _nivel_log = logging.INFO if nivel == "sospechoso" else logging.DEBUG
+                    logger.log(_nivel_log, f"[ACT] {t.nombre_red} | {_mask_dni(alumno.dni)} | {tipo_ev} | {nivel} | {descripcion}")
+                    aviso_actividad = {
                         "tipo":            "actividad",
                         "nombre_terminal": t.nombre_red,
                         "dni_alumno":      alumno.dni,
@@ -1687,7 +1957,13 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
                         "tipo_evento":     tipo_ev,
                         "descripcion":     descripcion,
                         "nivel":           nivel,
-                    })
+                    }
+
+                # Notificar al panel admin en tiempo real (fuera de la sesión de BD)
+                if aviso_sospecha:
+                    await manager._broadcast_admins(aviso_sospecha)
+                if aviso_actividad:
+                    await manager._broadcast_admins(aviso_actividad)
 
             elif tipo == "logout":
                 logger.info(f"[WS] {terminal_id} logout recibido")
@@ -1723,6 +1999,13 @@ async def websocket_terminal(websocket: WebSocket, terminal_ip: str):
             try:
                 async with async_session() as db:
                     t = await _buscar_terminal(db, terminal_id, terminal_ip)
+                    # Socket que nunca mandó 'hello' (clave = IP): la búsqueda por
+                    # IP puede dar con una PC que SÍ está conectada por otro socket
+                    # (misma IP). No marcarla offline ni cerrarle la sesión.
+                    _viva = manager.conexiones_activas.get(t.nombre_red) if t else None
+                    if _viva is not None and _viva is not websocket:
+                        logger.info(f"[WS] Socket {terminal_id} cerrado; '{t.nombre_red}' sigue conectada por otro socket — sin limpieza")
+                        t = None
                     if t:
                         t.estado = "offline"
                         t.ultima_conexion = datetime.now()   # "visto por última vez"
@@ -1769,6 +2052,25 @@ def _resolver_tid(target: str) -> str:
         if v == target:
             return k
     return target
+
+
+_ADMIN_REVALIDAR_SEG = 60
+# Marcador: "no se pudo verificar (BD caída), conservar rol/sede actuales".
+_USUARIO_SIN_CAMBIOS = object()
+
+
+async def _usuario_panel_vigente(username: str):
+    """Usuario si sigue existiendo, activo y con rol de panel; None si no;
+    _USUARIO_SIN_CAMBIOS si la BD falló (no expulsar por un error transitorio)."""
+    try:
+        async with async_session() as db:
+            u = (await db.execute(select(Usuario).where(Usuario.username == username))).scalar_one_or_none()
+            if u is None or not u.activo or u.rol not in ("superadmin", "admin"):
+                return None
+            return u
+    except Exception as e:
+        logger.warning(f"[WS-Admin] No se pudo revalidar a {username}: {e}")
+        return _USUARIO_SIN_CAMBIOS
 
 
 @app.websocket("/ws/admin")
@@ -1821,17 +2123,57 @@ async def websocket_admin(websocket: WebSocket):
     op_rol      = user.rol
     # Encargado con sede fija: solo puede operar las PCs de su sede (multi-sede).
     op_sede     = user.id_sede if user.rol != "superadmin" else None
+    token_exp   = payload.get("exp")
+    ultima_validacion = time.monotonic()
     manager._admins.append(websocket)
     logger.info(f"Panel admin conectado (autenticado): {op_username} [{op_rol}]")
     await manager._enviar_estado(websocket)
     try:
         while True:
             try:
-                data = await websocket.receive_json()
+                # Timeout para revalidar también a los paneles que solo miran
+                # (sin mandar comandos) y seguir recibiendo pushes.
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=_ADMIN_REVALIDAR_SEG)
+            except asyncio.TimeoutError:
+                data = None
             except WebSocketDisconnect:
                 raise
             except Exception:
+                # Socket cerrado por el manager (panel lento): salir del loop.
+                if websocket.application_state != WebSocketState.CONNECTED \
+                        or websocket.client_state != WebSocketState.CONNECTED:
+                    break
                 await websocket.send_json({"tipo": "error", "motivo": "JSON inválido"})
+                continue
+
+            # ── Revalidación de la sesión del operador ──
+            # Un JWT expirado o un usuario desactivado/degradado no puede seguir
+            # operando PCs por un socket abierto horas atrás. Expiración: en cada
+            # mensaje (barato). Estado en BD: como máximo cada 60 s.
+            motivo_rechazo = None
+            if token_exp is not None and time.time() >= float(token_exp):
+                motivo_rechazo = "Sesión expirada. Vuelva a iniciar sesión."
+            elif time.monotonic() - ultima_validacion >= _ADMIN_REVALIDAR_SEG:
+                u = await _usuario_panel_vigente(op_username)
+                if u is None:
+                    motivo_rechazo = "Usuario desactivado o sin permisos."
+                elif u is not _USUARIO_SIN_CAMBIOS:
+                    ultima_validacion = time.monotonic()
+                    op_rol = u.rol
+                    op_sede = u.id_sede if u.rol != "superadmin" else None
+            if motivo_rechazo:
+                logger.warning(f"[WS-Admin] {op_username}: {motivo_rechazo} Se cierra el socket.")
+                try:
+                    await asyncio.wait_for(websocket.send_json({"tipo": "error", "motivo": motivo_rechazo}), 2)
+                except Exception:
+                    pass
+                manager.desconectar_admin(websocket)
+                try:
+                    await websocket.close(code=4003, reason="Sesion invalida")
+                except Exception:
+                    pass
+                break
+            if data is None:
                 continue
 
             tipo = data.get("tipo") if isinstance(data, dict) else None
@@ -2058,37 +2400,46 @@ async def websocket_admin(websocket: WebSocket):
                                           if k in nombres_sede or manager.terminal_ips.get(k) in ips_sede}
                         ips_conectadas = {manager.terminal_ips.get(k) for k in ids_conectados} - {None}
 
+                    cerradas = 0
+                    focos_bloqueo = []
                     async with async_session() as db:
-                        # Cerrar solo las sesiones de terminales actualmente conectadas
-                        res_todas = await db.execute(select(Sesion).where(Sesion.estado == "activa"))
-                        sesiones_activas = res_todas.scalars().all()
-                        cerradas = 0
-                        for sesion_activa in sesiones_activas:
-                            res_t = await db.execute(select(Terminal).where(Terminal.id == sesion_activa.id_terminal))
-                            t_sesion = res_t.scalar_one_or_none()
-                            if t_sesion and (t_sesion.nombre_red in ids_conectados or t_sesion.ip in ips_conectadas):
-                                sesion_activa.hora_salida   = ahora_bloqueo_todas
-                                sesion_activa.activa        = False
-                                sesion_activa.motivo_cierre = "bloqueo_admin"
+                        # Solo las terminales conectadas (de la sede, si aplica), en
+                        # UNA consulta; y sus sesiones activas en OTRA (antes: una
+                        # consulta por sesión, N+1 con cientos de PCs).
+                        terminales_afectadas = []
+                        if ids_conectados or ips_conectadas:
+                            cond = Terminal.nombre_red.in_(list(ids_conectados)) if ids_conectados else None
+                            if ips_conectadas:
+                                c_ip = Terminal.ip.in_(list(ips_conectadas))
+                                cond = c_ip if cond is None else (cond | c_ip)
+                            terminales_afectadas = (await db.execute(select(Terminal).where(cond))).scalars().all()
+                        # Las offline/desconectadas conservan su estado actual
+                        for t in terminales_afectadas:
+                            t.estado = "bloqueado"
+                        ids_terminal = [t.id for t in terminales_afectadas]
+                        if ids_terminal:
+                            nombre_por_id = {t.id: t.nombre_red for t in terminales_afectadas}
+                            res_s = await db.execute(select(Sesion).where(
+                                Sesion.estado == "activa", Sesion.id_terminal.in_(ids_terminal)))
+                            for sesion_activa in res_s.scalars().all():
+                                _cerrar_sesion(sesion_activa, "bloqueo_admin")
+                                sesion_activa.hora_salida = ahora_bloqueo_todas
+                                focos_bloqueo.append(nombre_por_id.get(sesion_activa.id_terminal))
                                 cerradas += 1
                         logger.warning(f"[AUDIT] {op_username} [{op_rol}] ejecutó BLOQUEO GLOBAL: {cerradas} sesión(es) cerrada(s) (solo conectadas)")
-
-                        res_terms = await db.execute(select(Terminal))
-                        for t in res_terms.scalars().all():
-                            if t.nombre_red in ids_conectados or t.ip in ips_conectadas:
-                                t.estado = "bloqueado"
-                            # Las offline/desconectadas conservan su estado actual
                         await registrar_auditoria(op_username, "bloquear_todas", rol=op_rol,
                                                   objetivo=f"sede {sede_bloqueo}" if sede_bloqueo else "toda la sala",
                                                   detalle=f"{cerradas} sesión(es) cerrada(s)", db=db)
                         await db.commit()
 
-                    # Enviar comando "bloquear" solo a los kioscos conectados (de la sede, si aplica)
+                    # Enviar "bloquear" en paralelo (con timeout por PC) solo a los
+                    # kioscos conectados de la sede, o a todos si no hay sede.
                     if sede_bloqueo:
-                        for k in ids_conectados:
-                            await manager.bloquear_terminal(k)
+                        await manager.bloquear_todas(ids_conectados)
                     else:
                         await manager.bloquear_todas()
+                    for _nr in set(focos_bloqueo) - {None}:
+                        await manager.limpiar_foco(_nr)
                     await manager.notificar_evento(f"BLOQUEO GLOBAL: {cerradas} sesión(es) cerrada(s) ({len(ids_conectados)} terminal(es) conectada(s))", "warning")
                     await websocket.send_json({"tipo": "ok", "mensaje": f"Terminales conectadas bloqueadas ({cerradas} sesión(es) cerrada(s))"})
                     await manager.notificar_admins()
@@ -2163,21 +2514,45 @@ async def offline_sync(datos: _OfflineSyncReq, request: Request, db: AsyncSessio
     # Buscar terminal por nombre. NO se crea aquí (G-1): una sesión offline
     # legítima proviene de una PC que ya estaba registrada. Si no existe, se
     # rechaza para no permitir crear terminales fantasma sin autenticación.
-    res_t = await db.execute(select(Terminal).where(Terminal.nombre_red == datos.terminal))
+    nombre_terminal = _limpio(datos.terminal, 120).strip()
+    res_t = await db.execute(select(Terminal).where(Terminal.nombre_red == nombre_terminal))
     terminal = res_t.scalar_one_or_none()
     if terminal is None:
-        logger.warning(f"[OfflineSync] Terminal desconocida rechazada: {datos.terminal}")
+        logger.warning(f"[OfflineSync] Terminal desconocida rechazada: {nombre_terminal!r}")
         return {"estado": "terminal_desconocida", "motivo": "Terminal no registrada en el sistema."}
+
+    # Mitigación sin token: solo la propia PC puede sincronizar su sesión. La IP
+    # TCP real de la petición debe ser la que el servidor registró para esa
+    # terminal (la fija el WS con la IP de conexión, no la que dice el cliente).
+    # También vale la IP de su WS vivo (si DHCP le cambió la IP durante el corte,
+    # el 'hello' ya la actualizó en memoria aunque la fila aún no).
+    ip_peticion = rate_limit._ip_cliente(request)
+    ip_ok = bool(terminal.ip) and ip_peticion == terminal.ip
+    ip_ok = ip_ok or manager.terminal_ips.get(terminal.nombre_red) == ip_peticion
+    if not ip_ok:
+        logger.warning(f"[OfflineSync] Rechazado: '{nombre_terminal}' registrada con IP={terminal.ip} "
+                       f"pero la petición vino de {ip_peticion}")
+        return {"estado": "rechazado", "motivo": "La petición no proviene de la terminal indicada."}
 
     # Parsear hora de inicio (retroactiva). NOTA sobre hora_fin (G-8): el cliente
     # envía hora_fin al RECONECTAR, pero su intención es CONTINUAR la sesión (que
     # el alumno siga trabajando), no cerrarla. Por eso la sesión se registra como
     # 'activa' y hora_fin se ignora a propósito aquí: la sesión se cerrará por el
     # flujo normal (logout, bloqueo, desconexión) cuando realmente termine.
+    from datetime import timedelta
+    ahora = datetime.now()
     try:
         hora_inicio = datetime.strptime(datos.hora_inicio, "%Y-%m-%d %H:%M:%S")
     except ValueError:
-        hora_inicio = datetime.now()
+        hora_inicio = ahora
+    # Acotar la hora que manda el cliente: nunca futura ni de más de 24 h atrás
+    # (un reloj desfasado o un valor manipulado inflarían las horas de uso).
+    hora_inicio = max(ahora - timedelta(hours=24), min(hora_inicio, ahora))
+
+    # Mismas reglas que el login: sesión única por alumno y una sola sesión viva
+    # por PC.
+    await _aplicar_sesion_unica(db, dni, terminal_destino_id=terminal.id)
+    await _cerrar_activas_de_terminal(db, terminal.id, "reemplazada_en_terminal")
 
     # Registrar sesión activa con hora de entrada retroactiva.
     # fecha_uso usa la fecha del servidor (no del cliente) para que los filtros
@@ -2187,22 +2562,28 @@ async def offline_sync(datos: _OfflineSyncReq, request: Request, db: AsyncSessio
         dni_alumno   = dni,
         id_terminal  = terminal.id,
         hora_entrada = hora_inicio,
-        razon_uso    = datos.razon,
+        razon_uso    = _limpio(datos.razon, 200) or None,
         estado       = "activa",
         confirmada   = True,
-        fecha_uso    = datetime.now().date(),
+        fecha_uso    = ahora.date(),
     )
     db.add(sesion)
-    terminal.estado = "activo"   # Terminal usa "activo" (masculino); "activa" es de Sesion
-    terminal.ultima_conexion = datetime.now()
+    # Solo se marca en uso si el kiosco está conectado ahora mismo; si no, la
+    # terminal conserva su estado (offline) hasta que el WS la registre.
+    conectada = terminal.nombre_red in manager.conexiones_activas
+    if conectada:
+        terminal.estado = "activo"   # Terminal usa "activo" (masculino); "activa" es de Sesion
+        terminal.ultima_conexion = ahora
     await db.commit()
     await db.refresh(sesion)
 
-    logger.info(f"[OfflineSync] Sesión offline sincronizada: DNI={dni} terminal={datos.terminal} inicio={datos.hora_inicio}")
+    logger.info(f"[OfflineSync] Sesión offline sincronizada: DNI={_mask_dni(dni)} terminal={nombre_terminal} "
+                f"inicio={hora_inicio:%Y-%m-%d %H:%M:%S} conectada={conectada}")
 
     # Notificar al kiosco que la sesión fue confirmada — le pasa el nombre del alumno
-    # para que la UI se actualice con la bienvenida normal
-    await manager.enviar_comando(terminal.ip, {
+    # para que la UI se actualice con la bienvenida normal. El manager indexa
+    # por hostname (nombre_red), no por IP: antes este envío nunca llegaba.
+    await manager.enviar_comando(terminal.nombre_red, {
         "tipo":   "sesion_sync_ok",
         "dni":    dni,
         "nombre": alumno.nombre,
@@ -2426,4 +2807,9 @@ if __name__ == "__main__":
         _port = int(_cfg.get("network", {}).get("port", 8000))
     except Exception:
         pass
-    uvicorn.run("main:app", host=_host, port=_port, reload=False)
+    # ws_max_size: tope de 64 KB por mensaje WebSocket (el default de uvicorn es
+    # 16 MB). Ningún mensaje legítimo de kiosco o panel pasa de unos pocos KB;
+    # así un cliente falso no puede hacer que el servidor bufferice megas por
+    # mensaje. Un solo proceso: NUNCA workers>1 (el estado WS vive en memoria).
+    # Si se arranca con la CLI de uvicorn, pasar --ws-max-size 65536.
+    uvicorn.run("main:app", host=_host, port=_port, reload=False, ws_max_size=64 * 1024)

@@ -13,9 +13,17 @@ if not DATABASE_URL or not DATABASE_URL.startswith("mysql"):
         "Defina DATABASE_URL=mysql+asyncmy://user:pass@host:3306/db en el .env"
     )
 
+# Pool dimensionado para el servidor central (cientos de PCs de varias sedes).
+# UN solo proceso: NUNCA arrancar con uvicorn --workers N, porque el estado de
+# conexiones (core/websocket_manager) vive en memoria y cada worker vería solo
+# parte de las PCs. pool_timeout corto: mejor fallar rápido un evento que dejar
+# colgado el handler de un kiosco esperando conexión.
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
+    pool_size=20,
+    max_overflow=20,
+    pool_timeout=10,
     pool_recycle=3600,
     pool_pre_ping=True,
 )

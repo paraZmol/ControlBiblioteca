@@ -16,6 +16,9 @@ from fastapi import Request, HTTPException
 
 # Estructura: { (clave, ip): deque[timestamps] }
 _eventos: dict[tuple[str, str], deque] = {}
+# Ventana propia de cada clave: la limpieza global no puede usar la del
+# llamador de turno (un límite de 60 s borraría marcas de uno de 15 min).
+_ventanas: dict[tuple[str, str], float] = {}
 _lock = threading.Lock()
 
 # Última limpieza global, para no recorrer todo el dict en cada petición.
@@ -36,19 +39,21 @@ def _ip_cliente(request: Request) -> str:
     return "desconocido"
 
 
-def _limpiar_vencidos(ahora: float, ventana: float) -> None:
-    """Elimina entradas cuyas marcas ya salieron de la ventana (mantenimiento)."""
+def _limpiar_vencidos(ahora: float) -> None:
+    """Elimina entradas cuyas marcas ya salieron de SU ventana (mantenimiento)."""
     if ahora - _ultima_limpieza[0] < _INTERVALO_LIMPIEZA:
         return
     _ultima_limpieza[0] = ahora
     muertas = []
     for k, dq in _eventos.items():
+        ventana = _ventanas.get(k, _INTERVALO_LIMPIEZA)
         while dq and ahora - dq[0] > ventana:
             dq.popleft()
         if not dq:
             muertas.append(k)
     for k in muertas:
         _eventos.pop(k, None)
+        _ventanas.pop(k, None)
 
 
 def verificar(clave: str, ip: str, limite: int, ventana_seg: float) -> bool:
@@ -62,7 +67,8 @@ def verificar(clave: str, ip: str, limite: int, ventana_seg: float) -> bool:
     ahora = time.monotonic()
     k = (clave, ip)
     with _lock:
-        _limpiar_vencidos(ahora, ventana_seg)
+        _limpiar_vencidos(ahora)
+        _ventanas[k] = ventana_seg
         dq = _eventos.get(k)
         if dq is None:
             dq = deque()

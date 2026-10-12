@@ -20,3 +20,6 @@ server/.env
 .env
 .env.*
 server/.env.*
+
+# Logs del servidor (rotativos, con datos operativos)
+server/logs/

@@ -124,7 +124,7 @@ namespace ControlBiblioteca.Client.Services
 
             void Verificar(object? s, RoutedEventArgs ev)
             {
-                if (pinBox.Password == _config.BackdoorPin)
+                if (KioscoConfig.PinValido(pinBox.Password, _config.BackdoorPinHash, _config.BackdoorPin))
                 {
                     ventana.Close();
                     _app.EscaparAExplorer("maintenance_backdoor");
@@ -133,7 +133,7 @@ namespace ControlBiblioteca.Client.Services
                 {
                     pinBox.Clear();
                     pinBox.Focus();
-                    etiqueta.Text       = "PIN incorrecto — intente nuevamente:";
+                    etiqueta.Text       = KioscoConfig.PinBloqueado ? "Demasiados intentos — espere 1 minuto:" : "PIN incorrecto — intente nuevamente:";
                     etiqueta.Foreground = Brushes.Salmon;
                 }
             }
@@ -156,7 +156,8 @@ namespace ControlBiblioteca.Client.Services
             ventana.ShowDialog();
         }
 
-        public void ActualizarConfig(int modifiers, int key, string pin)
+        /// <param name="pinOHash">Hash PBKDF2 (servidor nuevo) o PIN en claro (servidor viejo).</param>
+        public void ActualizarConfig(int modifiers, int key, string pinOHash, bool esHash = false)
         {
             _app.Dispatcher.Invoke(() =>
             {
@@ -167,7 +168,8 @@ namespace ControlBiblioteca.Client.Services
 
                 _config.BackdoorModifiers = modifiers;
                 _config.BackdoorKey = key;
-                _config.BackdoorPin = pin;
+                if (esHash) { _config.BackdoorPinHash = pinOHash; _config.BackdoorPin = ""; }
+                else        { _config.BackdoorPin = pinOHash;     _config.BackdoorPinHash = ""; }
                 _config.Guardar();
 
                 if (_hwnd != null)

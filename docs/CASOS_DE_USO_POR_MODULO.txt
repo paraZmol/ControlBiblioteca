@@ -420,19 +420,15 @@ KIO-13 - Bloqueo de teclas y del Administrador de tareas   [Sistema]
   (Implementado en: client/Services/SecurityManager.cs:41-107; client/Services/KeyboardHook.cs:40-109)
 
 
-KIO-14 - Salida de emergencia y consola de depuracion   [Encargado]
-  Objetivo: Salir del kiosco al escritorio ante un fallo, sin reinstalar
-  Antes de esto: Ventana del kiosco con el foco
+KIO-14 - Consola de depuracion y comportamiento ante fallos
+  Objetivo: Diagnosticar el kiosco sin abrir la PC
   Pasos:
-    1. Ctrl+M activa el modo escape y arranca un timer de 5 s - MainWindow.xaml.cs:427-452
-    2. Dentro de esa ventana, 5 pulsaciones de ESC disparan ActivarEscapeEmergencia('ctrl_m_escape_5x') - MainWindow.xaml.cs:30, 455-468
-    3. ActivarEscapeEmergencia marca _cerrandoPorEscape, cancela el login pendiente, desconecta el WS y llama App.EscaparAExplorer, que hace Security.Desbloquear() - MainWindow.xaml.cs:471-478; App.xaml.cs:336-340
+    1. Ctrl+B+U alterna PanelDebug (ultimas lineas de log: IP, hostname, URL del WS, errores). Nunca muestra PINs.
   Si pasa otra cosa:
-    - Atajo legado Ctrl+Alt+F10 (MASTER_KEY) hace lo mismo de inmediato - MainWindow.xaml.cs:40-41, 417-424
-    - Si pasan los 5 s sin completar los ESC, la secuencia se cancela - MainWindow.xaml.cs:441-447
-    - Ctrl+B+U alterna PanelDebug, que muestra las ultimas 32 lineas de log (IP, hostname, URL del WS, errores) - MainWindow.xaml.cs:405-415, 845-857
-    - EscaparAExplorer tambien se dispara solo: watchdog de UI congelada, excepcion no manejada y excepcion del Dispatcher - App.xaml.cs:322, 358, 368
-  Resultado: El proceso libera el bloqueo y devuelve el escritorio de Windows
+    - Las salidas sin PIN (Ctrl+Alt+F10 y Ctrl+M + 5x ESC) se eliminaron en v4.55.
+    - Excepcion no manejada o UI congelada: App.ReiniciarKiosco relanza el kiosco SIN desbloquear (fail-closed).
+    - Error puntual de UI: se registra y sigue; 3 en un minuto reinician el kiosco.
+  Resultado: Para salir al escritorio solo existe el mantenimiento con PIN (KIO de backdoor)
   Donde: Sin UI propia (atajos) + PanelDebug/TxtDebug
   (Implementado en: client/UI/MainWindow.xaml.cs:403-478; client/App.xaml.cs:336-368)
 

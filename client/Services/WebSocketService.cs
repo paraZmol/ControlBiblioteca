@@ -120,6 +120,10 @@ namespace ControlBiblioteca.Client.Services
                         OnMensajeRecibido?.Invoke(primerMensaje);
 
                     await EscucharAsync();
+                    // Cierre ordenado del servidor (p.ej. reinicio): avisar igual que
+                    // ante un error, para que se active la logica de desconexion.
+                    if (!_cts.Token.IsCancellationRequested)
+                        OnConexionCambiada?.Invoke(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -189,29 +193,45 @@ namespace ControlBiblioteca.Client.Services
 
         // ── Métodos privados ───────────────────────────────────────
 
+        private const int MAX_MENSAJE = 256 * 1024;
+
+        /// <summary>
+        /// Lee un mensaje COMPLETO (puede llegar en varios fragmentos). Antes se
+        /// leia un solo bloque de 4 KB: un aviso largo llegaba partido en JSON
+        /// invalido. Devuelve null si el socket se cerro.
+        /// </summary>
+        private async Task<string?> RecibirMensajeAsync(ClientWebSocket ws)
+        {
+            var buffer = new byte[8192];
+            using var acumulado = new System.IO.MemoryStream();
+            while (true)
+            {
+                var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token);
+                if (result.MessageType == WebSocketMessageType.Close) return null;
+                acumulado.Write(buffer, 0, result.Count);
+                if (acumulado.Length > MAX_MENSAJE)
+                    throw new InvalidOperationException("Mensaje del servidor demasiado grande");
+                if (result.EndOfMessage)
+                    return Encoding.UTF8.GetString(acumulado.GetBuffer(), 0, (int)acumulado.Length);
+            }
+        }
+
         private async Task<string?> LeerUnMensajeAsync()
         {
-            if (_ws == null) return null;
-            try
-            {
-                var buffer = new byte[4096];
-                var result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token);
-                if (result.MessageType == WebSocketMessageType.Close) return null;
-                return Encoding.UTF8.GetString(buffer, 0, result.Count);
-            }
+            var ws = _ws;
+            if (ws == null) return null;
+            try { return await RecibirMensajeAsync(ws); }
             catch { return null; }
         }
 
         private async Task EscucharAsync()
         {
-            var buffer = new byte[4096];
-            while (_ws?.State == WebSocketState.Open && !_cts.Token.IsCancellationRequested)
+            var ws = _ws;
+            while (ws != null && ws.State == WebSocketState.Open && !_cts.Token.IsCancellationRequested)
             {
-                var result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token);
-                if (result.MessageType == WebSocketMessageType.Close)
+                string? mensaje = await RecibirMensajeAsync(ws);
+                if (mensaje == null)
                     break;
-
-                string mensaje = Encoding.UTF8.GetString(buffer, 0, result.Count);
                 OnMensajeRecibido?.Invoke(mensaje);
             }
         }

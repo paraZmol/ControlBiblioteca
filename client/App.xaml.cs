@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Principal;
@@ -82,12 +83,27 @@ namespace ControlBiblioteca.Client
             // salía → esa sesión quedaba SIN kiosco. Con Local\ tarea+Run siguen
             // deduplicados dentro de la misma sesión, que es lo que se busca.
             _mutex = new Mutex(true, "Local\\UNASAM_Biblioteca_Kiosco", out bool createdNew);
+            // Relanzado tras un error (ReiniciarKiosco): el proceso anterior todavia
+            // puede estar saliendo; esperar a que suelte el mutex en vez de salir.
+            if (!createdNew && Environment.GetCommandLineArgs().Contains("--reinicio"))
+            {
+                try { createdNew = _mutex.WaitOne(TimeSpan.FromSeconds(15)); }
+                catch (AbandonedMutexException) { createdNew = true; }
+            }
             _esDuenoMutex = createdNew;
             AppLog($"Mutex createdNew={createdNew}");
             if (!createdNew)
             {
                 AppLog("Segunda instancia en esta sesión — saliendo (la otra ya bloquea).");
                 Current.Shutdown();
+                return;
+            }
+
+            // ── Rollback de una actualizacion que no arranca bien ─────────────────
+            if (AutoUpdater.RegistrarArranqueYRollback())
+            {
+                LiberarMutex();
+                Environment.Exit(0);
                 return;
             }
 
@@ -338,7 +354,7 @@ namespace ControlBiblioteca.Client
                 {
                     if (++checksSinCambio >= LIMITE)
                     {
-                        EscaparAExplorer("watchdog_ui_congelada");
+                        ReiniciarKiosco("watchdog_ui_congelada");
                         return;
                     }
                 }
@@ -351,6 +367,31 @@ namespace ControlBiblioteca.Client
         }
 
         // ── Escape de emergencia ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Ante un error inesperado el kiosco se REINICIA sin desbloquear (antes
+        /// llamaba a EscaparAExplorer: la PC quedaba libre hasta que la tarea
+        /// programada lo relanzaba, y sin sesion en el servidor). Si el proceso
+        /// lleva menos de 30 s vivo (error al arrancar) no se relanza al instante,
+        /// para no entrar en un bucle; la tarea programada lo reintenta cada minuto.
+        /// </summary>
+        private readonly System.Collections.Generic.List<DateTime> _erroresUi = new();
+
+        public void ReiniciarKiosco(string razon)
+        {
+            CerrandoApp = true;
+            AppLog($"!!! ReiniciarKiosco — razón: {razon}");
+            try
+            {
+                var vivo = DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime;
+                string? exe = Environment.ProcessPath;
+                if (vivo.TotalSeconds >= 30 && !string.IsNullOrEmpty(exe))
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, "--reinicio")
+                    { UseShellExecute = false });
+            }
+            catch (Exception ex) { AppLog($"No se pudo relanzar: {ex.Message}"); }
+            Environment.Exit(1);
+        }
 
         public void EscaparAExplorer(string razon)
         {
@@ -372,9 +413,9 @@ namespace ControlBiblioteca.Client
             {
                 string msg = args.ExceptionObject?.ToString() ?? "Error desconocido";
                 AppLog($"!!! UnhandledException (isTerminating={args.IsTerminating}):\n{msg}");
-                try { MessageBox.Show(msg, "Error Fatal — ControlBiblioteca",
-                    MessageBoxButton.OK, MessageBoxImage.Error); } catch { }
-                EscaparAExplorer("unhandled_exception");
+                // Sin MessageBox: mostraba la traza al alumno y dejaba el proceso
+                // detenido esperando un clic.
+                ReiniciarKiosco("unhandled_exception");
             };
 
             DispatcherUnhandledException += (_, args) =>
@@ -382,9 +423,14 @@ namespace ControlBiblioteca.Client
                 args.Handled = true;
                 string msg = args.Exception.ToString();
                 AppLog($"!!! DispatcherUnhandledException:\n{msg}");
-                try { MessageBox.Show(msg, "Error — ControlBiblioteca",
-                    MessageBoxButton.OK, MessageBoxImage.Error); } catch { }
-                EscaparAExplorer("dispatcher_exception");
+                // Un error puntual de UI no justifica cortar la sesion del alumno:
+                // se registra y la app sigue. Solo si se repite (3 en 1 min) se
+                // reinicia el kiosco (sin desbloquear).
+                var ahora = DateTime.Now;
+                _erroresUi.RemoveAll(t => (ahora - t).TotalSeconds > 60);
+                _erroresUi.Add(ahora);
+                if (_erroresUi.Count >= 3)
+                    ReiniciarKiosco("dispatcher_exception_repetida");
             };
 
             TaskScheduler.UnobservedTaskException += (_, args) =>
@@ -435,14 +481,14 @@ namespace ControlBiblioteca.Client
             }
         }
 
-        internal void ActualizarBackdoorConfig(int modifiers, int key, string pin)
+        internal void ActualizarBackdoorConfig(int modifiers, int key, string pin, bool esHash = false)
         {
-            _backdoor?.ActualizarConfig(modifiers, key, pin);
+            _backdoor?.ActualizarConfig(modifiers, key, pin, esHash);
         }
 
-        internal void ActualizarOfflineConfig(int modifiers, int key, string pin)
+        internal void ActualizarOfflineConfig(int modifiers, int key, string pin, bool esHash = false)
         {
-            OfflineBackdoor?.ActualizarConfig(modifiers, key, pin);
+            OfflineBackdoor?.ActualizarConfig(modifiers, key, pin, esHash);
         }
 
         // Llamado por OfflineBackdoor cuando el alumno completó el diálogo

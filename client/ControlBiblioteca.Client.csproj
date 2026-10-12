@@ -26,8 +26,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Net.WebSockets.Client" Version="4.3.2" />
-    <PackageReference Include="System.Text.Json" Version="8.0.4" />
+    <!-- System.Net.WebSockets.Client y System.Text.Json ya vienen en net8.0;
+         los paquetes NuGet viejos (4.3.2 / 8.0.4 con vulnerabilidad NU1903) se quitaron. -->
     <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
 

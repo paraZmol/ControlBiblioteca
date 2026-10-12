@@ -1004,32 +1004,13 @@ FLUJO_ALUMNO.txt.
   Volver al kiosco requiere volver a ejecutar el .exe.
 
 
-  J-2. CÓMO USARLO (DOS MÉTODOS)
-  ─────────────────────────────────
-
-  MÉTODO 1 — Atajo rápido (Ctrl+Alt+F10, configurable):
-    1. Presionar la combinación configurada (por defecto: Ctrl+Alt+F10).
-    2. El kiosco se cierra inmediatamente y regresa al escritorio.
-    - NO pide confirmación ni PIN. Es instantáneo.
-    - Funciona tanto si el kiosco está bloqueado como si hay sesión activa.
-    - Si había sesión activa, el servidor la detecta como desconexión
-      y cierra la sesión con motivo "desconexion_red".
-
-  MÉTODO 2 — Secuencia Ctrl+M + 5x ESC (método legado/alternativo):
-    1. Presionar Ctrl+M. El kiosco activa el modo de escape internamente
-       (no hay aviso visual — solo se registra en el log interno).
-    2. Dentro de los 5 segundos siguientes, presionar ESC exactamente 5 veces.
-    3. El kiosco se cierra y regresa al escritorio.
-    - Si pasan más de 5 segundos sin completar los 5 ESC, el contador
-      se resetea y hay que empezar desde Ctrl+M otra vez.
-    - No pide PIN.
-
-  PARA PROBARLO (método 1):
-    1. Con el kiosco corriendo (bloqueado o con sesión), presionar
-       Ctrl+Alt+F10.
-    2. Verificar que el kiosco se cierra y el escritorio de Windows
-       queda visible.
-    3. En el log del servidor debería aparecer la terminal como "offline".
+  J-2. SALIDAS SIN PIN: ELIMINADAS (oct 2026)
+  ─────────────────────────────────────────────
+  Las salidas "legado" Ctrl+Alt+F10 y Ctrl+M + 5x ESC se ELIMINARON del
+  kiosco (v4.55): no pedian PIN y cualquier alumno que las conociera salia
+  del control. La unica forma de salir es el mantenimiento (atajo + PIN de
+  mantenimiento) o el modo offline (atajo + PIN offline). Ante un error
+  interno el kiosco ya no se abre: se reinicia solo, bloqueado.
 
 
   J-3. CONFIGURAR EL PIN Y LA TECLA DESDE EL PANEL
@@ -1037,7 +1018,7 @@ FLUJO_ALUMNO.txt.
   Quién puede hacerlo: SOLO SUPERADMIN.
 
   El atajo y PIN del modo offline (Ctrl+Alt+F11 por defecto) y el atajo
-  de mantenimiento (Ctrl+Alt+F10) se pueden cambiar desde el panel sin
+  de mantenimiento (Ctrl+Alt+F7) se pueden cambiar desde el panel sin
   tener que editar archivos en cada PC: el servidor los distribuye
   automáticamente a todos los kioscos conectados.
 

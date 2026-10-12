@@ -19,14 +19,20 @@
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: { extend: { colors: {
-                zinc: { 950: '#09090b' }
-            }}}
+        // Sin internet (servidor en LAN) el CDN no carga: sin este guard el
+        // ReferenceError cortaba el script. El panel sigue con style.css.
+        if (window.tailwind) {
+            tailwind.config = {
+                darkMode: 'class',
+                theme: { extend: { colors: {
+                    zinc: { 950: '#09090b' }
+                }}}
+            };
         }
     </script>
-    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- Version exacta: sin fijarla, unpkg sirve la ultima y un cambio mayor
+         podria romper los iconos sin aviso. -->
+    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1/src/index.js"></script>
     <link rel="stylesheet" href="static/css/style.css?v=90">
     <style>
         ::-webkit-scrollbar { width:6px; height:6px; }
@@ -346,7 +352,7 @@
                     <button id="monLiveTab" class="mon-live-tab" onclick="toggleActividadVivo()" aria-label="Abrir actividad en vivo">
                     <i class="ph ph-activity"></i>
                     <span class="mon-live-tab-txt">Actividad en vivo</span>
-                    <span class="mon-live-count" id="monLiveCount"></span>
+                    <span class="mon-live-count" id="monLiveCount" title="Eventos de hoy"></span>
                 </button>
                 <div id="monLiveOverlay" class="mon-live-overlay" onclick="toggleActividadVivo()"></div>
                 <aside id="monLiveSide" class="mon-live-drawer" aria-hidden="true">
@@ -408,9 +414,9 @@
                         </div>
                         <div class="hist-search">
                             <i class="ph ph-magnifying-glass hist-search-ico"></i>
-                            <input id="filtroSearch" type="text" placeholder="Buscar nombre, DNI o código…" oninput="aplicarFiltros()">
+                            <input id="filtroSearch" aria-label="Buscar en el historial por nombre, DNI o código" type="text" placeholder="Buscar nombre, DNI o código…" oninput="aplicarFiltros()">
                         </div>
-                        <select id="filtroActividad" class="hist-select" onchange="aplicarFiltros()">
+                        <select id="filtroActividad" aria-label="Filtrar por actividad" class="hist-select" onchange="aplicarFiltros()">
                             <option value="">Todas las actividades</option>
                             <option value="Investigación">Investigación</option>
                             <option value="Tarea">Tarea</option>
@@ -444,7 +450,7 @@
                     <div class="hist-adv-filters" id="histAdvFilters">
                         <div class="af-field">
                             <label class="af-lbl">Estado</label>
-                            <select class="hist-select" id="filtroEstado" onchange="aplicarFiltros()" style="width:100%;min-width:0">
+                            <select class="hist-select" id="filtroEstado" aria-label="Filtrar por estado de la sesión" onchange="aplicarFiltros()" style="width:100%;min-width:0">
                                 <option value="">Todos</option>
                                 <option value="activa">Activa</option>
                                 <option value="cerrada">Cerrada</option>
@@ -452,7 +458,7 @@
                         </div>
                         <div class="af-field">
                             <label class="af-lbl">Mes</label>
-                            <select class="hist-select af-input" id="filtroMes" onchange="aplicarFiltroMesAnio()" style="min-width:110px">
+                            <select class="hist-select af-input" id="filtroMes" aria-label="Filtrar por mes" onchange="aplicarFiltroMesAnio()" style="min-width:110px">
                                 <option value="">— cualquiera —</option>
                                 <option value="01">Enero</option>
                                 <option value="02">Febrero</option>
@@ -470,17 +476,17 @@
                         </div>
                         <div class="af-field">
                             <label class="af-lbl">Año</label>
-                            <select class="hist-select af-input" id="filtroAnio" onchange="aplicarFiltroMesAnio()" style="min-width:90px">
+                            <select class="hist-select af-input" id="filtroAnio" aria-label="Filtrar por año" onchange="aplicarFiltroMesAnio()" style="min-width:90px">
                                 <option value="">— cualquiera —</option>
                             </select>
                         </div>
                         <div class="af-field">
                             <label class="af-lbl">Desde</label>
-                            <input type="date" id="rangoDesde" onchange="limpiarMesAnio(); aplicarFiltros()" class="af-input">
+                            <input type="date" id="rangoDesde" aria-label="Fecha desde" onchange="limpiarMesAnio(); aplicarFiltros()" class="af-input">
                         </div>
                         <div class="af-field">
                             <label class="af-lbl">Hasta</label>
-                            <input type="date" id="rangoHasta" onchange="limpiarMesAnio(); aplicarFiltros()" class="af-input">
+                            <input type="date" id="rangoHasta" aria-label="Fecha hasta" onchange="limpiarMesAnio(); aplicarFiltros()" class="af-input">
                         </div>
                         <div class="af-field" style="justify-content:flex-end">
                             <button class="af-clear" onclick="limpiarFiltrosAvanzados()">Limpiar filtros</button>
@@ -552,7 +558,7 @@
                             <div class="flex gap-3 mb-4 items-center flex-wrap">
                                 <div class="relative flex-1 min-w-52">
                                     <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
-                                    <input id="maestroBuscar" type="text" placeholder="Buscar por nombre, DNI o código..."
+                                    <input id="maestroBuscar" aria-label="Buscar alumnos por nombre, DNI o código" type="text" placeholder="Buscar por nombre, DNI o código..."
                                         class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                                         oninput="buscarMaestro()">
                                 </div>
@@ -606,7 +612,7 @@
                             <div class="flex gap-3 mb-4 items-center flex-wrap">
                                 <div class="relative flex-1 min-w-52">
                                     <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
-                                    <input id="egresadosBuscar" type="text" placeholder="Buscar por nombre, DNI o código..."
+                                    <input id="egresadosBuscar" aria-label="Buscar egresados por nombre, DNI o código" type="text" placeholder="Buscar por nombre, DNI o código..."
                                         class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                                         oninput="buscarGrupo('egresados')">
                                 </div>
@@ -656,7 +662,7 @@
                             <div class="flex gap-3 mb-4 items-center flex-wrap">
                                 <div class="relative flex-1 min-w-52">
                                     <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
-                                    <input id="docentesBuscar" type="text" placeholder="Buscar por nombre, DNI o correo..."
+                                    <input id="docentesBuscar" aria-label="Buscar docentes por nombre, DNI o correo" type="text" placeholder="Buscar por nombre, DNI o correo..."
                                         class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                                         oninput="buscarGrupo('docentes')">
                                 </div>
@@ -707,7 +713,7 @@
                             <div class="flex gap-3 mb-4 items-center flex-wrap">
                                 <div class="relative flex-1 min-w-52">
                                     <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
-                                    <input id="autoridadesBuscar" type="text" placeholder="Buscar por nombre, DNI o cargo..."
+                                    <input id="autoridadesBuscar" aria-label="Buscar autoridades por nombre, DNI o cargo" type="text" placeholder="Buscar por nombre, DNI o cargo..."
                                         class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                                         oninput="buscarGrupo('autoridades')">
                                 </div>
@@ -788,11 +794,11 @@
                             <div class="flex gap-3 mb-4 items-center flex-wrap">
                                 <div class="relative flex-1 min-w-52">
                                     <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-sm"></i>
-                                    <input id="incidenciasBuscar" type="text" placeholder="Buscar por nombre o DNI…"
+                                    <input id="incidenciasBuscar" aria-label="Buscar incidencias por nombre o DNI" type="text" placeholder="Buscar por nombre o DNI…"
                                         class="input-filtro w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm rounded-lg pl-9 pr-4 py-2 text-zinc-900 dark:text-white focus:outline-none focus:border-amber-500 transition-colors placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                                         oninput="filtrarIncidencias()">
                                 </div>
-                                <select id="incidenciasFiltroTipo" class="hist-select" onchange="filtrarIncidencias()">
+                                <select id="incidenciasFiltroTipo" aria-label="Filtrar incidencias por tipo" class="hist-select" onchange="filtrarIncidencias()">
                                     <option value="">Todos los tipos</option>
                                     <option value="leve">Leve</option>
                                     <option value="grave">Grave</option>
@@ -838,13 +844,13 @@
                                 </div>
                                 <div class="flex gap-2 items-center flex-wrap">
                                     <span id="sospechasTotal" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
-                                    <select id="sospechasFiltroEstado" onchange="cargarSospechas()" class="hist-select text-xs">
+                                    <select id="sospechasFiltroEstado" aria-label="Filtrar sospechas por estado" onchange="cargarSospechas()" class="hist-select text-xs">
                                         <option value="pendiente">Pendientes</option>
                                         <option value="">Todas</option>
                                         <option value="aprobada">Aprobadas</option>
                                         <option value="descartada">Descartadas</option>
                                     </select>
-                                    <input type="date" id="sospechasFiltroFecha" onchange="cargarSospechas()"
+                                    <input type="date" id="sospechasFiltroFecha" aria-label="Filtrar sospechas por fecha" onchange="cargarSospechas()"
                                         class="hist-select text-xs"
                                         title="Filtrar por fecha de detección">
                                     <button onclick="sospechasLimpiarFecha()" class="db-btn db-btn-outline text-xs px-3 py-1.5" title="Limpiar fecha">
@@ -925,9 +931,9 @@
                                 <h3 class="text-base font-bold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 mr-auto">
                                     <i class="ph ph-clock-counter-clockwise text-lg"></i> Historial de Bans
                                 </h3>
-                                <input id="ban-hist-dni" type="text" maxlength="8" placeholder="DNI alumno"
+                                <input id="ban-hist-dni" aria-label="Filtrar bans por DNI del alumno" type="text" maxlength="8" placeholder="DNI alumno"
                                     class="act-filter-input" oninput="cargarHistorialBans()">
-                                <select id="ban-hist-estado" onchange="cargarHistorialBans()" class="act-filter-input">
+                                <select id="ban-hist-estado" aria-label="Filtrar bans por estado" onchange="cargarHistorialBans()" class="act-filter-input">
                                     <option value="">Todos los estados</option>
                                     <option value="activo">Activos</option>
                                     <option value="expirado">Expirados (sistema)</option>
@@ -1166,16 +1172,16 @@
 
                         <!-- Filtros secundarios -->
                         <div class="act-filters-row">
-                            <input id="act-filtro-dni" type="text" maxlength="8" placeholder="DNI alumno"
+                            <input id="act-filtro-dni" aria-label="Filtrar eventos por DNI del alumno" type="text" maxlength="8" placeholder="DNI alumno"
                                 class="act-filter-input" oninput="cargarActividad()">
-                            <input id="act-filtro-terminal" type="text" placeholder="PC (ej: PC-01)"
+                            <input id="act-filtro-terminal" aria-label="Filtrar eventos por PC" type="text" placeholder="PC (ej: PC-01)"
                                 class="act-filter-input" oninput="cargarActividad()">
-                            <select id="act-filtro-nivel" onchange="cargarActividad()" class="act-filter-input" style="display:none">
+                            <select id="act-filtro-nivel" aria-label="Filtrar eventos por nivel" onchange="cargarActividad()" class="act-filter-input" style="display:none">
                                 <option value="">Todos los niveles</option>
                                 <option value="sospechoso">Sospechoso</option>
                                 <option value="normal">Normal</option>
                             </select>
-                            <input id="act-filtro-fecha" type="date" class="act-filter-input" onchange="cargarActividad()">
+                            <input id="act-filtro-fecha" aria-label="Filtrar eventos por fecha" type="date" class="act-filter-input" onchange="cargarActividad()">
                             <button onclick="actLimpiarFiltros()" class="act-filter-clear">
                                 <i class="ph ph-x"></i> Limpiar
                             </button>
@@ -1243,7 +1249,7 @@
 
                         <!-- Tabla del banco de apps -->
                         <div class="act-filters-row">
-                            <input id="banco-apps-buscar" type="text" placeholder="Buscar programa..." class="act-filter-input" oninput="bancoCargarApps()">
+                            <input id="banco-apps-buscar" aria-label="Buscar en el banco de apps" type="text" placeholder="Buscar programa..." class="act-filter-input" oninput="bancoCargarApps()">
                         </div>
                         <div class="act-list-wrap">
                             <table class="act-table">
@@ -1273,7 +1279,7 @@
                             </button>
                         </div>
                         <div class="act-filters-row">
-                            <input id="banco-ruido-buscar" type="text" placeholder="Buscar proceso..." class="act-filter-input" oninput="bancoCargarRuido()">
+                            <input id="banco-ruido-buscar" aria-label="Buscar en el banco de ruido" type="text" placeholder="Buscar proceso..." class="act-filter-input" oninput="bancoCargarRuido()">
                         </div>
                         <div class="act-list-wrap">
                             <table class="act-table">
@@ -1903,9 +1909,9 @@
                                 <h3 class="text-base font-bold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 mr-auto">
                                     <i class="ph ph-clipboard-text text-lg"></i> Bitácora de Auditoría
                                 </h3>
-                                <input id="aud-usuario" type="text" maxlength="100" placeholder="Usuario"
+                                <input id="aud-usuario" aria-label="Filtrar auditoría por usuario" type="text" maxlength="100" placeholder="Usuario"
                                     class="act-filter-input" oninput="cargarAuditoria()">
-                                <select id="aud-accion" onchange="cargarAuditoria()" class="act-filter-input">
+                                <select id="aud-accion" aria-label="Filtrar auditoría por acción" onchange="cargarAuditoria()" class="act-filter-input">
                                     <option value="">Todas las acciones</option>
                                     <option value="bloquear_terminal">Bloquear terminal</option>
                                     <option value="desbloquear_terminal">Desbloquear terminal</option>
@@ -1944,8 +1950,8 @@
                                     <option value="reset_total">Reset total</option>
                                     <option value="backup_sql">Backup SQL</option>
                                 </select>
-                                <input id="aud-desde" type="date" class="act-filter-input" onchange="cargarAuditoria()" title="Desde">
-                                <input id="aud-hasta" type="date" class="act-filter-input" onchange="cargarAuditoria()" title="Hasta">
+                                <input id="aud-desde" aria-label="Auditoría desde" type="date" class="act-filter-input" onchange="cargarAuditoria()" title="Desde">
+                                <input id="aud-hasta" aria-label="Auditoría hasta" type="date" class="act-filter-input" onchange="cargarAuditoria()" title="Hasta">
                                 <span id="aud-total" class="text-xs text-zinc-500 dark:text-zinc-400"></span>
                             </div>
                             <p class="text-xs text-zinc-400 dark:text-zinc-500 mb-4">Registro permanente de quién hizo cada acción administrativa y cuándo. Solo visible para el superadmin.</p>
@@ -2306,7 +2312,7 @@
 </div>
 
 
-<script src="static/js/app.js?v=68"></script>
+<script src="static/js/app.js?v=69"></script>
 <script src="static/js/organizacion.js?v=3"></script>
 <script>
 // Tema

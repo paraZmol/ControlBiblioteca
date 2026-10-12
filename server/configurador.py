@@ -1,11 +1,16 @@
 """
 configurador.py — Lee config.json, genera .env y crea la BD si no existe.
 Uso: python configurador.py
+
+Es SEGURO volver a ejecutarlo (p.ej. para cambiar la IP o la contraseña de
+MySQL): NUNCA borra tablas ni datos. Solo crea lo que falte. Las columnas
+nuevas las agrega el propio servidor al arrancar (_migrar_columnas).
 """
 import json
 import sys
 import os
 import secrets
+from urllib.parse import quote_plus
 
 
 def cargar_config():
@@ -25,35 +30,56 @@ def generar_env(cfg):
     port = db["port"]
 
     cors = f"http://localhost,http://127.0.0.1,http://{ip},http://{ip}:{net['port']}"
-    db_url = (
-        f"mysql+aiomysql://{db['user']}:{db['password']}"
-        f"@{db['host']}:{port}/{db['name']}"
-    )
+    db_url = _db_url(db)
 
-    # Conservar SECRET_KEY si ya existe en .env
-    secret_key = None
+    # Conservar TODO lo que ya tenga el .env (SECRET_KEY, variables agregadas a
+    # mano como MYSQLDUMP_PATH...) y solo actualizar las claves que manejamos.
     env_path = os.path.join(os.path.dirname(__file__), ".env")
+    previas = {}
+    orden = []
     if os.path.exists(env_path):
         with open(env_path, encoding="utf-8") as f:
             for line in f:
-                if line.startswith("SECRET_KEY="):
-                    secret_key = line.strip().split("=", 1)[1]
-    if not secret_key or "CAMBIAR" in secret_key:
-        secret_key = secrets.token_urlsafe(32)
+                line = line.rstrip("\n")
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, v = line.split("=", 1)
+                    previas[k.strip()] = v
+                    orden.append(k.strip())
 
-    contenido = (
-        f"DATABASE_URL={db_url}\n"
-        f"SECRET_KEY={secret_key}\n"
-        f"CORS_ORIGINS={cors}\n"
-        f"PASS_NIVEL2={sec['pass_nivel2']}\n"
-    )
+    secret_key = previas.get("SECRET_KEY", "")
+    if not secret_key or "CAMBIAR" in secret_key or len(secret_key) < 32:
+        secret_key = secrets.token_urlsafe(32)
+    # Contraseña inicial de las cuentas del panel: aleatoria, nunca 'admin123'.
+    pass_inicial = previas.get("DEFAULT_ADMIN_PASSWORD", "")
+    nueva_inicial = not pass_inicial
+    if nueva_inicial:
+        pass_inicial = "Unasam" + secrets.token_hex(4)
+
+    nuevas = {
+        "DATABASE_URL": db_url,
+        "SECRET_KEY": secret_key,
+        "CORS_ORIGINS": cors,
+        "PASS_NIVEL2": sec["pass_nivel2"],
+        "DEFAULT_ADMIN_PASSWORD": pass_inicial,
+    }
+    previas.update(nuevas)
+    for k in nuevas:
+        if k not in orden:
+            orden.append(k)
 
     with open(env_path, "w", encoding="utf-8") as f:
-        f.write(contenido)
-    print(f"[OK] .env generado.")
-    print(f"     DATABASE_URL={db_url}")
+        f.write("".join(f"{k}={previas[k]}\n" for k in orden))
+    print("[OK] .env generado (se conservaron las variables existentes).")
+    print(f"     DATABASE_URL=mysql+aiomysql://{db['user']}:****@{db['host']}:{port}/{db['name']}")
     print(f"     CORS_ORIGINS={cors}")
-    print(f"     PASS_NIVEL2={sec['pass_nivel2']}")
+    return pass_inicial if nueva_inicial else None
+
+
+def _db_url(db) -> str:
+    """URL de SQLAlchemy con usuario/contraseña codificados (una contraseña con
+    @ : / # rompía la URL)."""
+    return (f"mysql+aiomysql://{quote_plus(str(db['user']))}:{quote_plus(str(db['password']))}"
+            f"@{db['host']}:{db['port']}/{db['name']}")
 
 
 def crear_base_datos(cfg):
@@ -95,10 +121,7 @@ async def crear_tablas_y_catalogo(cfg):
     """Crea tablas ORM y pobla catálogos iniciales."""
     import asyncio
     db_cfg = cfg["database"]
-    os.environ["DATABASE_URL"] = (
-        f"mysql+aiomysql://{db_cfg['user']}:{db_cfg['password']}"
-        f"@{db_cfg['host']}:{db_cfg['port']}/{db_cfg['name']}"
-    )
+    os.environ["DATABASE_URL"] = _db_url(db_cfg)
 
     from database import engine, Base, async_session
     from sqlalchemy import text
@@ -111,20 +134,13 @@ async def crear_tablas_y_catalogo(cfg):
         "Clases virtuales", "Otro",
     ]
 
-    tablas_drop = [
-        "sesiones", "alumnos_maestro", "escuelas",
-        "facultades", "terminales", "catalogo_motivos", "alumnos", "usuarios",
-    ]
-
-    print("[DB] Recreando esquema...")
-    async with engine.begin() as conn:
-        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
-        for t in tablas_drop:
-            await conn.execute(text(f"DROP TABLE IF EXISTS `{t}`"))
-        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+    # Antes aqui se hacia DROP TABLE de sesiones, alumnos, usuarios... en CADA
+    # ejecucion: reinstalar para cambiar la IP borraba todo el historial.
+    # create_all solo crea las tablas que faltan; nunca toca las existentes.
+    print("[DB] Creando las tablas que falten (no se borra nada)...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    print("[OK] Tablas creadas.")
+    print("[OK] Esquema listo.")
 
     from sqlalchemy import select
     from models import CatalogoMotivo, Facultad, Escuela, Usuario
@@ -137,19 +153,14 @@ async def crear_tablas_y_catalogo(cfg):
                 db.add(CatalogoMotivo(descripcion=desc))
         await db.flush()
 
-        admin = (await db.execute(select(Usuario).where(Usuario.username == "admin"))).scalar_one_or_none()
-        if not admin:
-            db.add(Usuario(
-                username="admin",
-                hashed_password=hashear_password("admin123"),
-                nombre_completo="Administrador",
-                rol="superadmin",
-            ))
         await db.commit()
+        hay_usuarios = (await db.execute(select(Usuario.id).limit(1))).scalars().first() is not None
 
     await engine.dispose()
-    print("[OK] Catalogos y usuario admin creados.")
-    print("     Login: admin / admin123")
+    print("[OK] Catalogos listos.")
+    # Las cuentas 'superadmin' y 'admin' las crea el servidor al primer arranque
+    # con DEFAULT_ADMIN_PASSWORD del .env.
+    return hay_usuarios
 
 
 def main():
@@ -160,13 +171,20 @@ def main():
     cfg = cargar_config()
     print(f"\n[OK] config.json leido.")
 
-    generar_env(cfg)
+    pass_inicial = generar_env(cfg)
     crear_base_datos(cfg)
 
     import asyncio
-    asyncio.run(crear_tablas_y_catalogo(cfg))
+    hay_usuarios = asyncio.run(crear_tablas_y_catalogo(cfg))
 
     print("\n[OK] Instalacion completada. Inicie el servidor con servidor_run.bat")
+    if pass_inicial and not hay_usuarios:
+        print("\n" + "=" * 50)
+        print("  CUENTAS INICIALES DEL PANEL (anotelas ahora):")
+        print("    usuario: superadmin   contrasena: " + pass_inicial)
+        print("    usuario: admin        contrasena: " + pass_inicial)
+        print("  Cambielas al entrar: Configuracion > Credenciales.")
+        print("=" * 50)
 
 
 if __name__ == "__main__":
