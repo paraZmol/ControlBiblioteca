@@ -501,6 +501,17 @@ async def _migrar_columnas():
             try:
                 await db.execute(text("ALTER TABLE sedes ADD COLUMN redes VARCHAR(300) NULL"))
             except Exception: pass
+            try:
+                await db.execute(text("ALTER TABLE sesiones ADD COLUMN id_sede INT NULL"))
+                # Solo al crear la columna: el historial existente toma la sede
+                # actual de su PC (no habia otra informacion).
+                await db.execute(text(
+                    "UPDATE sesiones s JOIN terminales t ON t.id = s.id_terminal "
+                    "SET s.id_sede = t.id_sede WHERE s.id_sede IS NULL"))
+            except Exception: pass
+            try:
+                await db.execute(text("ALTER TABLE sesiones ADD INDEX idx_sesion_sede_entrada (id_sede, hora_entrada)"))
+            except Exception: pass
             for _tabla in ("terminales", "usuarios", "incidencias"):
                 try:
                     await db.execute(text(f"ALTER TABLE {_tabla} ADD COLUMN id_sede INT NULL"))

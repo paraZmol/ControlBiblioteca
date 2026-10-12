@@ -480,7 +480,7 @@ async def reporte_estadisticas(
         or_(Sesion.motivo_cierre.is_(None), Sesion.motivo_cierre != "sin_confirmacion"),
     ]
     if id_sede:
-        cond.append(Terminal.id_sede == id_sede)
+        cond.append(Sesion.id_sede == id_sede)
 
     def base(*cols):
         return select(*cols).select_from(Sesion).join(Terminal, Terminal.id == Sesion.id_terminal).where(and_(*cond))
@@ -530,7 +530,7 @@ async def reporte_estadisticas(
         {"nombre": n, "sesiones": int(s), "usuarios": int(u), "minutos": int(m or 0)}
         for n, s, u, m in (await db.execute(
             base(sede_col, func.count(Sesion.id), func.count(func.distinct(Sesion.dni_alumno)), func.sum(minutos))
-            .outerjoin(Sede, Sede.id == Terminal.id_sede)
+            .outerjoin(Sede, Sede.id == Sesion.id_sede)
             .group_by(sede_col).order_by(func.count(Sesion.id).desc())
         )).all()
     ]

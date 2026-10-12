@@ -145,6 +145,10 @@ class Sesion(Base):
     motivo_cierre: Mapped[str]  = mapped_column(String(50),  nullable=True)
     confirmada:    Mapped[bool] = mapped_column(Boolean, default=False)
     fecha_uso:     Mapped[date] = mapped_column(Date, nullable=True)
+    # Sede donde ocurrio la sesion (copia de la sede de la PC al iniciarla).
+    # Asi mover una PC a otra sede no reescribe el historial. Lo llena el
+    # evento before_insert de abajo para TODAS las vias de alta de sesiones.
+    id_sede:       Mapped[int]  = mapped_column(Integer, nullable=True)
 
     alumno:     Mapped["AlumnoMaestro"]  = relationship(back_populates="sesiones")
     terminal:   Mapped["Terminal"]       = relationship(back_populates="sesiones")
@@ -460,3 +464,15 @@ class Auditoria(Base):
 
 # ── Alias legacy: Alumno → AlumnoMaestro para no romper main.py ──────
 Alumno = AlumnoMaestro
+
+
+# ── Sede de la sesion: se fija al insertar, desde la PC donde ocurre ──────────
+from sqlalchemy import event as _event, text as _text
+
+
+@_event.listens_for(Sesion, "before_insert")
+def _sesion_fijar_sede(mapper, connection, target):
+    if target.id_sede is None and target.id_terminal is not None:
+        target.id_sede = connection.execute(
+            _text("SELECT id_sede FROM terminales WHERE id = :t"), {"t": target.id_terminal}
+        ).scalar()

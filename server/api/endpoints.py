@@ -1038,8 +1038,8 @@ def _query_historial(cols, *, search=None, actividad=None, estado=None,
             raise _error_filtro("El estado debe ser 'activa' o 'cerrada'")
         q = q.where(Sesion.estado == estado)
     if id_sede:
-        # Encargado con sede fija: solo el historial de las PCs de su sede.
-        q = q.where(Terminal.id_sede == id_sede)
+        # Encargado con sede fija: solo las sesiones ocurridas en su sede.
+        q = q.where(Sesion.id_sede == id_sede)
     return q
 
 
